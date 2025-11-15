@@ -1,0 +1,78 @@
+# Example SUB Language Program
+# Demonstrates core language features
+
+# Variable declarations with blockchain-style #
+#var appName = "Hello SUB"
+#var version = 1.0
+#var userCount = 0
+
+# Function definition
+#function calculateSum(a, b)
+    #var result = a + b
+    #return result
+#end
+
+# Function with conditionals
+#function checkAge(age)
+    #if age >= 18
+        #return "Adult"
+    #elif age >= 13
+        #return "Teenager"  
+    #else
+        #return "Child"
+    #end
+#end
+
+# Loop example
+#function countToTen()
+    #for i in range(1, 11)
+        #print(i)
+    #end
+#end
+
+# Cross-platform UI definition
+#ui.window(title="SUB Demo App", width=800, height=600)
+    #ui.label(text="Welcome to SUB Language!", size=24)
+    #ui.button(text="Click Me", onclick=handleClick)
+    #ui.input(placeholder="Enter your name", id="nameInput")
+#end
+
+# Event handler function
+#function handleClick()
+    #var name = ui.getInput("nameInput")
+    #ui.alert("Hello, " + name)
+#end
+
+# Embedded Python for data processing
+#embed python
+    import json
+    data = {"users": 100, "active": 75}
+    result = json.dumps(data)
+#endembed
+
+# Embedded JavaScript for web features  
+#embed javascript
+    const config = {
+        theme: "dark",
+        language: "en"
+    };
+    console.log(config);
+#endembed
+
+# Main program entry
+#function main()
+    #print("Starting SUB application...")
+    
+    #var sum = calculateSum(10, 20)
+    #print("Sum: " + sum)
+    
+    #var status = checkAge(25)
+    #print("Status: " + status)
+    
+    countToTen()
+    
+    #print("Application initialized!")
+#end
+
+# Execute main
+main()
