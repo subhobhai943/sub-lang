@@ -10,7 +10,9 @@
 
 // Generate Android code (Java/Kotlin)
 static char* generate_android(ASTNode *ast) {
+    (void)ast; // Suppress unused parameter warning
     char *code = malloc(10000);
+    if (!code) return NULL;
     sprintf(code, 
         "package com.sublang.app;\n\n"
         "import android.app.Activity;\n"
@@ -28,7 +30,9 @@ static char* generate_android(ASTNode *ast) {
 
 // Generate iOS code (Swift)
 static char* generate_ios(ASTNode *ast) {
+    (void)ast; // Suppress unused parameter warning
     char *code = malloc(10000);
+    if (!code) return NULL;
     sprintf(code,
         "import UIKit\n\n"
         "class ViewController: UIViewController {\n"
@@ -43,7 +47,9 @@ static char* generate_ios(ASTNode *ast) {
 
 // Generate Web code (HTML/JS)
 static char* generate_web(ASTNode *ast) {
+    (void)ast; // Suppress unused parameter warning
     char *code = malloc(10000);
+    if (!code) return NULL;
     sprintf(code,
         "<!DOCTYPE html>\n"
         "<html>\n"
@@ -51,8 +57,10 @@ static char* generate_web(ASTNode *ast) {
         "    <title>SUB App</title>\n"
         "</head>\n"
         "<body>\n"
+        "    <h1>SUB Language Application</h1>\n"
         "    <script>\n"
         "    // Generated SUB code\n"
+        "    console.log('SUB App Loaded');\n"
         "    </script>\n"
         "</body>\n"
         "</html>\n"
@@ -62,12 +70,15 @@ static char* generate_web(ASTNode *ast) {
 
 // Generate Windows code (Win32)
 static char* generate_windows(ASTNode *ast) {
+    (void)ast; // Suppress unused parameter warning
     char *code = malloc(10000);
+    if (!code) return NULL;
     sprintf(code,
         "#include <windows.h>\n\n"
         "int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,\n"
         "                   LPSTR lpCmdLine, int nCmdShow) {\n"
         "    // Generated SUB code\n"
+        "    MessageBox(NULL, \"SUB App\", \"Hello\", MB_OK);\n"
         "    return 0;\n"
         "}\n"
     );
@@ -76,14 +87,16 @@ static char* generate_windows(ASTNode *ast) {
 
 // Generate macOS code (Cocoa)
 static char* generate_macos(ASTNode *ast) {
+    (void)ast; // Suppress unused parameter warning
     char *code = malloc(10000);
+    if (!code) return NULL;
     sprintf(code,
         "#import <Cocoa/Cocoa.h>\n\n"
         "int main(int argc, const char * argv[]) {\n"
         "    @autoreleasepool {\n"
         "        // Generated SUB code\n"
+        "        NSLog(@\"SUB App Started\");\n"
         "        [NSApplication sharedApplication];\n"
-        "        [NSApp run];\n"
         "    }\n"
         "    return 0;\n"
         "}\n"
@@ -93,13 +106,14 @@ static char* generate_macos(ASTNode *ast) {
 
 // Generate Linux code (GTK)
 static char* generate_linux(ASTNode *ast) {
+    (void)ast; // Suppress unused parameter warning
     char *code = malloc(10000);
+    if (!code) return NULL;
     sprintf(code,
-        "#include <gtk/gtk.h>\n\n"
+        "#include <stdio.h>\n\n"
         "int main(int argc, char *argv[]) {\n"
-        "    gtk_init(&argc, &argv);\n"
         "    // Generated SUB code\n"
-        "    gtk_main();\n"
+        "    printf(\"SUB App Running\\n\");\n"
         "    return 0;\n"
         "}\n"
     );
