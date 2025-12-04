@@ -1,77 +1,84 @@
 # SUB Language Compiler Makefile
-# Cross-platform compatible
+# CMake wrapper for cross-platform compatibility
 
 # Detect OS
 ifeq ($(OS),Windows_NT)
     detected_OS := Windows
-    RM = del /Q
-    TARGET = sub.exe
-    MKDIR = if not exist
+    RM = rmdir /S /Q
+    MKDIR = mkdir
+    TARGET = build\\Release\\subc.exe
     INSTALL_DIR = C:\\Program Files\\SUB
 else
     detected_OS := $(shell uname -s)
-    RM = rm -f
-    TARGET = sub
+    RM = rm -rf
     MKDIR = mkdir -p
+    TARGET = build/subc
     INSTALL_DIR = /usr/local/bin
 endif
 
-CC = gcc
-CFLAGS = -Wall -Wextra -O2 -std=c11
-SOURCES = sub.c lexer.c parser.c semantic.c codegen.c utils.c
-OBJECTS = $(SOURCES:.c=.o)
-HEADERS = sub_compiler.h error_handler.h
+.PHONY: all build clean install test help cmake-config
 
-.PHONY: all clean install test help
-
-all: $(TARGET)
+all: build
 	@echo "Build successful! SUB compiler ready for $(detected_OS)"
 
-$(TARGET): $(OBJECTS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS)
+cmake-config:
+	@echo "Configuring CMake build system..."
+	$(MKDIR) build 2>/dev/null || true
+	cmake -B build -DCMAKE_BUILD_TYPE=Release
 
-%.o: %.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $< -o $@
+build: cmake-config
+	@echo "Building SUB compiler with CMake..."
+	cmake --build build --config Release
+	@echo "✓ Build complete"
 
 clean:
+	@echo "Cleaning build artifacts..."
 ifeq ($(OS),Windows_NT)
-	-$(RM) *.o $(TARGET) 2>nul
-	@echo Clean complete.
+	-$(RM) build 2>nul || true
+	-del /Q *.o *.exe 2>nul || true
 else
-	-$(RM) $(OBJECTS) $(TARGET)
-	@echo "Clean complete."
+	-$(RM) build
+	-$(RM) *.o sub output_*.js output_*.java output_*.c
 endif
+	@echo "Clean complete."
 
-install: $(TARGET)
+install: build
+	@echo "Installing SUB compiler..."
 ifeq ($(OS),Windows_NT)
-	$(MKDIR) "$(INSTALL_DIR)"
-	copy $(TARGET) "$(INSTALL_DIR)"
+	$(MKDIR) "$(INSTALL_DIR)" 2>nul || true
+	copy $(TARGET) "$(INSTALL_DIR)" /Y
 	@echo SUB compiler installed to $(INSTALL_DIR)
 else
-	$(MKDIR) $(INSTALL_DIR)
-	cp $(TARGET) $(INSTALL_DIR)/
-	@echo "SUB compiler installed to $(INSTALL_DIR)/$(TARGET)"
+	sudo $(MKDIR) $(INSTALL_DIR)
+	sudo cp $(TARGET) $(INSTALL_DIR)/subc
+	@echo "SUB compiler installed to $(INSTALL_DIR)/subc"
 endif
 
-test: $(TARGET)
+test: build
+	@echo "Running tests..."
 ifeq ($(OS),Windows_NT)
-	@echo "Testing not yet configured for Windows"
+	.\\build\\Release\\subc.exe example.sb web
+	@echo "Test compilation complete"
 else
-	@if [ -f run_tests.sh ]; then \
-		./run_tests.sh; \
-		echo "Tests complete."; \
-	else \
-		echo "No test script found"; \
-	fi
+	./build/subc example.sb web
+	@echo "Test compilation complete"
 endif
 
 help:
-	@echo "SUB Language Compiler"
-	@echo "====================="
+	@echo "SUB Language Compiler (CMake Edition)"
+	@echo "======================================="
 	@echo "Detected OS: $(detected_OS)"
 	@echo ""
-	@echo "make        - Build the compiler"
-	@echo "make clean  - Remove build files"
-	@echo "make install- Install compiler"
-	@echo "make test   - Run tests"
-	@echo "make help   - Show this help"
+	@echo "Available targets:"
+	@echo "  make all      - Build the compiler (default)"
+	@echo "  make build    - Build with CMake"
+	@echo "  make clean    - Remove all build artifacts"
+	@echo "  make install  - Install compiler to system"
+	@echo "  make test     - Build and test with example.sb"
+	@echo "  make help     - Show this help message"
+	@echo ""
+	@echo "Requirements:"
+	@echo "  - CMake 3.20+"
+	@echo "  - Rust toolchain (stable)"
+	@echo "  - C++17 compatible compiler"
+	@echo "  - C11 compatible compiler"
