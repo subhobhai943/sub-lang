@@ -9,9 +9,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(MSVC)
     add_compile_options(/W4 /O2)
 else()
-    add_compile_options(-Wall -Wextra -O3 -march=native -flto)
-    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -ffast-math")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math")
+    # Removed -march=native for CI compatibility
+    # Removed -flto for faster builds and CI stability
+    add_compile_options(-Wall -Wextra -O2)
 endif()
 
 # Rust frontend library
@@ -24,11 +24,13 @@ else()
     set(RUST_LIB ${RUST_TARGET_DIR}/libsub_frontend.a)
 endif()
 
+# Build Rust frontend first
 add_custom_command(
     OUTPUT ${RUST_LIB}
     COMMAND cargo build --release
     WORKING_DIRECTORY ${RUST_FRONTEND_DIR}
-    COMMENT "Building Rust frontend..."
+    COMMENT "Building Rust frontend library..."
+    VERBATIM
 )
 
 add_custom_target(rust_frontend DEPENDS ${RUST_LIB})
@@ -62,18 +64,23 @@ add_executable(subc
     compiler/main.c
 )
 
+# Link libraries
 target_link_libraries(subc PRIVATE
     sub_middle_end
     sub_backend
     ${RUST_LIB}
 )
 
+# Platform-specific libraries
 if(UNIX AND NOT APPLE)
     target_link_libraries(subc PRIVATE dl pthread m)
 elseif(APPLE)
     target_link_libraries(subc PRIVATE pthread)
+elseif(WIN32)
+    target_link_libraries(subc PRIVATE ws2_32 userenv)
 endif()
 
+# Ensure Rust builds before main executable
 add_dependencies(subc rust_frontend)
 
 # Install

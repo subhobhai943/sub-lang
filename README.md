@@ -92,33 +92,51 @@ SUB's compiler strategically uses **three languages** to maximize performance:
 ### Installation
 
 #### Prerequisites
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Install CMake (3.20+)
-# Ubuntu/Debian
-sudo apt install cmake build-essential
+**Required:**
+- **Rust** (stable) - [Install from rustup.rs](https://rustup.rs/)
+- **CMake 3.20+** - [Download from cmake.org](https://cmake.org/download/)
+- **C++17 compiler** - GCC 7+, Clang 6+, or MSVC 2019+
+- **C11 compiler** - Usually included with C++ compiler
+
+**Quick Install:**
+
+```bash
+# Linux (Ubuntu/Debian)
+sudo apt update
+sudo apt install build-essential cmake
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # macOS
 brew install cmake
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Windows
-# Download from https://cmake.org/download/
+# 1. Install Rust from https://rustup.rs/
+# 2. Install CMake from https://cmake.org/download/
+# 3. Install Visual Studio 2019+ with C++ desktop development
 ```
 
-#### Build the Heavy Compiler
+#### Build the Compiler
+
 ```bash
 # Clone the repository
 git clone https://github.com/subhobhai943/sub-lang.git
 cd sub-lang
 
-# One-command build (handles Rust + C++ + C)
-chmod +x build.sh
-./build.sh
+# Build using Make (Linux/macOS)
+make
 
-# The executable will be at: ./build/subc
+# Or build using CMake directly (all platforms)
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+
+# The executable will be at:
+# Linux/macOS: ./build/subc
+# Windows: .\build\Release\subc.exe
 ```
+
+**📖 For detailed platform-specific instructions, troubleshooting, and more, see [BUILD.md](BUILD.md)**
 
 ### Compile Your First Program
 
@@ -129,14 +147,23 @@ cat > hello.sb << 'EOF'
 #print("Hello, " + name)
 EOF
 
-# Compile for web
-./build/subc hello.sb web -v
+# Compile for web (Linux/macOS)
+./build/subc hello.sb web
+# Output: output_web.js
+
+# Compile for web (Windows)
+.\build\Release\subc.exe hello.sb web
 
 # Compile for Android
-./build/subc hello.sb android -O3
+./build/subc hello.sb android
+# Output: output_android.java
 
 # Compile for native
-./build/subc hello.sb native --verbose
+./build/subc hello.sb native
+# Output: output_native.c
+
+# With verbose output and optimization
+./build/subc hello.sb web -v -O3
 ```
 
 ---
@@ -257,10 +284,11 @@ C baseline:          800ms  (SUB is 94% of C speed)
 
 ## 📚 Documentation
 
-- [Language Specification](LANGUAGE_SPEC.md)
-- [Implementation Guide](IMPLEMENTATION_GUIDE.md)
-- [Contributing Guide](CONTRIBUTING.md)
-- [Project Summary](PROJECT_SUMMARY.md)
+- **[BUILD.md](BUILD.md)** - Detailed build instructions for all platforms
+- [Language Specification](LANGUAGE_SPEC.md) - Complete language syntax and semantics
+- [Implementation Guide](IMPLEMENTATION_GUIDE.md) - Compiler architecture details
+- [Contributing Guide](CONTRIBUTING.md) - How to contribute to the project
+- [Project Summary](PROJECT_SUMMARY.md) - High-level project overview
 
 ---
 
@@ -273,8 +301,22 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 1. **Frontend (Rust)**: Modify `compiler/frontend/src/lib.rs`
 2. **Middle-end (C++)**: Edit `compiler/middle_end/semantic_analyzer.cpp`
 3. **Backend (C)**: Update `compiler/backend/codegen.c`
-4. **Rebuild**: Run `./build.sh`
-5. **Test**: `./build/subc test.sb web -v`
+4. **Rebuild**: Run `make` or `cmake --build build`
+5. **Test**: `./build/subc example.sb web -v`
+
+See [BUILD.md](BUILD.md) for detailed development setup.
+
+---
+
+## 🔧 Build Troubleshooting
+
+If you encounter build issues:
+
+1. **Check prerequisites**: Ensure Rust, CMake, and C++ compiler are installed
+2. **Read [BUILD.md](BUILD.md)**: Contains platform-specific troubleshooting
+3. **Clean build**: `make clean && make`
+4. **Check GitHub Actions**: See `.github/workflows/ci.yml` for reference
+5. **Open an issue**: [GitHub Issues](https://github.com/subhobhai943/sub-lang/issues)
 
 ---
 
