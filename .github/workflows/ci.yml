@@ -11,41 +11,76 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
       fail-fast: false
     
     steps:
     - uses: actions/checkout@v3
     
+    - name: Setup Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+    
     - name: Setup Build Environment
       run: |
         echo "Setting up build environment on ${{ matrix.os }}"
-        echo "GCC version:"
-        gcc --version || true
+        rustc --version
+        cargo --version
+    
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '3.20.x'
+    
+    - name: Configure CMake
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Release
     
     - name: Build Compiler
       run: |
-        echo "Building SUB compiler..."
-        make
+        cmake --build build --config Release
     
-    - name: Verify Build
+    - name: Verify Build (Unix)
+      if: runner.os != 'Windows'
       run: |
         echo "Verifying compiler build..."
-        ls -lh sub
-        file sub || true
+        ls -lh build/subc || ls -lh build/
+        file build/subc || true
     
-    - name: Test Example Compilation
+    - name: Verify Build (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        echo "Verifying compiler build..."
+        dir build\Release\subc.exe
+    
+    - name: Test Example Compilation (Unix)
+      if: runner.os != 'Windows'
       continue-on-error: true
       run: |
         echo "Testing example.sb compilation..."
-        ./sub example.sb web || echo "Compilation completed with exit code $?"
-        if [ -f output_web.code ]; then
+        ./build/subc example.sb web || echo "Compilation completed with exit code $?"
+        if [ -f output_web.js ]; then
           echo "Output file generated successfully"
           echo "First 20 lines of output:"
-          head -20 output_web.code
+          head -20 output_web.js
         else
           echo "Warning: Output file not generated"
         fi
+    
+    - name: Test Example Compilation (Windows)
+      if: runner.os == 'Windows'
+      continue-on-error: true
+      run: |
+        echo "Testing example.sb compilation..."
+        .\build\Release\subc.exe example.sb web
+        if (Test-Path output_web.js) {
+          echo "Output file generated successfully"
+          Get-Content output_web.js -Head 20
+        } else {
+          echo "Warning: Output file not generated"
+        }
+      shell: pwsh
     
     - name: Archive Artifacts
       if: always()
@@ -53,8 +88,11 @@ jobs:
       with:
         name: sub-compiler-${{ matrix.os }}
         path: |
-          sub
-          output_*.code
+          build/subc
+          build/Release/subc.exe
+          output_*.js
+          output_*.java
+          output_*.c
         if-no-files-found: ignore
 
   build-status:
