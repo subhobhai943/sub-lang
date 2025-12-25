@@ -18,7 +18,19 @@ char* read_file(const char *filename) {
     fseek(file, 0, SEEK_SET);
     
     char *content = malloc(size + 1);
-    fread(content, 1, size, file);
+    if (!content) {
+        fprintf(stderr, "Error: Memory allocation failed\n");
+        fclose(file);
+        return NULL;
+    }
+    
+    size_t bytes_read = fread(content, 1, size, file);
+    if (bytes_read != (size_t)size) {
+        fprintf(stderr, "Error: Failed to read file %s\n", filename);
+        fclose(file);
+        free(content);
+        return NULL;
+    }
     content[size] = '\0';
     
     fclose(file);
@@ -88,15 +100,33 @@ int main(int argc, char *argv[]) {
     
     // Phase 4: Semantic Analysis
     printf("[4/5] Semantic analysis...\n");
-    if (!semantic_analyze(ast)) {
+    SymbolTable *symbols = symbol_table_create(64);
+    if (!semantic_analyze(ast, symbols)) {
         fprintf(stderr, "Semantic analysis failed\n");
+        symbol_table_free(symbols);
+        parser_free_ast(ast);
+        lexer_free_tokens(tokens, token_count);
+        free(source);
         return 1;
     }
     printf("      Passed\n");
     
     // Phase 5: Code Generation
     printf("[5/5] Code generation for %s...\n", platform_str);
-    char *output_code = codegen_generate(ast, platform);
+    
+    // Prepare compilation options
+    CompilationOptions options = {0};
+    options.optimize = true;
+    options.optimization_level = 2;
+    options.debug_symbols = false;
+    options.minify = false;
+    options.warnings_as_errors = false;
+    options.verbose = false;
+    options.use_cpp = false;
+    options.enable_simd = false;
+    options.parallel_compile = false;
+    
+    char *output_code = codegen_generate(ast, platform, &options);
     
     // Write output file
     char output_file[256];
@@ -110,6 +140,7 @@ int main(int argc, char *argv[]) {
     free(source);
     lexer_free_tokens(tokens, token_count);
     parser_free_ast(ast);
+    symbol_table_free(symbols);
     free(output_code);
     
     return 0;
