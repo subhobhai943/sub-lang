@@ -1,0 +1,6 @@
+[workspace]
+members = [
+  "compiler_rust",
+  "compiler/frontend"
+]
+resolver = "2"
