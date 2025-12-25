@@ -42,7 +42,20 @@ static char* read_file(const char* path) {
     fseek(f, 0, SEEK_SET);
     
     char* buffer = malloc(size + 1);
-    fread(buffer, 1, size, f);
+    if (!buffer) {
+        fprintf(stderr, "Error: Memory allocation failed\n");
+        fclose(f);
+        return NULL;
+    }
+    
+    size_t bytes_read = fread(buffer, 1, size, f);
+    if (bytes_read != (size_t)size) {
+        fprintf(stderr, "Error: Failed to read file '%s'\n", path);
+        fclose(f);
+        free(buffer);
+        return NULL;
+    }
+    
     buffer[size] = '\0';
     fclose(f);
     
