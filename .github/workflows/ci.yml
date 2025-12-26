@@ -17,11 +17,29 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
     - name: Setup Build Environment
       run: |
         echo "Setting up build environment on ${{ matrix.os }}"
         echo "GCC version:"
         gcc --version || true
+        echo "Rust version:"
+        rustc --version
+        cargo --version
+    
+    - name: Build Rust Frontend
+      run: |
+        echo "Building Rust frontend library..."
+        cd compiler/frontend
+        cargo build --release
+        cd ../..
+        echo "Frontend library built successfully"
+        ls -lh compiler/frontend/target/release/libsub_frontend.* || true
     
     - name: Build Compiler
       run: |
