@@ -42,19 +42,39 @@ void compile_error(const char *message, int line) {
     fprintf(stderr, "Compilation error at line %d: %s\n", line, message);
 }
 
+// Get proper file extension for platform
+const char* get_file_extension(Platform platform) {
+    switch (platform) {
+        case PLATFORM_ANDROID:
+            return ".java";
+        case PLATFORM_IOS:
+            return ".swift";
+        case PLATFORM_WEB:
+            return ".html";
+        case PLATFORM_WINDOWS:
+        case PLATFORM_MACOS:
+        case PLATFORM_LINUX:
+        default:
+            return ".c";
+    }
+}
+
 // Main function
 int main(int argc, char *argv[]) {
-    printf("SUB Language Compiler v1.0\n");
+    printf("SUB Language Compiler v2.0\n");
     printf("================================\n\n");
     
-    if (argc < 3) {
-        printf("Usage: sub <input.sb> <platform>\n");
-        printf("Platforms: android, ios, web, windows, macos, linux\n");
+    if (argc < 2) {
+        printf("Usage: sub <input.sb> [platform]\n");
+        printf("Platforms: android, ios, web, windows, macos, linux (default: linux)\n");
+        printf("\nExample:\n");
+        printf("  sub program.sb          # Compile for Linux (generates .c file)\n");
+        printf("  sub program.sb android  # Compile for Android (generates .java file)\n");
         return 1;
     }
     
     const char *input_file = argv[1];
-    const char *platform_str = argv[2];
+    const char *platform_str = argc > 2 ? argv[2] : "linux";
     
     // Determine target platform
     Platform platform;
@@ -66,6 +86,7 @@ int main(int argc, char *argv[]) {
     else if (strcmp(platform_str, "linux") == 0) platform = PLATFORM_LINUX;
     else {
         fprintf(stderr, "Error: Unknown platform %s\n", platform_str);
+        fprintf(stderr, "Valid platforms: android, ios, web, windows, macos, linux\n");
         return 1;
     }
     
@@ -99,13 +120,42 @@ int main(int argc, char *argv[]) {
     printf("[5/5] Code generation for %s...\n", platform_str);
     char *output_code = codegen_generate(ast, platform);
     
-    // Write output file
+    if (!output_code) {
+        fprintf(stderr, "Code generation failed\n");
+        return 1;
+    }
+    
+    // Write output file with proper extension
     char output_file[256];
-    snprintf(output_file, sizeof(output_file), "output_%s.code", platform_str);
+    const char *extension = get_file_extension(platform);
+    snprintf(output_file, sizeof(output_file), "output_%s%s", platform_str, extension);
     write_file(output_file, output_code);
     
-    printf("\nCompilation successful!\n");
-    printf("Output written to: %s\n", output_file);
+    printf("\n✓ Compilation successful!\n");
+    printf("✓ Output written to: %s\n", output_file);
+    
+    // Print next steps based on platform
+    printf("\nNext steps:\n");
+    switch (platform) {
+        case PLATFORM_ANDROID:
+            printf("  javac %s\n", output_file);
+            break;
+        case PLATFORM_IOS:
+            printf("  swiftc %s -o program\n", output_file);
+            break;
+        case PLATFORM_WEB:
+            printf("  Open %s in a web browser\n", output_file);
+            break;
+        case PLATFORM_WINDOWS:
+        case PLATFORM_MACOS:
+        case PLATFORM_LINUX:
+            printf("  gcc %s -o program\n", output_file);
+            printf("  ./program\n");
+            break;
+        default:
+            printf("  Compile %s with appropriate compiler\n", output_file);
+            break;
+    }
     
     // Cleanup
     free(source);
