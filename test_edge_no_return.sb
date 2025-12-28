@@ -1,0 +1,18 @@
+# Test: Function with no return statement
+# Ruby uses implicit returns (last expression value)
+
+#embed ruby
+    def no_explicit_return(x)
+      x * 2  # implicit return
+    end
+
+    def with_side_effect
+      puts "Side effect only"
+      nil  # explicit nil
+    end
+
+    result = no_explicit_return(5)
+    puts "Result: #{result}"
+
+    with_side_effect
+#endembed

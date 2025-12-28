@@ -76,7 +76,7 @@ SUB's compiler strategically uses **three languages** to maximize performance:
 - Platform-specific optimizations
 
 🔄 **Multi-Language Support**
-- Embed C, C++, Python, JavaScript, Rust
+- Embed C, C++, Python, JavaScript, Rust, Ruby
 - Zero-cost FFI between languages
 - Best-of-all-worlds approach
 
@@ -137,6 +137,23 @@ EOF
 
 # Compile for native
 ./build/subc hello.sb native --verbose
+
+# Compile to Ruby (using multi-language compiler)
+./sublang hello.sb ruby
+ruby output.rb
+```
+
+### Multi-Language Compilation
+
+SUB supports compilation to multiple target languages. See [MULTILANG_GUIDE.md](MULTILANG_GUIDE.md) for full details.
+
+```bash
+# Compile to different languages
+./sublang program.sb python     # Python output
+./sublang program.sb javascript # JavaScript output
+./sublang program.sb ruby       # Ruby output
+./sublang program.sb java       # Java output
+./sublang program.sb rust       # Rust output
 ```
 
 ---
@@ -297,7 +314,7 @@ MIT License - See [LICENSE](LICENSE) file
 2. **Fast Execution** - Multi-language compiler optimizes aggressively
 3. **Cross-Platform** - Write once, deploy everywhere
 4. **Memory Safe** - Rust frontend eliminates entire bug classes
-5. **Polyglot** - Embed C, C++, Python, JS, Rust seamlessly
+5. **Polyglot** - Embed C, C++, Python, JS, Rust, Ruby seamlessly
 6. **Modern** - Try-catch, async/await, generics, SIMD
 7. **Production-Ready** - Enterprise-grade error handling
 

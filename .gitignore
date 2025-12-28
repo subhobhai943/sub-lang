@@ -22,3 +22,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.log
+
+# Personal project documentation
+.project/

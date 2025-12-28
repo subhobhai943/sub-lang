@@ -1,0 +1,19 @@
+# Test: Strings with special characters
+# Tests proper string handling in Ruby
+
+#embed ruby
+    # Basic special characters
+    puts "Hello\tWorld"  # tab
+    puts "Line1\nLine2"  # newline
+    puts "Quote: \"Hello\""  # escaped quotes
+    puts 'Single quotes: \'test\''  # escaped single quotes
+
+    # Unicode and special strings
+    puts "UTF-8: cafe"
+    puts "Backslash: C:\\path\\file"
+
+    # String interpolation
+    name = "Ruby"
+    puts "Hello, #{name}!"
+    puts "1 + 1 = #{1 + 1}"
+#endembed

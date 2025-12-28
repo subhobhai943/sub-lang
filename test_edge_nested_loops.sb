@@ -1,0 +1,20 @@
+# Test: Nested loops
+# Tests nested loop generation in Ruby
+
+#embed ruby
+    # Nested each loops
+    (0...3).each do |i|
+      (0...3).each do |j|
+        puts "i=#{i}, j=#{j}"
+      end
+    end
+
+    # While loop inside for loop
+    (0...2).each do |i|
+      count = 0
+      while count < 2
+        puts "Loop #{i}, count #{count}"
+        count += 1
+      end
+    end
+#endembed

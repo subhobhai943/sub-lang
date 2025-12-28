@@ -183,6 +183,25 @@ Variables are declared using the `#var` keyword with optional type hints:
 #endembed
 ```
 
+**Ruby Embedding:**
+```sub
+#embed ruby
+    class Calculator
+      def add(a, b)
+        a + b
+      end
+
+      def multiply(a, b)
+        a * b
+      end
+    end
+
+    calc = Calculator.new
+    puts calc.add(5, 3)
+    puts calc.multiply(4, 7)
+#endembed
+```
+
 **Rust Embedding (New):**
 ```sub
 #embed rust
@@ -216,6 +235,7 @@ SUB compiles to native code for multiple platforms:
 | Windows | C/C++ | Win32 | Native |
 | macOS | Swift/ObjC | Cocoa | Native |
 | Linux | C/C++ | GTK | Native |
+| Ruby | .rb | MRI/JRuby | Interpreted |
 
 ## 5. Standard Library
 

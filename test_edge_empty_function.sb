@@ -1,0 +1,14 @@
+# Test: Empty function body
+# The Ruby generator should add a placeholder comment
+
+#embed ruby
+    # Testing empty function body handling
+    def empty_function
+      # TODO: implement
+    end
+
+    def another_empty
+    end
+
+    puts "Empty functions defined successfully"
+#endembed

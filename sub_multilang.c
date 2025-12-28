@@ -22,6 +22,7 @@ typedef enum {
     LANG_GO,
     LANG_ASSEMBLY,
     LANG_CSS,
+    LANG_RUBY,
     LANG_LLVM_IR,
     LANG_WASM
 } TargetLanguage;
@@ -47,6 +48,7 @@ static LanguageInfo language_info[] = {
     {"go",         ".go",    "go",         "go run output.go"},
     {"assembly",   ".asm",   "nasm",       "nasm -f elf64 output.asm && ld output.o -o program && ./program"},
     {"css",        ".css",   "(browser)",  "(open in browser)"},
+    {"ruby",       ".rb",    "ruby",       "ruby output.rb"},
     {"llvm",       ".ll",    "llc",        "llc output.ll && gcc output.s -o program"},
     {"wasm",       ".wasm",  "(browser)",  "(load in WebAssembly)"},
 };
@@ -60,6 +62,7 @@ extern char* codegen_cpp(ASTNode *ast, const char *source);
 extern char* codegen_rust(ASTNode *ast, const char *source);
 extern char* codegen_javascript(ASTNode *ast, const char *source);
 extern char* codegen_css(ASTNode *ast, const char *source);
+extern char* codegen_ruby(ASTNode *ast, const char *source);
 extern char* codegen_assembly(ASTNode *ast, const char *source);
 
 /* From codegen.c */
@@ -114,6 +117,7 @@ TargetLanguage parse_language(const char *lang_str) {
     if (strcasecmp(lang_str, "go") == 0 || strcasecmp(lang_str, "golang") == 0) return LANG_GO;
     if (strcasecmp(lang_str, "assembly") == 0 || strcasecmp(lang_str, "asm") == 0) return LANG_ASSEMBLY;
     if (strcasecmp(lang_str, "css") == 0) return LANG_CSS;
+    if (strcasecmp(lang_str, "ruby") == 0 || strcasecmp(lang_str, "rb") == 0) return LANG_RUBY;
     if (strcasecmp(lang_str, "llvm") == 0) return LANG_LLVM_IR;
     if (strcasecmp(lang_str, "wasm") == 0) return LANG_WASM;
     
@@ -141,6 +145,8 @@ char* generate_code(ASTNode *ast, TargetLanguage lang, const char *source) {
             return codegen_javascript(ast, source);
         case LANG_CSS:
             return codegen_css(ast, source);
+        case LANG_RUBY:
+            return codegen_ruby(ast, source);
         case LANG_ASSEMBLY:
             return codegen_assembly(ast, source);
         case LANG_TYPESCRIPT:
@@ -181,11 +187,13 @@ void print_usage(const char *prog_name) {
     printf("  go/golang      - Go (coming soon)\n");
     printf("  assembly/asm   - x86-64 Assembly\n");
     printf("  css            - CSS Stylesheet\n");
+    printf("  ruby/rb        - Ruby\n");
     printf("  llvm           - LLVM IR (coming soon)\n");
     printf("  wasm           - WebAssembly (coming soon)\n");
     printf("\nExamples:\n");
     printf("  %s program.sb python      # Compile to Python\n", prog_name);
     printf("  %s program.sb java        # Compile to Java\n", prog_name);
+    printf("  %s program.sb ruby        # Compile to Ruby\n", prog_name);
     printf("  %s program.sb rust        # Compile to Rust\n", prog_name);
     printf("  %s program.sb c           # Compile to C (default)\n\n", prog_name);
 }
