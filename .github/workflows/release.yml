@@ -16,7 +16,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         include:
           - os: ubuntu-latest
             artifact_name: sublang-linux
@@ -24,16 +24,12 @@ jobs:
           - os: macos-latest
             artifact_name: sublang-macos
             asset_name: sublang-macos-x64
-          - os: windows-latest
-            artifact_name: sublang.exe
-            asset_name: sublang-windows-x64.exe
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup build environment (Ubuntu/macOS)
-        if: runner.os != 'Windows'
+      - name: Setup build environment
         run: |
           if [ "$RUNNER_OS" == "Linux" ]; then
             sudo apt-get update
@@ -42,34 +38,14 @@ jobs:
             brew install gcc make
           fi
 
-      - name: Setup build environment (Windows)
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: |
-            mingw-w64-x86_64-gcc
-            make
-
-      - name: Build project (Ubuntu/macOS)
-        if: runner.os != 'Windows'
+      - name: Build project
         run: |
           make clean
           make
           chmod +x sublang
           mv sublang ${{ matrix.artifact_name }}
 
-      - name: Build project (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          make clean
-          make
-          mv sublang.exe ${{ matrix.artifact_name }}
-
       - name: Test build
-        if: runner.os != 'Windows'
         run: |
           ./${{ matrix.artifact_name }} --version || echo "Version flag not implemented"
           echo "Build successful!"
@@ -176,11 +152,12 @@ jobs:
           ### 📥 Installation
           
           Download the appropriate binary for your platform:
-          - **Linux**: `sublang-linux-x64`
-          - **macOS**: `sublang-macos-x64`
-          - **Windows**: `sublang-windows-x64.exe`
+          - **Linux (x64)**: `sublang-linux-x64`
+          - **macOS (x64)**: `sublang-macos-x64`
           
-          Make it executable (Linux/macOS):
+          > **Note**: Windows support is not available in this release. SUB Language currently supports Linux and macOS only.
+          
+          Make it executable:
           ```bash
           chmod +x sublang-*-x64
           ./sublang-*-x64 program.sb ruby
@@ -208,12 +185,11 @@ jobs:
           files: |
             artifacts/sublang-linux-x64/*
             artifacts/sublang-macos-x64/*
-            artifacts/sublang-windows-x64.exe/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Release Summary
         run: |
           echo "✅ Release ${{ steps.version.outputs.VERSION }} created successfully!"
-          echo "📦 Artifacts uploaded for Linux, macOS, and Windows"
+          echo "📦 Artifacts uploaded for Linux and macOS"
           echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.VERSION }}"
