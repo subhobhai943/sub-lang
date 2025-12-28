@@ -1,0 +1,7 @@
+# SUB Language files
+*.sb linguist-language=SUB linguist-detectable
+*.sub linguist-language=SUB linguist-detectable
+
+# Mark as programming language
+*.sb linguist-generated=false
+*.sub linguist-generated=false

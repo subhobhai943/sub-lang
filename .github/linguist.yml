@@ -1,0 +1,10 @@
+# GitHub Linguist configuration for SUB Language
+SUB:
+  type: programming
+  color: "#FF6B6B"
+  extensions:
+    - ".sb"
+    - ".sub"
+  tm_scope: source.sub
+  ace_mode: text
+  language_id: 999999999
