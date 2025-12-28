@@ -1,0 +1,227 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "SUB",
+  "scopeName": "source.sub",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#variables"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#embedded-code"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.sub",
+          "match": "(^\\s*)?(#)(?!var|function|if|elif|else|for|while|break|continue|return|print|input|end|import|class|embed).*$\\n?",
+          "captures": {
+            "1": {
+              "name": "punctuation.whitespace.comment.leading.sub"
+            },
+            "2": {
+              "name": "punctuation.definition.comment.sub"
+            }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.sub",
+          "match": "\\b(#if|#elif|#else|#for|#while|#break|#continue|#return|#end)\\b"
+        },
+        {
+          "name": "keyword.declaration.sub",
+          "match": "\\b(#var|#function|#class|#import)\\b"
+        },
+        {
+          "name": "keyword.other.sub",
+          "match": "\\b(#print|#input|#embed)\\b"
+        },
+        {
+          "name": "constant.language.sub",
+          "match": "\\b(true|false|null|nil|True|False|None)\\b"
+        },
+        {
+          "name": "support.type.sub",
+          "match": "\\b(int|float|string|bool|list|dict|array)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.sub",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.sub",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.sub",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.sub",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.sub",
+          "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.hex.sub",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.sub",
+          "match": "\\b0[bB][01]+\\b"
+        },
+        {
+          "name": "constant.numeric.octal.sub",
+          "match": "\\b0[oO][0-7]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.sub",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.sub",
+          "match": "(?<=#function\\s+)\\w+"
+        },
+        {
+          "name": "entity.name.function.call.sub",
+          "match": "\\b\\w+(?=\\()"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.declaration.sub",
+          "match": "(?<=#var\\s+)\\w+"
+        },
+        {
+          "name": "variable.other.sub",
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arithmetic.sub",
+          "match": "\\+|\\-|\\*|\\/|%|\\*\\*"
+        },
+        {
+          "name": "keyword.operator.comparison.sub",
+          "match": "==|!=|<|>|<=|>="
+        },
+        {
+          "name": "keyword.operator.logical.sub",
+          "match": "\\band\\b|\\bor\\b|\\bnot\\b|&&|\\|\\||!"
+        },
+        {
+          "name": "keyword.operator.assignment.sub",
+          "match": "=|\\+=|-=|\\*=|\\/="
+        }
+      ]
+    },
+    "embedded-code": {
+      "patterns": [
+        {
+          "name": "meta.embedded.block.python",
+          "begin": "#embed\\s+python",
+          "end": "#end",
+          "patterns": [
+            {
+              "include": "source.python"
+            }
+          ]
+        },
+        {
+          "name": "meta.embedded.block.javascript",
+          "begin": "#embed\\s+javascript",
+          "end": "#end",
+          "patterns": [
+            {
+              "include": "source.js"
+            }
+          ]
+        },
+        {
+          "name": "meta.embedded.block.java",
+          "begin": "#embed\\s+java",
+          "end": "#end",
+          "patterns": [
+            {
+              "include": "source.java"
+            }
+          ]
+        },
+        {
+          "name": "meta.embedded.block.c",
+          "begin": "#embed\\s+c",
+          "end": "#end",
+          "patterns": [
+            {
+              "include": "source.c"
+            }
+          ]
+        },
+        {
+          "name": "meta.embedded.block.ruby",
+          "begin": "#embed\\s+ruby",
+          "end": "#end",
+          "patterns": [
+            {
+              "include": "source.ruby"
+            }
+          ]
+        },
+        {
+          "name": "meta.embedded.block.generic",
+          "begin": "#embed\\s+\\w+",
+          "end": "#end",
+          "contentName": "meta.embedded.content.sub"
+        }
+      ]
+    }
+  }
+}
