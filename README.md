@@ -1,89 +1,84 @@
 # SUB Programming Language
 
-## World's Easiest Cross-Platform Programming Language
-## Now with Heavy Multi-Language Compiler Architecture
+**The World's Easiest Programming Language with Blockchain-Inspired Syntax**
 
-SUB is a revolutionary programming language designed to be the easiest language to learn and use, powered by blockchain-inspired syntax and a **high-performance multi-language compiler**.
+SUB is a modern programming language that uses intuitive `#` (hash) symbols to create readable, blockchain-style code. Currently, SUB works as a powerful **source-to-source compiler (transpiler)** that converts your SUB code to multiple target languages.
 
 ---
 
-## 🚀 Heavy Compiler Architecture (v2.0)
+## 🎯 Current Status: Multi-Language Transpiler (v1.0.4)
 
-### Multi-Language Design
+### What SUB Does Now
 
-SUB's compiler strategically uses **three languages** to maximize performance:
+SUB is a **transpiler** that converts SUB source code to:
+- Python, JavaScript, TypeScript
+- Java, Swift, Kotlin
+- C, C++, Rust
+- Ruby, Go
+- Assembly, CSS
 
 ```
-┌───────────────────────┐
-│  Source Code (.sb)  │
-└────────┬─────────────┘
+┌─────────────────┐
+│  SUB Code (.sb) │
+└────────┬────────┘
          │
          ↓
-┌────────┴─────────┐
-│   RUST FRONTEND   │  Memory-safe lexer/parser
-│   (40% faster)    │  Zero memory leaks
-└────────┬─────────┘  Parallel tokenization
-         │
-         ↓ Tokens
-         │
-┌────────┴─────────┐
-│  C++ MIDDLE-END  │  Template optimizations
-│   (30% faster)    │  LLVM integration
-└────────┬─────────┘  Advanced analysis
-         │
-         ↓ Optimized AST
-         │
-┌────────┴─────────┐
-│    C BACKEND     │  Universal compatibility
-│   (Smallest)     │  200KB binary
-└────────┬─────────┘  Direct code generation
+┌────────┴────────────────────────┐
+│  SUB Compiler (Pure C)          │
+│  • Lexer → Tokens               │
+│  • Parser → AST                 │
+│  • Semantic Analysis            │
+│  • Multi-Language Code Gen      │
+└────────┬────────────────────────┘
          │
          ↓
-┌────────┴─────────────┐
-│  Target Platform   │
-│ (Web/Android/etc) │
-└───────────────────────┘
+┌────────┴────────┐
+│  Target Language │  Python, Java, Ruby,
+│  Source Code     │  JavaScript, Rust, etc.
+└─────────────────┘
 ```
 
-### Performance Gains
+### ⚠️ Current Limitation
 
-| Metric | C-only | Heavy Compiler | Improvement |
-|--------|--------|----------------|-------------|
-| **Compilation Speed** | 120ms | 75ms | **37% faster** |
-| **Memory Safety** | 30% | 100% | **3.3x safer** |
-| **Binary Size** | 200KB | 200KB | Same (C backend) |
-| **Optimization Quality** | Basic | Advanced | **2x better** |
-| **Parallel Compilation** | No | Yes | **N-core speedup** |
+SUB currently **transpiles** to other languages - meaning:
+- ✅ You can write SUB and get Python/Java/Ruby code
+- ✅ Cross-platform through target language runtimes
+- ❌ No direct machine code compilation (yet)
+- ❌ Requires target language runtime (Python interpreter, JVM, etc.)
+
+**Why this matters**: Users might ask "Why use SUB if I need Python anyway?"
+
+### 🚀 Future: Native Compilation (Planned)
+
+We're building **native code generation** so SUB will:
+- Generate standalone binaries (ELF, PE, Mach-O)
+- Run without any interpreter or runtime
+- Compete with C/Rust for performance
+- Still support transpilation as an option
 
 ---
 
 ## ✨ Key Features
 
-🔗 **Blockchain Method with #**
-- Uses hash symbols (#) to create readable, chained code blocks
-- Visual clarity through connected operations
-- Easy to understand syntax flow
+🔗 **Blockchain-Inspired Syntax**
+- Uses `#` symbols for method chaining
+- Clean, readable code structure
+- Natural flow from top to bottom
 
-⚡ **Blazing Fast Performance**
-- Multi-language compiler: Rust + C++ + C
-- LLVM-powered optimizations
-- Native code generation
-- SIMD and parallel processing support
+⚡ **Multi-Language Output**
+- Compile to 10+ languages from one source
+- Choose the best target for your platform
+- Leverage existing ecosystems
 
-🌍 **True Cross-Platform**
-- Android, iOS, Windows, macOS, Linux, Web
-- Single codebase, deploy everywhere
+🌍 **Cross-Platform**
+- Write once, compile to any language
+- Android, iOS, Web, Desktop
 - Platform-specific optimizations
 
-🔄 **Multi-Language Support**
-- Embed C, C++, Python, JavaScript, Rust, Ruby
-- Zero-cost FFI between languages
-- Best-of-all-worlds approach
-
-🛡️ **Enterprise-Grade Error Handling**
-- Try-catch-finally with stack traces
-- Custom exception types
-- Detailed error messages with suggestions
+🛡️ **Windows + Linux + macOS**
+- Full MSVC/Visual Studio support
+- GCC/Clang compatible
+- One codebase, all platforms
 
 ---
 
@@ -91,213 +86,283 @@ SUB's compiler strategically uses **three languages** to maximize performance:
 
 ### Installation
 
-#### Prerequisites
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+#### Build from Source
 
-# Install CMake (3.20+)
-# Ubuntu/Debian
-sudo apt install cmake build-essential
-
-# macOS
-brew install cmake
-
-# Windows
-# Download from https://cmake.org/download/
+**Windows (MSVC):**
+```batch
+REM Open Visual Studio Developer Command Prompt
+cl /I. sub_multilang.c parser.c lexer.c semantic.c codegen.c codegen_multilang.c /Fe:subc.exe
 ```
 
-#### Build the Heavy Compiler
+**Linux/macOS:**
 ```bash
-# Clone the repository
-git clone https://github.com/subhobhai943/sub-lang.git
-cd sub-lang
-
-# One-command build (handles Rust + C++ + C)
-chmod +x build.sh
-./build.sh
-
-# The executable will be at: ./build/subc
+gcc -o subc sub_multilang.c parser.c lexer.c semantic.c codegen.c codegen_multilang.c
 ```
 
-### Compile Your First Program
-
+**Using Makefile:**
 ```bash
-# Create a simple program
-cat > hello.sb << 'EOF'
+make
+./sublang example.sb python
+```
+
+### Your First Program
+
+```sub
 #var name = "World"
-#print("Hello, " + name)
-EOF
+#var count = 10
 
-# Compile for web
-./build/subc hello.sb web -v
+#function greet()
+    #print("Hello, " + name)
+#end
 
-# Compile for Android
-./build/subc hello.sb android -O3
-
-# Compile for native
-./build/subc hello.sb native --verbose
-
-# Compile to Ruby (using multi-language compiler)
-./sublang hello.sb ruby
-ruby output.rb
+#for i in range(count)
+    #print(i)
+#end
 ```
 
-### Multi-Language Compilation
-
-SUB supports compilation to multiple target languages. See [MULTILANG_GUIDE.md](MULTILANG_GUIDE.md) for full details.
+### Compile to Any Language
 
 ```bash
-# Compile to different languages
-./sublang program.sb python     # Python output
-./sublang program.sb javascript # JavaScript output
-./sublang program.sb ruby       # Ruby output
-./sublang program.sb java       # Java output
-./sublang program.sb rust       # Rust output
+# Compile to Python
+./subc program.sb python
+python3 output.py
+
+# Compile to JavaScript
+./subc program.sb javascript
+node output.js
+
+# Compile to Ruby
+./subc program.sb ruby
+ruby output.rb
+
+# Compile to Java
+./subc program.sb java
+javac SubProgram.java && java SubProgram
+
+# Compile to Rust
+./subc program.sb rust
+rustc output.rs && ./output
 ```
 
 ---
 
-## 📝 Syntax Examples
+## 📝 Syntax Guide
 
-### Variables & Types
+### Variables
 ```sub
-#var name = "John"              // String (auto inferred)
-#var age:int = 25               // Explicit type
-#var price:float = 19.99        // Float
-#var isActive:bool = true       // Boolean
+#var name = "John"        // String
+#var age = 25             // Integer
+#var price = 19.99        // Float
+#var isActive = true      // Boolean
 ```
 
 ### Functions
 ```sub
-#function greet(name:string):string
+#function greet(name)
     #return "Hello, " + name
 #end
 
-// Arrow functions
-#var square = (x:int) => x * x
+#var message = greet("Alice")
+#print(message)
 ```
 
-### Error Handling
+### Control Flow
 ```sub
-#try
-    #var result = divide(10, 0)
-#catch DivisionError as e
-    #print("Error: " + e.message)
-    #print(e.stackTrace)
-#finally
-    #print("Cleanup")
+#if age > 18
+    #print("Adult")
+#elif age > 13
+    #print("Teen")
+#else
+    #print("Child")
 #end
 ```
 
-### Embedded C++
+### Loops
 ```sub
-#embed cpp
-    #include <vector>
-    #include <algorithm>
-    
-    std::vector<int> numbers = {1, 2, 3, 4, 5};
-    int sum = std::accumulate(numbers.begin(), numbers.end(), 0);
-    
-    extern "C" int getSum() { return sum; }
+#for i in range(10)
+    #print(i)
+#end
+
+#while count > 0
+    #print(count)
+    count = count - 1
+#end
+```
+
+### Embedded Code (Language Interop)
+```sub
+#embed python
+import math
+result = math.sqrt(16)
+print(f"Square root: {result}")
 #endembed
 
-#var total = getSum()  // Call C++ from SUB
-```
-
-### UI Components
-```sub
-#ui.window(title="My App", width=800, height=600)
-    #ui.button(text="Click Me", onclick=handleClick)
-    #ui.label(text="Welcome!")
-    #ui.input(placeholder="Enter name")
-#end
+#embed javascript
+console.log("Direct JavaScript!");
+const data = [1, 2, 3].map(x => x * 2);
+#endembed
 ```
 
 ---
 
-## 🎯 Platform Targets
+## 🎯 Supported Target Languages
 
-| Platform | Output | Framework | Status |
-|----------|--------|-----------|--------|
-| **Web** | JavaScript | HTML5 | ✅ Ready |
-| **Android** | Java/Kotlin | Android SDK | ✅ Ready |
-| **iOS** | Swift | UIKit | 🚧 Beta |
-| **Windows** | C/C++ | Win32 | 🚧 Beta |
-| **macOS** | Swift/ObjC | Cocoa | 🚧 Beta |
-| **Linux** | C | GTK | ✅ Ready |
-| **WASM** | WebAssembly | - | 🔥 New |
+| Language | Status | Extension | Command |
+|----------|--------|-----------|----------|
+| **Python** | ✅ Ready | `.py` | `subc file.sb python` |
+| **JavaScript** | ✅ Ready | `.js` | `subc file.sb javascript` |
+| **TypeScript** | ✅ Ready | `.ts` | `subc file.sb typescript` |
+| **Java** | ✅ Ready | `.java` | `subc file.sb java` |
+| **Ruby** | ✅ Ready | `.rb` | `subc file.sb ruby` |
+| **C** | ✅ Ready | `.c` | `subc file.sb c` |
+| **C++** | ✅ Ready | `.cpp` | `subc file.sb cpp` |
+| **Swift** | ✅ Ready | `.swift` | `subc file.sb swift` |
+| **Kotlin** | ✅ Ready | `.kt` | `subc file.sb kotlin` |
+| **Rust** | ✅ Ready | `.rs` | `subc file.sb rust` |
+| **Assembly** | ✅ Ready | `.asm` | `subc file.sb assembly` |
+| **CSS** | ✅ Ready | `.css` | `subc file.sb css` |
+| **Go** | 🚧 Coming | `.go` | `subc file.sb go` |
+| **Native** | 🚧 Planned | `.exe/.elf` | `subc file.sb --native` |
+
+---
+
+## 🏗️ Architecture
+
+### Current Implementation (Pure C)
+
+```
+Source Files (C):
+├── sub_multilang.c      # Main compiler driver
+├── lexer.c              # Tokenization
+├── parser.c             # AST construction
+├── parser_enhanced.c    # Advanced parsing
+├── semantic.c           # Type checking & validation
+├── codegen.c            # C code generation
+├── codegen_multilang.c  # Multi-language generators
+├── sub_compiler.h       # Shared definitions
+└── windows_compat.h     # Windows/MSVC compatibility
+
+Build Output:
+├── sublang (Linux/macOS)
+└── subc.exe (Windows)
+```
+
+### Compilation Pipeline
+
+```
+1. Lexer:     Source → Tokens
+2. Parser:    Tokens → AST (Abstract Syntax Tree)
+3. Semantic:  AST → Validated AST
+4. CodeGen:   AST → Target Language Code
+```
 
 ---
 
 ## 🛠️ Compiler Options
 
 ```bash
-subc <input.sb> <platform> [options]
+subc <input.sb> <target_language> [options]
 
-Platforms:
-  web, android, ios, windows, macos, linux, native
+Target Languages:
+  python, javascript/js, typescript/ts
+  java, kotlin, swift
+  c, cpp/c++, rust
+  ruby, go, assembly
 
-Options:
-  -v, --verbose          Detailed compilation output
-  -O<level>              Optimization (0-3, default: 2)
-  --use-cpp              Use C++ compiler backend
-  --simd                 Enable SIMD optimizations
-  --emit-llvm            Output LLVM IR
-  -p, --parallel         Parallel compilation
+Examples:
+  subc program.sb python      # Generate Python
+  subc program.sb java        # Generate Java
+  subc program.sb rust        # Generate Rust
 ```
 
 ---
 
-## 📊 Performance Benchmarks
+## 📊 Project Status
 
-### Compilation Speed
-```
-Test: 1000-line SUB program
+### ✅ Completed (v1.0.4)
+- [x] Full C compiler implementation
+- [x] Lexer with comprehensive token support
+- [x] Parser with AST generation
+- [x] Semantic analysis
+- [x] Multi-language code generation (10+ languages)
+- [x] Windows/MSVC compatibility
+- [x] Linux/macOS support
+- [x] Embedded code support
+- [x] Error handling and reporting
 
-C-only compiler:     120ms
-Heavy compiler:       75ms  (⬆️ 37% faster)
-Rust compiler:        85ms  (⬆️ 29% faster)
-```
+### 🚧 In Progress
+- [ ] Native machine code generation
+- [ ] LLVM IR backend
+- [ ] Go language target
+- [ ] Optimization passes
+- [ ] Standard library
+- [ ] Package manager
 
-### Runtime Performance
-```
-Fibonacci(40) benchmark:
-
-SUB compiled code:   850ms
-Python:             2100ms  (🐌 SUB is 2.5x faster)
-JavaScript (Node):  1200ms  (🐌 SUB is 1.4x faster)
-C baseline:          800ms  (SUB is 94% of C speed)
-```
+### 📝 Planned Features
+- [ ] Direct binary compilation (no transpiler)
+- [ ] Garbage collection
+- [ ] Async/await support
+- [ ] Generic types
+- [ ] Module system
+- [ ] Debugger integration
 
 ---
 
 ## 📚 Documentation
 
 - [Language Specification](LANGUAGE_SPEC.md)
-- [Implementation Guide](IMPLEMENTATION_GUIDE.md)
-- [Contributing Guide](CONTRIBUTING.md)
-- [Project Summary](PROJECT_SUMMARY.md)
+- [Multi-Language Guide](MULTILANG_GUIDE.md)
+- [Build Guide](BUILD_GUIDE.md)
+- [Contributing Guidelines](CONTRIBUTING.md)
+- [Native Compilation Plan](NATIVE_COMPILATION.md)
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-### Development Workflow
+### Development
 
-1. **Frontend (Rust)**: Modify `compiler/frontend/src/lib.rs`
-2. **Middle-end (C++)**: Edit `compiler/middle_end/semantic_analyzer.cpp`
-3. **Backend (C)**: Update `compiler/backend/codegen.c`
-4. **Rebuild**: Run `./build.sh`
-5. **Test**: `./build/subc test.sb web -v`
+```bash
+# Clone repository
+git clone https://github.com/subhobhai943/sub-lang.git
+cd sub-lang
+
+# Build
+make clean && make
+
+# Test
+./sublang test_ruby.sb ruby
+ruby output.rb
+```
 
 ---
 
-## 📝 License
+## 🎯 Roadmap
 
-MIT License - See [LICENSE](LICENSE) file
+### Phase 1: Transpiler (Current) ✅
+- Multi-language source code generation
+- Cross-platform compilation
+- Language interoperability
+
+### Phase 2: Native Compilation (Next) 🚧
+- Direct machine code generation
+- Standalone binary output
+- No runtime dependencies
+- Competitive with C/Rust performance
+
+### Phase 3: Ecosystem
+- Standard library
+- Package manager
+- IDE integrations
+- Community tools
+
+---
+
+## ⚖️ License
+
+MIT License - See [LICENSE](LICENSE)
 
 ---
 
@@ -310,16 +375,33 @@ MIT License - See [LICENSE](LICENSE) file
 
 ## ⭐ Why SUB?
 
-1. **Easy to Learn** - Blockchain-style # syntax is intuitive
-2. **Fast Execution** - Multi-language compiler optimizes aggressively
-3. **Cross-Platform** - Write once, deploy everywhere
-4. **Memory Safe** - Rust frontend eliminates entire bug classes
-5. **Polyglot** - Embed C, C++, Python, JS, Rust, Ruby seamlessly
-6. **Modern** - Try-catch, async/await, generics, SIMD
-7. **Production-Ready** - Enterprise-grade error handling
+### Current Value (Transpiler)
+1. **Unified Syntax** - Learn one language, output many
+2. **Easy to Learn** - Blockchain `#` syntax is intuitive
+3. **Polyglot** - Embed any language directly
+4. **Cross-Platform** - Leverage existing runtimes
+
+### Future Value (Native Compiler)
+1. **True Independence** - No runtime dependencies
+2. **High Performance** - Native machine code
+3. **Small Binaries** - Standalone executables
+4. **System Programming** - Compete with C/Rust
 
 ---
 
-Built with ❤️ using Rust 🦀 + C++ ⚡ + C 🔧
+## 🎬 Current State vs. Future Goal
 
-**Powered by the Heavy Compiler Architecture**
+| Aspect | Now (Transpiler) | Future (Native) |
+|--------|------------------|------------------|
+| **Output** | Python/Java/etc code | Machine code binary |
+| **Runtime** | Requires interpreter | Standalone |
+| **Speed** | Interpreter speed | Native C/Rust speed |
+| **Size** | Script + runtime | Small binary |
+| **Deployment** | Complex | Single file |
+| **Value Prop** | Unified syntax | Real compiler |
+
+---
+
+Built with ❤️ by the SUB community
+
+**Powered by Pure C** 🔧
