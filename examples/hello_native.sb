@@ -1,0 +1,15 @@
+# SUB Language - Native Compilation Example
+# This program compiles directly to machine code!
+
+#var name = "World"
+#var greeting = "Hello, " + name
+
+#print(greeting)
+#print("SUB is a real programming language!")
+
+#var x = 10
+#var y = 20
+#var sum = x + y
+
+#print("Sum: ")
+#print(sum)
