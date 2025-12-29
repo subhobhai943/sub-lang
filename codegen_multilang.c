@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include "windows_compat.h"
 #include <stdarg.h>
 #include <ctype.h>
 
@@ -411,30 +412,15 @@ char* codegen_rust(ASTNode *ast, const char *source) { (void)ast; (void)source; 
 char* codegen_css(ASTNode *ast, const char *source) { (void)ast; (void)source; return strdup("body { font-family: Arial; }\n"); }
 char* codegen_assembly(ASTNode *ast, const char *source) { (void)ast; (void)source; return strdup("; SUB Program\nsection .text\n\tglobal _start\n_start:\n\tmov rax, 60\n\txor rdi, rdi\n\tsyscall\n"); }
 
-/* ========================================
-   RUBY CODE GENERATOR
-   Generates idiomatic Ruby code from SUB AST.
-   Uses 2-space indentation (Ruby convention).
-   Maps SUB constructs to Ruby equivalents:
-     #var -> variable assignment
-     #function -> def/end
-     #if/#elif/#else -> if/elsif/else/end
-     #for in range -> (a...b).each do |i|
-     #while -> while/end
-     #print -> puts
-   ======================================== */
-
-/* Helper: Ruby 2-space indentation */
+/* Ruby code generator continues from previous implementation... */
 static void indent_ruby(StringBuilder *sb, int level) {
     for (int i = 0; i < level; i++) {
         sb_append(sb, "  ");
     }
 }
 
-/* Forward declaration */
 static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent);
 
-/* Generate Ruby expression from AST node */
 static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
     if (!node) return;
 
@@ -457,7 +443,6 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
 
         case AST_CALL_EXPR: {
             const char *func_name = node->value ? node->value : "func";
-            /* Map print() to puts */
             if (strcmp(func_name, "print") == 0) {
                 sb_append(sb, "puts");
                 if (node->left) {
@@ -479,7 +464,6 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
     }
 }
 
-/* Generate Ruby statement/node from AST */
 static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
 
@@ -502,7 +486,6 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
             break;
 
         case AST_CONST_DECL:
-            /* Ruby constants are UPPER_CASE by convention */
             indent_ruby(sb, indent);
             sb_append(sb, "%s = ", node->value ? node->value : "CONST");
             if (node->right) {
@@ -513,11 +496,10 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "\n");
             break;
 
-        case AST_FUNCTION_DECL: {
+        case AST_FUNCTION_DECL:
             sb_append(sb, "\n");
             indent_ruby(sb, indent);
             sb_append(sb, "def %s", node->value ? node->value : "func");
-            /* Handle parameters if stored in children array */
             if (node->children && node->child_count > 0) {
                 sb_append(sb, "(");
                 for (int i = 0; i < node->child_count; i++) {
@@ -530,7 +512,6 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
             }
             sb_append(sb, "\n");
 
-            /* Function body */
             if (node->body) {
                 generate_node_ruby(sb, node->body, indent + 1);
             }
@@ -538,7 +519,6 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
                 generate_node_ruby(sb, stmt, indent + 1);
             }
 
-            /* Empty function body needs placeholder */
             if (!node->body && !node->left) {
                 indent_ruby(sb, indent + 1);
                 sb_append(sb, "# TODO: implement\n");
@@ -547,7 +527,6 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
             indent_ruby(sb, indent);
             sb_append(sb, "end\n");
             break;
-        }
 
         case AST_IF_STMT:
             indent_ruby(sb, indent);
@@ -556,14 +535,12 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "\n");
             generate_node_ruby(sb, node->body, indent + 1);
             if (node->right) {
-                /* Check if the else branch is another if (elif -> elsif) */
                 if (node->right->type == AST_IF_STMT) {
                     indent_ruby(sb, indent);
                     sb_append(sb, "elsif ");
                     generate_expr_ruby(sb, node->right->condition);
                     sb_append(sb, "\n");
                     generate_node_ruby(sb, node->right->body, indent + 1);
-                    /* Continue processing else branches */
                     if (node->right->right) {
                         ASTNode *else_branch = node->right->right;
                         while (else_branch && else_branch->type == AST_IF_STMT) {
@@ -590,16 +567,13 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "end\n");
             break;
 
-        case AST_FOR_STMT: {
+        case AST_FOR_STMT:
             indent_ruby(sb, indent);
-            const char *iter_var = node->value ? node->value : "i";
-            /* Generate Ruby range iteration: (0...n).each do |i| */
-            sb_append(sb, "(0...10).each do |%s|\n", iter_var);
+            sb_append(sb, "(0...10).each do |%s|\n", node->value ? node->value : "i");
             generate_node_ruby(sb, node->body, indent + 1);
             indent_ruby(sb, indent);
             sb_append(sb, "end\n");
             break;
-        }
 
         case AST_WHILE_STMT:
             indent_ruby(sb, indent);
@@ -636,7 +610,6 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_EMBED_CODE:
         case AST_EMBED_CPP:
         case AST_EMBED_C:
-            /* Include embedded code directly */
             if (node->value) {
                 indent_ruby(sb, indent);
                 sb_append(sb, "# Embedded code\n");
@@ -645,7 +618,6 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
             break;
 
         case AST_UI_COMPONENT:
-            /* UI components - generate comment for now */
             indent_ruby(sb, indent);
             sb_append(sb, "# UI: %s\n", node->value ? node->value : "component");
             break;
@@ -655,23 +627,19 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
     }
 }
 
-/* Main Ruby code generator entry point */
 char* codegen_ruby(ASTNode *ast, const char *source) {
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
 
-    /* File header with shebang */
     sb_append(sb, "#!/usr/bin/env ruby\n");
     sb_append(sb, "# Generated by SUB Language Compiler\n\n");
 
-    /* Check for embedded Ruby code first */
     char *embedded = extract_embedded_code(source, "ruby");
     if (embedded) {
         sb_append(sb, "# Embedded Ruby code from SUB\n");
         sb_append(sb, "%s\n", embedded);
         free(embedded);
     } else {
-        /* Generate from AST */
         generate_node_ruby(sb, ast, 0);
     }
 
