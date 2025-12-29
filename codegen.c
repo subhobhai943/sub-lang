@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include "windows_compat.h"
 #include <stdarg.h>
 
 /* String Builder for code generation */
