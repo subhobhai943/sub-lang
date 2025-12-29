@@ -12,23 +12,23 @@
 
 /* x86-64 Register allocation */
 typedef enum {
-    REG_RAX = 0,  // Accumulator, return value
-    REG_RBX,      // Base register, callee-saved
-    REG_RCX,      // Counter, 4th argument
-    REG_RDX,      // Data, 3rd argument
-    REG_RSI,      // Source index, 2nd argument
-    REG_RDI,      // Destination index, 1st argument
-    REG_RBP,      // Base pointer
-    REG_RSP,      // Stack pointer
-    REG_R8,       // 5th argument
-    REG_R9,       // 6th argument
-    REG_R10,      // Temporary
-    REG_R11,      // Temporary
-    REG_R12,      // Callee-saved
-    REG_R13,      // Callee-saved
-    REG_R14,      // Callee-saved
-    REG_R15,      // Callee-saved
-    REG_COUNT
+    X64_REG_RAX = 0,  // Accumulator, return value
+    X64_REG_RBX,      // Base register, callee-saved
+    X64_REG_RCX,      // Counter, 4th argument
+    X64_REG_RDX,      // Data, 3rd argument
+    X64_REG_RSI,      // Source index, 2nd argument
+    X64_REG_RDI,      // Destination index, 1st argument
+    X64_REG_RBP,      // Base pointer
+    X64_REG_RSP,      // Stack pointer
+    X64_REG_R8,       // 5th argument
+    X64_REG_R9,       // 6th argument
+    X64_REG_R10,      // Temporary
+    X64_REG_R11,      // Temporary
+    X64_REG_R12,      // Callee-saved
+    X64_REG_R13,      // Callee-saved
+    X64_REG_R14,      // Callee-saved
+    X64_REG_R15,      // Callee-saved
+    X64_REG_COUNT
 } X64Register;
 
 /* Code generation context */
@@ -37,7 +37,7 @@ typedef struct {
     int label_counter;         // For generating unique labels
     int string_counter;        // For string literals
     int stack_offset;          // Current stack offset
-    bool reg_in_use[REG_COUNT]; // Register allocation tracker
+    bool reg_in_use[X64_REG_COUNT]; // Register allocation tracker
 } X64Context;
 
 /* Main code generation functions */
