@@ -18,7 +18,7 @@ cd sub-lang
 ### Step 2: Create a Feature Branch
 ```bash
 git checkout -b feature/your-feature-name
-# Example: git checkout -b feature/add-python-backend
+# Example: git checkout -b feature/rust-compiler-backend
 ```
 
 ### Step 3: Set Up Development Environment
@@ -102,7 +102,221 @@ Our next major goals are:
 3. **C Compiler Architecture Integration** - Improved C code generation
 4. **Full Windows Support (v1.0.4)** - Fix POSIX compatibility issues
 
-Want to work on these? Open an issue or submit a PR!
+Want to work on these? See detailed guides below!
+
+## 🦀 Rust Compiler Architecture Integration
+
+### Overview
+Integrate Rust as a compilation target for SUB Language, allowing `.sb` files to compile to native Rust code with performance and safety benefits.
+
+### Step-by-Step Integration:
+
+#### Step 1: Create Rust Backend Module
+```bash
+# Create new file: src/codegen/rust_backend.c
+touch src/codegen/rust_backend.c
+touch src/codegen/rust_backend.h
+```
+
+#### Step 2: Implement Rust Code Generator
+Create functions to translate SUB AST to Rust code:
+
+```c
+// In rust_backend.c
+void generate_rust_code(ASTNode* node, FILE* output) {
+    // Translate SUB syntax to Rust
+    // Handle:
+    // - #variable declarations -> let mut / let
+    // - #function definitions -> fn
+    // - #loop / #if -> loop / if statements
+    // - Type inference and ownership rules
+}
+```
+
+#### Step 3: Add Rust Target to Compiler
+Modify `sub_multilang.c` to recognize "rust" target:
+
+```c
+if (strcasecmp(target, "rust") == 0) {
+    compile_to_rust(ast, output_file);
+}
+```
+
+#### Step 4: Handle SUB to Rust Syntax Mapping
+| SUB Syntax | Rust Equivalent |
+|------------|----------------|
+| `#variable x = 10;` | `let mut x = 10;` |
+| `#function add(a, b)` | `fn add(a: i32, b: i32) -> i32` |
+| `#loop(i, 0, 10)` | `for i in 0..10` |
+| `#if (condition)` | `if condition` |
+
+#### Step 5: Test Rust Compilation
+```bash
+./sub example.sb rust
+rustc output.rs -o program
+./program
+```
+
+#### Step 6: Documentation
+- Add Rust examples to `examples/` directory
+- Update README.md with Rust compilation instructions
+- Document Rust-specific features and limitations
+
+## ⚙️ C++ Compiler Architecture Integration
+
+### Overview
+Enhance C++ backend support with modern C++ features (C++11/14/17/20) for better performance and object-oriented programming support.
+
+### Step-by-Step Integration:
+
+#### Step 1: Create Enhanced C++ Backend
+```bash
+# Create/update: src/codegen/cpp_backend.c
+touch src/codegen/cpp_backend.h
+```
+
+#### Step 2: Implement Modern C++ Features
+
+```c
+// In cpp_backend.c
+void generate_cpp_code(ASTNode* node, FILE* output) {
+    // Support:
+    // - Smart pointers (unique_ptr, shared_ptr)
+    // - Lambda functions
+    // - Range-based for loops
+    // - Auto type inference
+    // - STL containers
+}
+```
+
+#### Step 3: SUB to C++ Syntax Mapping
+| SUB Syntax | C++ Equivalent |
+|------------|----------------|
+| `#variable x = 10;` | `auto x = 10;` |
+| `#function add(a, b)` | `auto add(int a, int b) -> int` |
+| `#array nums = [1,2,3];` | `std::vector<int> nums = {1,2,3};` |
+| `#loop(i, 0, 10)` | `for(int i = 0; i < 10; i++)` |
+
+#### Step 4: Add C++ Standard Support
+```c
+// Allow users to specify C++ version
+if (strcasecmp(target, "cpp17") == 0) {
+    compile_to_cpp(ast, output_file, CPP_17);
+} else if (strcasecmp(target, "cpp20") == 0) {
+    compile_to_cpp(ast, output_file, CPP_20);
+}
+```
+
+#### Step 5: Test C++ Compilation
+```bash
+./sub example.sb cpp
+g++ -std=c++17 output.cpp -o program
+./program
+```
+
+#### Step 6: Add OOP Support
+- Implement class/struct generation from SUB
+- Support inheritance and polymorphism
+- Add namespace management
+
+## 🔧 C Compiler Architecture Integration
+
+### Overview
+Improve C code generation with optimized output, better memory management, and support for different C standards (C99, C11, C17).
+
+### Step-by-Step Integration:
+
+#### Step 1: Enhance Existing C Backend
+```bash
+# Update: src/codegen/c_backend.c
+# Create: src/codegen/c_optimizer.c
+```
+
+#### Step 2: Implement C Standard Support
+
+```c
+// In c_backend.c
+void generate_c_code(ASTNode* node, FILE* output, CStandard standard) {
+    // Generate code for:
+    // - C99: Variable-length arrays, inline functions
+    // - C11: Anonymous structs, static assertions
+    // - C17: Bug fixes and clarifications
+}
+```
+
+#### Step 3: Optimize Generated C Code
+
+```c
+void optimize_c_output(ASTNode* node) {
+    // Apply optimizations:
+    // - Constant folding
+    // - Dead code elimination
+    // - Inline small functions
+    // - Reduce memory allocations
+}
+```
+
+#### Step 4: SUB to C Syntax Mapping
+| SUB Syntax | C Equivalent |
+|------------|----------------|
+| `#variable x = 10;` | `int x = 10;` |
+| `#function add(a, b)` | `int add(int a, int b)` |
+| `#array nums = [1,2,3];` | `int nums[] = {1,2,3};` |
+| `#loop(i, 0, 10)` | `for(int i = 0; i < 10; i++)` |
+
+#### Step 5: Add Multiple C Standard Targets
+```c
+// Support different C versions
+if (strcasecmp(target, "c99") == 0) {
+    compile_to_c(ast, output_file, C99);
+} else if (strcasecmp(target, "c11") == 0) {
+    compile_to_c(ast, output_file, C11);
+}
+```
+
+#### Step 6: Memory Management Improvements
+- Add automatic cleanup generation
+- Implement buffer overflow protection
+- Generate valgrind-clean code
+- Add memory leak detection helpers
+
+#### Step 7: Test C Compilation
+```bash
+./sub example.sb c99
+gcc -std=c99 output.c -o program
+./program
+
+# Test with different standards
+./sub example.sb c11
+gcc -std=c11 output.c -o program
+```
+
+## 🔄 Common Integration Tasks (All Architectures)
+
+### Required Files to Modify:
+1. `src/codegen/[language]_backend.c` - Core code generation
+2. `src/codegen/[language]_backend.h` - Header file
+3. `sub_multilang.c` - Add target recognition
+4. `Makefile` - Add compilation rules
+5. `README.md` - Update documentation
+6. `examples/` - Add example programs
+
+### Testing Checklist:
+- [ ] Basic syntax compilation (variables, functions)
+- [ ] Control flow (if, loops, switch)
+- [ ] Data structures (arrays, structs)
+- [ ] Memory management (no leaks)
+- [ ] Cross-platform compatibility
+- [ ] Performance benchmarks
+- [ ] Error handling
+- [ ] Edge cases
+
+### Integration Best Practices:
+1. **Start Small** - Begin with basic syntax translation
+2. **Test Incrementally** - Test each feature as you add it
+3. **Follow Patterns** - Look at existing backends (web, android, ios)
+4. **Document Everything** - Add comments and examples
+5. **Ask for Help** - Open issues or discussions if stuck
 
 ## 🐛 Reporting Bugs
 
@@ -128,7 +342,7 @@ Want to work on these? Open an issue or submit a PR!
 - **Function Length:** Keep under 50 lines when possible
 
 ### Naming Conventions
-- **Functions:** `snake_case` (e.g., `compile_to_web`)
+- **Functions:** `snake_case` (e.g., `compile_to_rust`)
 - **Structs:** `PascalCase` (e.g., `ASTNode`)
 - **Constants:** `UPPER_SNAKE_CASE` (e.g., `MAX_BUFFER_SIZE`)
 - **Variables:** `snake_case` (e.g., `token_count`)
@@ -152,6 +366,7 @@ Want to work on these? Open an issue or submit a PR!
 - **Build System:** Make
 - **Version Control:** Git
 - **OS:** Linux/macOS (Windows support coming in v1.0.4)
+- **Optional:** Rust, C++ compiler for testing backends
 
 ### Building from Source
 ```bash
@@ -169,6 +384,11 @@ make
 
 # Compile to iOS
 ./sub example.sb ios
+
+# Future targets:
+./sub example.sb rust
+./sub example.sb cpp
+./sub example.sb c99
 ```
 
 ## 🎨 Language Design Principles
@@ -188,6 +408,7 @@ Feel free to:
 - Open a GitHub Issue for questions
 - Start a GitHub Discussion
 - Contact the maintainers
+- Ask about specific compiler architecture integration
 
 ---
 
