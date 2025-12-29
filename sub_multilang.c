@@ -227,7 +227,7 @@ int main(int argc, char *argv[]) {
     printf("[1/5] 📖 Reading source file...\n");
     char *source = read_file(input_file);
     if (!source) return 1;
-    printf("      ✓ Read %ld bytes\n", strlen(source));
+    printf("      ✓ Read %zu bytes\n", strlen(source));
     
     // Phase 2: Lexical Analysis
     printf("[2/5] 🔤 Lexical analysis...\n");
@@ -266,7 +266,7 @@ int main(int argc, char *argv[]) {
     }
     
     write_file(output_file, output_code);
-    printf("      ✓ Generated %ld bytes\n", strlen(output_code));
+    printf("      ✓ Generated %zu bytes\n", strlen(output_code));
     
     // Success!
     printf("\n✅ Compilation successful!\n");
