@@ -6,7 +6,12 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include "windows_compat.h"
+
+// strings.h doesn't exist on Windows, skip it there
+#ifndef _WIN32
 #include <strings.h>
+#endif
 
 /* Target Language Enum */
 typedef enum {
