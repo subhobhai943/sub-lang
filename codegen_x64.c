@@ -128,8 +128,12 @@ static void x64_generate_function_prologue(X64Context *ctx, IRFunction *func) {
 /* Generate function epilogue */
 static void x64_generate_function_epilogue(X64Context *ctx, IRFunction *func) {
     x64_emit_comment(ctx, "Function epilogue");
-    x64_emit_label(ctx, func->name);
-    fprintf(ctx->output, "_return:\n");
+    
+    // Create unique return label (e.g., "main_return:" instead of "main:")
+    char return_label[256];
+    snprintf(return_label, sizeof(return_label), "%s_return", func->name);
+    x64_emit_label(ctx, return_label);
+    
     x64_emit(ctx, "movq %%rbp, %%rsp");
     x64_emit(ctx, "popq %%rbp");
     x64_emit(ctx, "ret\n");
