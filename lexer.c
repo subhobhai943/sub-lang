@@ -152,9 +152,10 @@ Token* lexer_tokenize(const char *source, int *token_count) {
             case '<':
             case '>':
             case '!': {
-                char op[3] = {*ptr, 0, 0};
+                char op[3] = {*ptr, '\0', '\0'};
                 if (*(ptr + 1) == '=') {
                     op[1] = '=';
+                    op[2] = '\0';
                     ptr++;
                     column++;
                 }
