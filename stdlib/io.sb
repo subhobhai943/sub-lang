@@ -1,0 +1,135 @@
+# ==========================================
+# SUB Standard Library - I/O Module
+# File: stdlib/io.sb
+# Functions for input/output operations
+# ==========================================
+
+# Print with newline
+#func println(message) {
+    print(message)
+    print("\n")
+}
+
+# Print without newline
+#func printf(format, ...args) {
+    # Format string and print
+    #var output = format_string(format, args)
+    print(output)
+}
+
+# Read line from stdin
+#func readln() -> str {
+    #var line = ""
+    #var ch = getchar()
+    #while ch != '\n' && ch != EOF {
+        line = line + ch
+        ch = getchar()
+    }
+    #return line
+}
+
+# Read integer from stdin
+#func read_int() -> int {
+    #var line = readln()
+    #return parse_int(line)
+}
+
+# Read float from stdin
+#func read_float() -> float {
+    #var line = readln()
+    #return parse_float(line)
+}
+
+# Print error message to stderr
+#func eprint(message) {
+    write_stderr(message)
+}
+
+# Print error with newline
+#func eprintln(message) {
+    eprint(message)
+    eprint("\n")
+}
+
+# Format string with placeholders
+#func format(template, ...args) -> str {
+    #var result = template
+    #var arg_index = 0
+    
+    # Replace {} with arguments
+    #var i = 0
+    #while i < len(result) {
+        #if result[i] == '{' && result[i+1] == '}' {
+            #if arg_index < len(args) {
+                result = str_replace_at(result, i, 2, str(args[arg_index]))
+                arg_index = arg_index + 1
+            }
+        }
+        i = i + 1
+    }
+    
+    #return result
+}
+
+# Debug print with location info
+#func debug(message, file, line) {
+    eprintln("[DEBUG] " + file + ":" + str(line) + " - " + message)
+}
+
+# Print colored output (ANSI)
+#func print_color(message, color) {
+    #var colors = {
+        "red": "\033[31m",
+        "green": "\033[32m",
+        "yellow": "\033[33m",
+        "blue": "\033[34m",
+        "magenta": "\033[35m",
+        "cyan": "\033[36m",
+        "white": "\033[37m",
+        "reset": "\033[0m"
+    }
+    
+    print(colors[color] + message + colors["reset"])
+}
+
+# Print success message
+#func print_success(message) {
+    print_color("✓ " + message, "green")
+}
+
+# Print error message
+#func print_error(message) {
+    print_color("✗ " + message, "red")
+}
+
+# Print warning message
+#func print_warning(message) {
+    print_color("⚠ " + message, "yellow")
+}
+
+# Print info message
+#func print_info(message) {
+    print_color("ℹ " + message, "cyan")
+}
+
+# Clear console
+#func clear_screen() {
+    #if is_windows() {
+        system("cls")
+    } #else {
+        system("clear")
+    }
+}
+
+# Prompt user for input
+#func prompt(message) -> str {
+    print(message + ": ")
+    #return readln()
+}
+
+# Confirm yes/no
+#func confirm(message) -> bool {
+    print(message + " (y/n): ")
+    #var response = readln()
+    #return response == "y" || response == "Y" || response == "yes"
+}
