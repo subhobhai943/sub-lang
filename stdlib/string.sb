@@ -1,0 +1,321 @@
+# ==========================================
+# SUB Standard Library - String Module
+# File: stdlib/string.sb
+# String manipulation functions
+# ==========================================
+
+# String length
+#func len(s) -> int {
+    #var count = 0
+    #while s[count] != '\0' {
+        count = count + 1
+    }
+    #return count
+}
+
+# String concatenation
+#func concat(s1, s2) -> str {
+    #return s1 + s2
+}
+
+# Substring
+#func substr(s, start, length) -> str {
+    #var result = ""
+    #for i in range(start, start + length) {
+        #if i < len(s) {
+            result = result + s[i]
+        }
+    }
+    #return result
+}
+
+# String comparison
+#func strcmp(s1, s2) -> int {
+    #var i = 0
+    #while s1[i] != '\0' && s2[i] != '\0' {
+        #if s1[i] != s2[i] {
+            #return s1[i] - s2[i]
+        }
+        i = i + 1
+    }
+    #return s1[i] - s2[i]
+}
+
+# Case-insensitive comparison
+#func stricmp(s1, s2) -> int {
+    #return strcmp(to_lower(s1), to_lower(s2))
+}
+
+# String search
+#func index_of(s, ch) -> int {
+    #for i in range(len(s)) {
+        #if s[i] == ch {
+            #return i
+        }
+    }
+    #return -1
+}
+
+#func last_index_of(s, ch) -> int {
+    #var last = -1
+    #for i in range(len(s)) {
+        #if s[i] == ch {
+            last = i
+        }
+    }
+    #return last
+}
+
+#func contains(s, substr) -> bool {
+    #return find(s, substr) != -1
+}
+
+#func find(s, substr) -> int {
+    #var s_len = len(s)
+    #var sub_len = len(substr)
+    
+    #for i in range(s_len - sub_len + 1) {
+        #var match = true
+        #for j in range(sub_len) {
+            #if s[i + j] != substr[j] {
+                match = false
+                #break
+            }
+        }
+        #if match {
+            #return i
+        }
+    }
+    #return -1
+}
+
+# Case conversion
+#func to_upper(s) -> str {
+    #var result = ""
+    #for i in range(len(s)) {
+        #var ch = s[i]
+        #if ch >= 'a' && ch <= 'z' {
+            result = result + char(ord(ch) - 32)
+        } #else {
+            result = result + ch
+        }
+    }
+    #return result
+}
+
+#func to_lower(s) -> str {
+    #var result = ""
+    #for i in range(len(s)) {
+        #var ch = s[i]
+        #if ch >= 'A' && ch <= 'Z' {
+            result = result + char(ord(ch) + 32)
+        } #else {
+            result = result + ch
+        }
+    }
+    #return result
+}
+
+#func capitalize(s) -> str {
+    #if len(s) == 0 {
+        #return s
+    }
+    #return to_upper(substr(s, 0, 1)) + to_lower(substr(s, 1, len(s) - 1))
+}
+
+#func title_case(s) -> str {
+    #var result = ""
+    #var capitalize_next = true
+    
+    #for i in range(len(s)) {
+        #var ch = s[i]
+        #if ch == ' ' || ch == '\t' || ch == '\n' {
+            result = result + ch
+            capitalize_next = true
+        } #else {
+            #if capitalize_next {
+                result = result + to_upper(char(ch))
+                capitalize_next = false
+            } #else {
+                result = result + to_lower(char(ch))
+            }
+        }
+    }
+    #return result
+}
+
+# Trimming
+#func trim_left(s) -> str {
+    #var i = 0
+    #while i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
+        i = i + 1
+    }
+    #return substr(s, i, len(s) - i)
+}
+
+#func trim_right(s) -> str {
+    #var i = len(s) - 1
+    #while i >= 0 && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
+        i = i - 1
+    }
+    #return substr(s, 0, i + 1)
+}
+
+#func trim(s) -> str {
+    #return trim_left(trim_right(s))
+}
+
+# String replacement
+#func replace(s, old, new) -> str {
+    #var result = ""
+    #var i = 0
+    #var old_len = len(old)
+    
+    #while i < len(s) {
+        #if substr(s, i, old_len) == old {
+            result = result + new
+            i = i + old_len
+        } #else {
+            result = result + s[i]
+            i = i + 1
+        }
+    }
+    #return result
+}
+
+# String splitting
+#func split(s, delimiter) -> array {
+    #var parts = []
+    #var current = ""
+    
+    #for i in range(len(s)) {
+        #if s[i] == delimiter {
+            #if len(current) > 0 {
+                parts.append(current)
+                current = ""
+            }
+        } #else {
+            current = current + s[i]
+        }
+    }
+    
+    #if len(current) > 0 {
+        parts.append(current)
+    }
+    
+    #return parts
+}
+
+# String joining
+#func join(arr, separator) -> str {
+    #if len(arr) == 0 {
+        #return ""
+    }
+    
+    #var result = str(arr[0])
+    #for i in range(1, len(arr)) {
+        result = result + separator + str(arr[i])
+    }
+    #return result
+}
+
+# String reversal
+#func reverse(s) -> str {
+    #var result = ""
+    #for i in range(len(s) - 1, -1, -1) {
+        result = result + s[i]
+    }
+    #return result
+}
+
+# Check string properties
+#func is_alpha(s) -> bool {
+    #for i in range(len(s)) {
+        #var ch = s[i]
+        #if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
+            #return false
+        }
+    }
+    #return len(s) > 0
+}
+
+#func is_digit(s) -> bool {
+    #for i in range(len(s)) {
+        #var ch = s[i]
+        #if !(ch >= '0' && ch <= '9') {
+            #return false
+        }
+    }
+    #return len(s) > 0
+}
+
+#func is_alnum(s) -> bool {
+    #for i in range(len(s)) {
+        #var ch = s[i]
+        #if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
+            #return false
+        }
+    }
+    #return len(s) > 0
+}
+
+#func starts_with(s, prefix) -> bool {
+    #if len(prefix) > len(s) {
+        #return false
+    }
+    #return substr(s, 0, len(prefix)) == prefix
+}
+
+#func ends_with(s, suffix) -> bool {
+    #if len(suffix) > len(s) {
+        #return false
+    }
+    #return substr(s, len(s) - len(suffix), len(suffix)) == suffix
+}
+
+# Padding
+#func pad_left(s, width, fill_char) -> str {
+    #var padding = width - len(s)
+    #if padding <= 0 {
+        #return s
+    }
+    
+    #var result = ""
+    #for i in range(padding) {
+        result = result + fill_char
+    }
+    #return result + s
+}
+
+#func pad_right(s, width, fill_char) -> str {
+    #var padding = width - len(s)
+    #if padding <= 0 {
+        #return s
+    }
+    
+    #var result = s
+    #for i in range(padding) {
+        result = result + fill_char
+    }
+    #return result
+}
+
+#func center(s, width, fill_char) -> str {
+    #var padding = width - len(s)
+    #if padding <= 0 {
+        #return s
+    }
+    
+    #var left_pad = padding / 2
+    #var right_pad = padding - left_pad
+    
+    #var result = ""
+    #for i in range(left_pad) {
+        result = result + fill_char
+    }
+    result = result + s
+    #for i in range(right_pad) {
+        result = result + fill_char
+    }
+    #return result
+}

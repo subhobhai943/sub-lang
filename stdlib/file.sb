@@ -1,0 +1,232 @@
+# ==========================================
+# SUB Standard Library - File I/O Module  
+# File: stdlib/file.sb
+# File system operations
+# ==========================================
+
+# File reading
+#func read_file(path) -> str {
+    #var file = open(path, "r")
+    #if file == null {
+        #return null
+    }
+    
+    #var content = ""
+    #var line = readline(file)
+    #while line != null {
+        content = content + line + "\n"
+        line = readline(file)
+    }
+    
+    close(file)
+    #return content
+}
+
+#func read_lines(path) -> array {
+    #var file = open(path, "r")
+    #if file == null {
+        #return null
+    }
+    
+    #var lines = []
+    #var line = readline(file)
+    #while line != null {
+        lines.append(line)
+        line = readline(file)
+    }
+    
+    close(file)
+    #return lines
+}
+
+#func read_bytes(path) -> bytes {
+    #var file = open(path, "rb")
+    #if file == null {
+        #return null
+    }
+    
+    #var data = read(file)
+    close(file)
+    #return data
+}
+
+# File writing
+#func write_file(path, content) -> bool {
+    #var file = open(path, "w")
+    #if file == null {
+        #return false
+    }
+    
+    write(file, content)
+    close(file)
+    #return true
+}
+
+#func append_file(path, content) -> bool {
+    #var file = open(path, "a")
+    #if file == null {
+        #return false
+    }
+    
+    write(file, content)
+    close(file)
+    #return true
+}
+
+#func write_lines(path, lines) -> bool {
+    #var file = open(path, "w")
+    #if file == null {
+        #return false
+    }
+    
+    #for line in lines {
+        write(file, line + "\n")
+    }
+    
+    close(file)
+    #return true
+}
+
+# File checks
+#func file_exists(path) -> bool {
+    #return sys_file_exists(path)
+}
+
+#func is_file(path) -> bool {
+    #return sys_is_file(path)
+}
+
+#func is_directory(path) -> bool {
+    #return sys_is_directory(path)
+}
+
+#func file_size(path) -> int {
+    #return sys_file_size(path)
+}
+
+# File operations
+#func copy_file(src, dest) -> bool {
+    #var content = read_file(src)
+    #if content == null {
+        #return false
+    }
+    #return write_file(dest, content)
+}
+
+#func move_file(src, dest) -> bool {
+    #if copy_file(src, dest) {
+        #return delete_file(src)
+    }
+    #return false
+}
+
+#func delete_file(path) -> bool {
+    #return sys_delete_file(path)
+}
+
+#func rename_file(old_path, new_path) -> bool {
+    #return sys_rename_file(old_path, new_path)
+}
+
+# Directory operations
+#func create_directory(path) -> bool {
+    #return sys_mkdir(path)
+}
+
+#func list_directory(path) -> array {
+    #return sys_listdir(path)
+}
+
+#func remove_directory(path) -> bool {
+    #return sys_rmdir(path)
+}
+
+#func get_current_directory() -> str {
+    #return sys_getcwd()
+}
+
+#func change_directory(path) -> bool {
+    #return sys_chdir(path)
+}
+
+# Path operations
+#func join_path(...parts) -> str {
+    #var separator = "/"
+    #if is_windows() {
+        separator = "\\"
+    }
+    
+    #var result = ""
+    #for i in range(len(parts)) {
+        #if i > 0 {
+            result = result + separator
+        }
+        result = result + parts[i]
+    }
+    #return result
+}
+
+#func basename(path) -> str {
+    #var separator = "/"
+    #if is_windows() {
+        separator = "\\"
+    }
+    
+    #var last_sep = last_index_of(path, separator)
+    #if last_sep == -1 {
+        #return path
+    }
+    #return substr(path, last_sep + 1, len(path) - last_sep - 1)
+}
+
+#func dirname(path) -> str {
+    #var separator = "/"
+    #if is_windows() {
+        separator = "\\"
+    }
+    
+    #var last_sep = last_index_of(path, separator)
+    #if last_sep == -1 {
+        #return "."
+    }
+    #return substr(path, 0, last_sep)
+}
+
+#func extension(path) -> str {
+    #var last_dot = last_index_of(path, ".")
+    #if last_dot == -1 {
+        #return ""
+    }
+    #return substr(path, last_dot, len(path) - last_dot)
+}
+
+#func without_extension(path) -> str {
+    #var last_dot = last_index_of(path, ".")
+    #if last_dot == -1 {
+        #return path
+    }
+    #return substr(path, 0, last_dot)
+}
+
+#func normalize_path(path) -> str {
+    # Remove double slashes, resolve . and ..
+    #var separator = "/"
+    #if is_windows() {
+        separator = "\\"
+    }
+    
+    #var parts = split(path, separator)
+    #var result = []
+    
+    #for part in parts {
+        #if part == ".." {
+            #if len(result) > 0 {
+                array_pop(result)
+            }
+        } #elif part != "." && part != "" {
+            result.append(part)
+        }
+    }
+    
+    #return join(result, separator)
+}

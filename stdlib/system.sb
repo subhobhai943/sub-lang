@@ -1,0 +1,169 @@
+# ==========================================
+# SUB Standard Library - System Module
+# File: stdlib/system.sb
+# System utilities and environment
+# ==========================================
+
+# Process operations
+#func exit(code) {
+    sys_exit(code)
+}
+
+#func system(command) -> int {
+    #return sys_system(command)
+}
+
+#func execute(command, args) -> int {
+    #return sys_execute(command, args)
+}
+
+# Environment variables
+#func getenv(name) -> str {
+    #return sys_getenv(name)
+}
+
+#func setenv(name, value) -> bool {
+    #return sys_setenv(name, value)
+}
+
+#func unsetenv(name) -> bool {
+    #return sys_unsetenv(name)
+}
+
+# Time operations
+#func time() -> int {
+    # Returns current Unix timestamp
+    #return sys_time()
+}
+
+#func clock() -> float {
+    # Returns processor time
+    #return sys_clock()
+}
+
+#func sleep(seconds) {
+    sys_sleep(seconds)
+}
+
+#func sleep_ms(milliseconds) {
+    sys_sleep_ms(milliseconds)
+}
+
+# Date/Time formatting
+#func format_time(timestamp, format) -> str {
+    #return sys_strftime(timestamp, format)
+}
+
+#func parse_time(time_str, format) -> int {
+    #return sys_strptime(time_str, format)
+}
+
+# Platform detection
+#func platform() -> str {
+    #return sys_platform()
+}
+
+#func is_windows() -> bool {
+    #return platform() == "windows"
+}
+
+#func is_linux() -> bool {
+    #return platform() == "linux"
+}
+
+#func is_macos() -> bool {
+    #return platform() == "darwin"
+}
+
+#func arch() -> str {
+    #return sys_arch()
+}
+
+# Process information
+#func pid() -> int {
+    #return sys_getpid()
+}
+
+#func ppid() -> int {
+    #return sys_getppid()
+}
+
+#func username() -> str {
+    #return sys_getuser()
+}
+
+#func hostname() -> str {
+    #return sys_gethostname()
+}
+
+# Performance timing
+#func benchmark(func) -> float {
+    #var start = clock()
+    func()
+    #var end = clock()
+    #return end - start
+}
+
+#func time_it(func, iterations) -> float {
+    #var total = 0.0
+    #for i in range(iterations) {
+        total = total + benchmark(func)
+    }
+    #return total / iterations
+}
+
+# Memory information
+#func memory_usage() -> int {
+    #return sys_memory_usage()
+}
+
+# Command line arguments
+#func argc() -> int {
+    #return sys_argc()
+}
+
+#func argv(index) -> str {
+    #return sys_argv(index)
+}
+
+#func get_args() -> array {
+    #var args = []
+    #for i in range(argc()) {
+        args.append(argv(i))
+    }
+    #return args
+}
+
+# Signal handling
+#func signal(sig, handler) {
+    sys_signal(sig, handler)
+}
+
+# Constants for signals
+#const SIGINT = 2
+#const SIGTERM = 15
+#const SIGKILL = 9
+#const SIGUSR1 = 10
+#const SIGUSR2 = 12
+
+# Error handling
+#func last_error() -> str {
+    #return sys_strerror(sys_errno())
+}
+
+#func errno() -> int {
+    #return sys_errno()
+}
+
+# Assertion
+#func assert(condition, message) {
+    #if !condition {
+        eprintln("Assertion failed: " + message)
+        exit(1)
+    }
+}
+
+#func panic(message) {
+    eprintln("PANIC: " + message)
+    exit(1)
+}
