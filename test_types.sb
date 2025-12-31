@@ -1,0 +1,18 @@
+# Simple type checking test
+
+var x = 5
+var y = 10
+
+print(x + y)
+
+var name = "hello"
+print(name + " world")
+
+if x > y then
+    print("x is greater")
+end
+
+# This should cause a type error: int + string
+# var error = 5 + "hello"
+
+print("Test complete")

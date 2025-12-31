@@ -11,7 +11,7 @@ NATIVE_OBJECTS = $(NATIVE_SOURCES:.c=.o)
 NATIVE_TARGET = subc-native
 
 # Source files for transpiler
-TRANS_SOURCES = sub_multilang.c lexer.c parser_enhanced.c semantic.c codegen.c codegen_multilang.c codegen_rust.c type_system.c error_handler.c codegen_cpp.c targets.c
+TRANS_SOURCES = sub_multilang.c lexer.c parser_enhanced.c semantic.c codegen.c codegen_multilang.c type_system.c error_handler.c
 TRANS_OBJECTS = $(TRANS_SOURCES:.c=.o)
 TRANS_TARGET = sublang
 

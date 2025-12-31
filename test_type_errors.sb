@@ -1,0 +1,65 @@
+# Test file to demonstrate strict type checking
+# This file should trigger type errors
+
+# Test 1: Int + String - should error
+var x = 5 + "hello"
+
+# Test 2: If with non-boolean - should error
+var y = 10
+if y then
+    print("this is wrong")
+end
+
+# Test 3: String + String - OK
+var a = "hello" + "world"
+
+# Test 4: String + Int - OK (concatenation)
+var b = "age: " + 25
+
+# Test 5: Int + Int - OK
+var c = 5 + 10
+
+# Test 6: Logical and with non-bool - should error
+var d = 5
+if d and 10 then
+    print("wrong type")
+end
+
+# Test 7: Comparison with different types - should error
+if 5 > "hello" then
+    print("cannot compare")
+end
+
+# Test 8: Array access with non-int index - should error
+var arr = [1, 2, 3]
+var idx = "wrong"
+var e = arr[idx]
+
+# Test 9: Array access with int - OK
+var f = arr[0]
+
+# Test 10: Ternary with incompatible types - should error
+var g = (5 > 3) ? "string" : 123
+
+# Test 11: Ternary with compatible types - OK
+var h = (5 > 3) ? 10 : 20
+
+# Test 12: Assign wrong type to existing var - should error
+var i = 5
+i = "now a string"
+
+# Test 13: Correct reassignment - OK
+var j = 10
+j = 20
+
+# Test 14: Const reassignment - should error
+const k = 100
+k = 200
+
+# Test 15: Division by type mismatch - should error
+var l = 5 / "hello"
+
+# Test 16: Correct division - OK
+var m = 10 / 2
+
+print("Type checking test complete")

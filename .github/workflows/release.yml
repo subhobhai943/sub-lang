@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., v1.0.5)'
+        description: 'Version to release (e.g., v1.0.6)'
         required: true
         type: string
 
@@ -53,25 +53,26 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           make clean
-          make
+          make transpiler
           chmod +x sublang
           mv sublang ${{ matrix.artifact_name }}
 
       - name: Build transpiler (Windows)
         if: runner.os == 'Windows'
         run: |
-          cl /I. sub_multilang.c parser.c lexer.c semantic.c codegen.c codegen_multilang.c /Fe:${{ matrix.artifact_name }}
+          cl /I. sub_multilang.c parser_enhanced.c lexer.c semantic.c codegen.c codegen_multilang.c type_system.c /Fe:${{ matrix.artifact_name }}
 
       - name: Build native compiler (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
-          gcc -o ${{ matrix.native_name }} sub_native_compiler.c parser.c lexer.c semantic.c ir.c codegen_x64.c
-          chmod +x ${{ matrix.native_name }}
+          make native
+          chmod +x subc-native
+          mv subc-native ${{ matrix.native_name }}
 
       - name: Build native compiler (Windows)
         if: runner.os == 'Windows'
         run: |
-          cl /I. sub_native_compiler.c parser.c lexer.c semantic.c ir.c codegen_x64.c /Fe:${{ matrix.native_name }}
+          cl /I. sub_native_compiler.c parser_enhanced.c lexer.c semantic.c ir.c codegen_x64.c /Fe:${{ matrix.native_name }}
 
       - name: Upload transpiler artifact
         uses: actions/upload-artifact@v4
@@ -113,35 +114,61 @@ jobs:
             echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Read release notes
+      - name: Generate release notes
         id: release_notes
         run: |
-          if [ -f "RELEASE_NOTES_${{ steps.version.outputs.VERSION }}.md" ]; then
-            cat "RELEASE_NOTES_${{ steps.version.outputs.VERSION }}.md" > release_notes.md
-          else
-            cat > release_notes.md << 'EOF'
+          cat > release_notes.md << 'EOF'
           ## 🎉 SUB Language ${{ steps.version.outputs.VERSION }}
           
-          ### 🐛 Native Compiler Bug Fixes & Stability
+          ### ⚡ Production-Ready Native Compiler
           
-          **Release Date**: December 30, 2025  
-          **Type**: Bug Fix Release  
-          **Focus**: Native x86-64 Compiler Stability
+          **Release Date**: December 31, 2025  
+          **Type**: Major Feature Release  
+          **Focus**: Native x86-64 Compiler + Enhanced Parser
           
-          #### ✅ Bugs Fixed (5 Critical Issues)
+          #### ✨ What's New
           
-          1. **Fixed Enum Name Conflicts** - Renamed `REG_*` to `X64_REG_*`
-          2. **Fixed Duplicate Function** - Renamed `read_file()` to `read_file_native()`
-          3. **Fixed AST Node Types** - Updated `NODE_*` to `AST_*`
-          4. **Fixed Field Access** - Changed `node->name` to `node->value`
-          5. **Fixed Duplicate Label** - Generate unique return labels
+          **1. Native x86-64 Compiler** 🚀
+          - Direct assembly generation for Linux/macOS/Windows
+          - Stack-based variable management
+          - Full control flow support (if/else, while loops)
+          - Arithmetic operations with correct precedence
+          - Native binary compilation with zero dependencies
+          
+          **2. Intermediate Representation (IR)** 🏗️
+          - Clean separation of parsing and code generation
+          - Optimizable IR layer for future enhancements
+          - Better architecture for multi-platform support
+          
+          **3. Enhanced Parser** 📝
+          - Fixed operator precedence (PEMDAS)
+          - Proper block handling with braces
+          - Expression statement support
+          - Better error handling
+          
+          **4. Type System** 🔒
+          - Improved type safety
+          - Type inference for expressions
+          - Target language type mapping
+          
+          **5. Comprehensive Test Suite** ✅
+          - Universal test validation
+          - Multi-language transpilation tests
+          - Automated verification pipeline
+          
+          #### 🐛 Bug Fixes
+          
+          - Fixed infinite loops in parser
+          - Resolved variable assignment logic errors
+          - Corrected operator precedence handling
+          - Fixed enum name conflicts
+          - Resolved duplicate function definitions
           
           #### 📦 What's Included
           
           - **Native Compiler** (`subc-native`) - Compiles to x86-64 machine code
-          - **Transpiler** (`sublang`) - Converts to 12+ languages
-          - **Full Windows/MSVC Support**
-          - **Linux & macOS Support**
+          - **Transpiler** (`sublang`) - Converts to 12+ languages (Python, JS, Java, C++, Rust, Swift, Kotlin, Ruby, etc.)
+          - **Full Cross-Platform Support** - Windows, Linux, macOS
           
           #### 🚀 Installation
           
@@ -164,11 +191,14 @@ jobs:
           python3 output.py
           ```
           
+          #### 🙏 Contributors
+          
+          Special thanks to [@Ratkiller446](https://github.com/Ratkiller446) for the amazing contribution in PR #5!
+          
           ---
           
-          **Full Changelog**: https://github.com/${{ github.repository }}/compare/v1.0.4...${{ steps.version.outputs.VERSION }}
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/v1.0.5...${{ steps.version.outputs.VERSION }}
           EOF
-          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
