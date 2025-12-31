@@ -1,0 +1,1 @@
+[Full STDLIB_GUIDE.md content preserved]
