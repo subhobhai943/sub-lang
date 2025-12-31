@@ -117,11 +117,11 @@ int compile_to_native(const char *input_file, const char *output_file) {
     // Phase 7: Assemble and Link
     printf("[7/7] 🔗 Assembling and linking...\n");
     
+    char obj_file[256];
     char cmd[512];
     
 #ifdef _WIN32
     // Windows: Use MSVC assembler (ml64) and linker
-    char obj_file[256];
     snprintf(obj_file, sizeof(obj_file), "%s.obj", output_file);
     snprintf(cmd, sizeof(cmd), "ml64 /c /Fo%s %s", obj_file, asm_file);
     if (execute_command(cmd) != 0) {

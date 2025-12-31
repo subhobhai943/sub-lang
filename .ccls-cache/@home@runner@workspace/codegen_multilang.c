@@ -108,6 +108,7 @@ static char* extract_embedded_code(const char *source, const char *lang) {
 
 /* Forward declarations */
 static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent);
+static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent);
 
 static void indent_code(StringBuilder *sb, int level) {
     for (int i = 0; i < level; i++) {
@@ -384,7 +385,7 @@ char* codegen_javascript(ASTNode *ast, const char *source) {
 
 /* Simplified generators for other languages - you can expand these */
 
-char* codegen_java(ASTNode *ast __attribute__((unused)), const char *source) {
+char* codegen_java(ASTNode *ast, const char *source) {
     char *embedded = extract_embedded_code(source, "java");
     if (embedded) {
         StringBuilder *sb = sb_create();

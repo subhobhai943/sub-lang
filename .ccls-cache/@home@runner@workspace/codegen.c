@@ -273,7 +273,7 @@ static char* generate_c_code(ASTNode *ast) {
 
 /* Platform-specific code generation */
 
-static char* generate_android(ASTNode *ast __attribute__((unused))) {
+static char* generate_android(ASTNode *ast) {
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     
@@ -299,7 +299,7 @@ static char* generate_android(ASTNode *ast __attribute__((unused))) {
     return sb_to_string(sb);
 }
 
-static char* generate_ios(ASTNode *ast __attribute__((unused))) {
+static char* generate_ios(ASTNode *ast) {
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     
@@ -321,7 +321,7 @@ static char* generate_ios(ASTNode *ast __attribute__((unused))) {
     return sb_to_string(sb);
 }
 
-static char* generate_web(ASTNode *ast __attribute__((unused))) {
+static char* generate_web(ASTNode *ast) {
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     
@@ -406,7 +406,7 @@ char* codegen_generate(ASTNode *ast, Platform platform) {
 }
 
 /* Generate C++ code from AST */
-char* codegen_generate_cpp(ASTNode *ast __attribute__((unused)), Platform platform __attribute__((unused))) {
+char* codegen_generate_cpp(ASTNode *ast, Platform platform) {
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     
@@ -428,6 +428,6 @@ char* codegen_generate_cpp(ASTNode *ast __attribute__((unused)), Platform platfo
 }
 
 /* Generate regular C code */
-char* codegen_generate_c(ASTNode *ast __attribute__((unused)), Platform platform __attribute__((unused))) {
+char* codegen_generate_c(ASTNode *ast, Platform platform) {
     return generate_c_code(ast);
 }
