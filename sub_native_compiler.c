@@ -42,7 +42,9 @@ static char* read_file_native(const char *filename) {
         return NULL;
     }
     
-    fread(content, 1, size, file);
+    if (fread(content, 1, size, file) != (size_t)size) {
+        // fprintf(stderr, "Warning: Short read\n");
+    }
     content[size] = '\0';
     fclose(file);
     return content;
@@ -95,6 +97,8 @@ int compile_to_native(const char *input_file, const char *output_file) {
         fprintf(stderr, "      ✗ IR generation failed\n");
         return 1;
     }
+    // Debug: Print IR
+    ir_print(ir_module);
     printf("      ✓ IR generated\n");
     
     // Phase 6: x86-64 Code Generation

@@ -1,261 +1,67 @@
-# ✅ SUB Language Transformation Complete!
+# SUB Language Transformation Summary
 
-## What We Built
+This document summarizes the major changes and enhancements made to the SUB language compiler, focusing on the implementation of a native verification pipeline and robust x86-64 code generation.
 
-SUB is now a **REAL PROGRAMMING LANGUAGE** that compiles to native machine code!
+## 1. Native Compiler Implementation (x86-64)
 
-### Before ❌
-- Just a transpiler (SUB → Python/Java/etc)
-- No value proposition ("Why not just use Python?")
-- Depends on interpreters/runtimes
-- Slow execution
+We have successfully implemented a functional native compiler capable of generating Linux x86-64 assembly.
 
-### After ✅
-- Full compiler (SUB → IR → Assembly → Machine Code)
-- Standalone native binaries
-- C-like performance
-- Zero dependencies
-- Still supports transpilation as bonus feature
+### Key Components:
+- **`codegen_x64.c`**: A new backend that translates Intermediate Representation (IR) into x86-64 assembly.
+  - Implements stack-based variable storage (variables are stored at `rbp - offset`).
+  - Supports arithmetic operations (`+`, `-`, `*`, `/`) using stack logic to ensure correct register usage.
+  - Implements control flow: `if`, `else`, `while` loops using labels and conditional jumps (`cmp`, `je`, `jmp`).
+  - Implements `print(...)` using `printf` from libc.
+- **`ir.c` & `ir.h`**: A new Intermediate Representation layer.
+  - Decouples parsing from code generation.
+  - Converts AST into a linear sequence of instructions (`IR_LOAD`, `IR_STORE`, `IR_ADD`, `IR_JUMP_IF_NOT`, etc.).
+  - Handles variable resolution and scope management.
+- **`sub_native_compiler.c`**: The driver program for the native compiler.
+  - Links `lexer`, `parser_enhanced`, `semantic`, `ir`, and `codegen_x64`.
 
-## Architecture Created
+## 2. Parser Enhancements (`parser_enhanced.c`)
 
-```
-SUB Source Code (.sb)
-        ↓
-    Lexer & Parser
-        ↓
-    AST (Abstract Syntax Tree)
-        ↓
-    Semantic Analysis
-        ↓
-    IR Generation (NEW!)
-        ↓
-    IR Optimization (NEW!)
-        ↓
-    x86-64 Code Generator (NEW!)
-        ↓
-    Assembly Code
-        ↓
-    Assembler & Linker
-        ↓
-Native Executable (ELF/PE/Mach-O)
-```
+The parser was significantly refactored to support complex control flow and fix critical bugs.
 
-## New Files Created
+### Fixes & Features:
+- **Statement Parsing**: Fixed the main loop to parse statements correctly without requiring a `#` prefix.
+- **Operator Precedence**: Implemented strict precedence climbing (PEMDAS) to fix logic errors (e.g., `x = x - 1` previously parsed incorrectly).
+- **Block Handling**: Updated `parse_block` to correctly handle brace-delimited blocks (`{ ... }`) for `if`, `while`, and functions.
+- **Expression Statements**: Added support for generic expression statements (assignments, function calls) as top-level statements.
 
-### Core Compiler
-1. **ir.h** - Intermediate Representation definitions
-2. **ir.c** - IR generator from AST
-3. **codegen_native.h** - Native code generator interface
-4. **codegen_native.c** - x86-64 assembly generator
-5. **sub_native.c** - Native compiler driver
-6. **windows_compat.h** - Cross-platform compatibility
+## 3. Testing Infrastructure
 
-### Documentation
-7. **NATIVE_COMPILATION.md** - Complete native compilation guide
-8. **QUICKSTART.md** - 5-minute getting started guide
-9. **Makefile** - Build system for both compilers
-10. **TRANSFORMATION_SUMMARY.md** - This document
+We introduced a comprehensive verification suite.
 
-### Examples
-11. **examples/hello_native.sb** - Native compilation demo
+- **`examples/universal_test.sb`**: A "Rosetta Stone" test file that verifies:
+  - Integer arithmetic and printing.
+  - Variable assignment and state updates.
+  - Conditional logic (`if/else`).
+  - Iterative logic (`while` loops).
+- **`tests/run_tests.py`**: A validation script that:
+  - Compiles `subc-native`.
+  - Transpiles to Python, JS, etc. (regression testing).
+  - Runs the native binary and verifies output matches expected results.
 
-## Two Compilers, One Language
+## 4. Build System
 
-### 1. Native Compiler (`subc`)
-```bash
-./subc program.sb      # → a.out (native binary)
-./a.out                # Runs at C speed!
-```
+- **`Makefile`**: Updated to build both:
+  - `subc-native`: The native compiler.
+  - `sublang`: The multi-language transpiler.
+  - Uses `parser_enhanced.c` for both targets to ensure consistency.
 
-**Features:**
-- Compiles to machine code
-- No runtime dependencies
-- Fast execution (~12ms for Fib(30))
-- Small binaries (~50KB)
-- Cross-platform (Linux/macOS/Windows)
-
-### 2. Transpiler (`sublang`)
-```bash
-./sublang program.sb python    # → output.py
-python output.py              # Runs with Python
-```
-
-**Features:**
-- Transpiles to 10+ languages
-- Ecosystem integration
-- Learning tool
-- Web/mobile support
-
-## Performance Metrics
-
-| Benchmark | Native SUB | Python | JavaScript | C |
-|-----------|-----------|---------|-----------|---|
-| Fib(30) | **12ms** | 420ms (35x slower) | 35ms (3x slower) | 11ms |
-| Startup | Instant | ~50ms | ~30ms | Instant |
-| Memory | 2MB | 15MB | 8MB | 2MB |
-
-**Result: Native SUB runs at 95% of C speed!**
-
-## Compilation Pipeline
-
-### Input (SUB Code)
-```sub
-#var x = 10
-#var y = 20
-#var sum = x + y
-#print(sum)
-```
-
-### Step 1: IR
-```ir
-function main() -> int {
-  move r0, 10
-  move r1, 20
-  r2 = add r0, r1
-  call print
-  return 0
-}
-```
-
-### Step 2: Assembly
-```asm
-main:
-    push rbp
-    mov rbp, rsp
-    mov rax, 10
-    mov rbx, 20
-    add rax, rbx
-    mov rdi, rax
-    call printf
-    mov rax, 0
-    pop rbp
-    ret
-```
-
-### Step 3: Binary
-```
-ELF Header + Code + Data → a.out (executable)
-```
-
-## Why This Matters
-
-### The Problem We Solved
-**Before:** "SUB just converts to Python. Why not write Python directly?"  
-**After:** "SUB compiles to native code and runs as fast as C!"
-
-### Real Value Propositions
-1. **Easy Syntax** - Blockchain-style # syntax
-2. **Native Speed** - Compiles to machine code
-3. **No Dependencies** - Standalone executables
-4. **Cross-Platform** - Linux/macOS/Windows
-5. **Multi-Target** - Can still transpile if needed
-6. **Learning Tool** - See IR, assembly, and machine code
-7. **Production Ready** - Real compiler, not toy
-
-## Build & Run
-
-```bash
-# Build both compilers
-make
-
-# Native compilation
-./subc hello.sb
-./a.out
-
-# Transpilation
-./sublang hello.sb python
-python output.py
-
-# With optimization
-./subc program.sb -O3 -o fast_app
-./fast_app
-
-# View internals
-./subc program.sb -emit-ir    # See IR
-./subc program.sb -S          # See assembly
-```
-
-## Supported Platforms
+## Usage
 
 ### Native Compilation
-- ✅ Linux x86-64
-- ✅ macOS x86-64
-- ✅ Windows x86-64
-- 🚧 ARM64 (planned)
-- 🚧 RISC-V (planned)
+```bash
+make native
+./subc-native examples/universal_test.sb my_program
+./my_program
+```
 
 ### Transpilation
-- ✅ Python, JavaScript, Java
-- ✅ C, C++, Rust
-- ✅ Swift, Kotlin, Ruby
-- ✅ Go, TypeScript, CSS
-
-## Technical Highlights
-
-### IR Design
-- Platform-independent
-- Easy to optimize
-- Similar to LLVM IR
-- SSA-like structure
-
-### Code Generation
-- Direct x86-64 assembly
-- Register allocation
-- Stack management
-- Calling conventions
-- System V ABI (Linux/macOS)
-- Windows x64 ABI
-
-### Optimizations (Current)
-- Constant folding
-- Dead code elimination
-- Register allocation
-- Strength reduction
-
-### Optimizations (Planned)
-- Loop unrolling
-- Function inlining
-- Tail call optimization
-- SIMD vectorization
-
-## Next Steps
-
-### v1.0.4 Release (Current)
-- ✅ Windows compatibility
-- ✅ Native compilation
-- ✅ IR implementation
-- ✅ x86-64 codegen
-
-### v1.1.0 (Next)
-- [ ] ARM64 support
-- [ ] Better optimizations
-- [ ] Debugger support
-- [ ] Standard library
-
-### v2.0.0 (Future)
-- [ ] LLVM backend option
-- [ ] WebAssembly target
-- [ ] JIT compilation
-- [ ] Generics and traits
-
-## Conclusion
-
-SUB is now a **REAL PROGRAMMING LANGUAGE**!
-
-✅ Compiles to native machine code  
-✅ Runs at C-like speed  
-✅ Zero dependencies  
-✅ Cross-platform  
-✅ Easy syntax  
-✅ Production-ready  
-
-**Users can now answer:** "Why use SUB instead of Python?"  
-**Answer:** "Because SUB compiles to native code and runs 35x faster!"
-
----
-
-**Status**: Production Ready  
-**Version**: 1.0.4  
-**Date**: December 29, 2025  
-**Achievement**: 🎉 SUB is a real compiler!
+```bash
+make transpiler
+./sublang examples/universal_test.sb python
+python3 examples/universal_test.py
+```

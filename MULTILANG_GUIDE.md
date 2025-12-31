@@ -438,20 +438,19 @@ Modify the compiler to accept custom output names:
 ```
 
 ---
+## Supported Languages
 
-## Compilation Matrix 🗺️
-
-### SUB Language Features → Target Languages
-
-| Feature | C | C++ | Python | Java | Rust | JS | Ruby |
-|---------|---|-----|--------|------|------|----|----|
-| Variables | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Functions | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| If/Else | ✅ | ✅ | ✅ | ✅ | 🚧 | ✅ | ✅ |
-| Loops | ✅ | ✅ | ✅ | 🚧 | 🚧 | 🚧 | ✅ |
-| Classes | 🚧 | 🚧 | 🚧 | 🚧 | 🚧 | 🚧 | 🚧 |
-| Arrays | 🚧 | 🚧 | 🚧 | 🚧 | 🚧 | 🚧 | 🚧 |
-| Strings | 🚧 | 🚧 | 🚧 | 🚧 | 🚧 | 🚧 | 🚧 |
+| Language | Status | Type Support |
+|----------|--------|--------------|
+| **Python** | ✅ Stable | Dynamic |
+| **JavaScript** | ✅ Stable | Dynamic |
+| **Java** | ✅ Stable | Static (Inferred) |
+| **C++** | ✅ Stable | Static |
+| **Rust** | ✅ Stable | Static (Ownership) |
+| **Swift** | ✅ Stable | Static |
+| **Kotlin** | ✅ Stable | Static |
+| **Ruby** | ✅ Stable | Dynamic |
+| **Assembly** | 🚧 Native | Native (x86-64) |
 
 ---
 

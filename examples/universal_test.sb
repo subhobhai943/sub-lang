@@ -1,0 +1,22 @@
+# SUB Universal Test (Native Compiler)
+
+print(123456789)
+
+var x = 10
+var y = 20
+var sum = x + y
+print(sum)
+
+if (sum > 25) {
+    print(1) # True
+} else {
+    print(0) # False
+}
+
+var counter = 5
+while (counter > 0) {
+    print(counter)
+    counter = counter - 1
+}
+
+print(999)

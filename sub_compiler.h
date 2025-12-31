@@ -167,7 +167,10 @@ typedef enum {
     AST_ARRAY_LITERAL,
     AST_OBJECT_LITERAL,
     AST_MEMBER_ACCESS,
-    AST_ARRAY_ACCESS
+    AST_ARRAY_ACCESS,
+    AST_RANGE_EXPR,       // range(n) or range(start, end)
+    AST_ARRAY_ITERATION,  // for item in collection
+    AST_PARAM_DECL        // Function parameter declaration
 } ASTNodeType;
 
 /* AST Node Structure */

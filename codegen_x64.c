@@ -105,6 +105,8 @@ static void x64_generate_prologue(X64Context *ctx) {
     fprintf(ctx->output, "# Architecture: x86-64\n\n");
     
     fprintf(ctx->output, ".section .rodata\n");
+    fprintf(ctx->output, ".LC0:\n");
+    fprintf(ctx->output, "    .string \"%%ld\\n\"\n");
     fprintf(ctx->output, ".section .data\n");
     fprintf(ctx->output, ".section .text\n");
     fprintf(ctx->output, ".global main\n\n");
@@ -150,37 +152,108 @@ void x64_generate_instruction(X64Context *ctx, IRInstruction *instr) {
             }
             break;
             
+        case IR_PUSH:
+             x64_emit(ctx, "pushq %%rax");
+             break;
+
         case IR_ADD:
             x64_emit_comment(ctx, "ADD operation");
+            x64_emit(ctx, "popq %%rbx"); // Pop left operand
             x64_emit(ctx, "addq %%rbx, %%rax");
             break;
             
         case IR_SUB:
             x64_emit_comment(ctx, "SUB operation");
-            x64_emit(ctx, "subq %%rbx, %%rax");
+            x64_emit(ctx, "movq %%rax, %%rbx"); // Right operand -> RBX
+            x64_emit(ctx, "popq %%rax");        // Left operand -> RAX
+            x64_emit(ctx, "subq %%rbx, %%rax"); // Left - Right
             break;
             
         case IR_MUL:
             x64_emit_comment(ctx, "MUL operation");
+            x64_emit(ctx, "popq %%rbx");
             x64_emit(ctx, "imulq %%rbx, %%rax");
             break;
             
         case IR_DIV:
             x64_emit_comment(ctx, "DIV operation");
-            x64_emit(ctx, "cqto");  // Sign extend RAX to RDX:RAX
+            x64_emit(ctx, "movq %%rax, %%rbx"); // Right -> RBX (divisor)
+            x64_emit(ctx, "popq %%rax");        // Left -> RAX (dividend)
+            x64_emit(ctx, "cqto");
             x64_emit(ctx, "idivq %%rbx");
             break;
             
         case IR_RETURN:
             if (instr->src1) {
-                // Return value already in RAX
+                if (instr->src1->type == IR_TYPE_INT) {
+                     x64_emit(ctx, "movq $%ld, %%rax", instr->src1->data.int_val);
+                }
             }
             x64_emit(ctx, "jmp %s_return", instr->comment ? instr->comment : "main");
             break;
+
+        case IR_ALLOC:
+            x64_emit_comment(ctx, "Alloc variable (noop, stack reserved)");
+            break;
+            
+        case IR_STORE:
+            x64_emit_comment(ctx, "Store variable");
+            // dest is the variable register (index), src implicitly in RAX from previous expr
+            // Stack offset = (reg_num + 1) * 8
+            if (instr->dest) {
+                int offset = (instr->dest->data.reg_num + 1) * 8;
+                x64_emit(ctx, "movq %%rax, -%d(%%rbp)", offset);
+            }
+            break;
+            
+        case IR_LOAD:
+            x64_emit_comment(ctx, "Load variable");
+            // src1 is the variable register
+            if (instr->src1) {
+                int offset = (instr->src1->data.reg_num + 1) * 8;
+                x64_emit(ctx, "movq -%d(%%rbp), %%rax", offset);
+            }
+            break;
             
         case IR_PRINT:
-            x64_emit_comment(ctx, "Print (placeholder)");
-            // TODO: Call printf or custom print function
+            x64_emit_comment(ctx, "Print integer");
+            // Assuming the value to print is in RAX (from previous instruction)
+            x64_emit(ctx, "movq %%rax, %%rsi"); // 2nd argument: value to print
+            x64_emit(ctx, "leaq .LC0(%%rip), %%rdi"); // 1st argument: format string
+            x64_emit(ctx, "xorq %%rax, %%rax"); // Clear RAX (no vector args)
+            x64_emit(ctx, "call printf@PLT");
+            break;
+            
+        case IR_JUMP_IF_NOT:
+            x64_emit_comment(ctx, "Jump if false (0)");
+            x64_emit(ctx, "cmpq $0, %%rax");
+            if (instr->dest && instr->dest->data.label) {
+                x64_emit(ctx, "je %s", instr->dest->data.label);
+            }
+            break;
+
+        case IR_EQ:
+        case IR_NE:
+        case IR_LT:
+        case IR_LE:
+        case IR_GT:
+        case IR_GE:
+            x64_emit_comment(ctx, "Comparison");
+            x64_emit(ctx, "movq %%rax, %%rbx"); // Right -> RBX
+            x64_emit(ctx, "popq %%rax");        // Left -> RAX
+            x64_emit(ctx, "cmpq %%rbx, %%rax"); // Compare Left (RAX) vs Right (RBX)
+            x64_emit(ctx, "movq $0, %%rax");    // Default false
+            const char *set_instr = "sete"; // Default EQ
+            switch(instr->opcode) {
+                case IR_EQ: set_instr = "sete"; break;
+                case IR_NE: set_instr = "setne"; break;
+                case IR_LT: set_instr = "setl"; break;
+                case IR_LE: set_instr = "setle"; break;
+                case IR_GT: set_instr = "setg"; break;
+                case IR_GE: set_instr = "setge"; break;
+                default: break;
+            }
+            x64_emit(ctx, "%s %%al", set_instr);
             break;
             
         case IR_LABEL:

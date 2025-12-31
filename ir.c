@@ -160,7 +160,12 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
     
     switch (node->type) {
         case AST_PROGRAM:
-            // Process all children
+            // fprintf(stderr, "DEBUG: Visiting AST_PROGRAM (left=%p, children=%d)\n", node->left, node->child_count);
+            // Process linked list of statements (via node->left)
+            for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
+                ir_generate_from_ast_node(func, stmt);
+            }
+            // Also check children if any (hybrid approach)
             for (int i = 0; i < node->child_count; i++) {
                 ir_generate_from_ast_node(func, node->children[i]);
             }
@@ -174,8 +179,11 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
             ir_function_add_instruction(func, alloc);
             
             // If there's an initializer, store it
-            if (node->child_count > 0) {
-                ir_generate_from_ast_node(func, node->children[0]);
+            if (node->child_count > 0 || node->right) {
+                if (node->child_count > 0)
+                    ir_generate_from_ast_node(func, node->children[0]);
+                else
+                    ir_generate_from_ast_node(func, node->right);
                 
                 IRInstruction *store = ir_instruction_create(IR_STORE);
                 store->dest = alloc->dest;
@@ -187,8 +195,13 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
         case AST_CALL_EXPR:
             if (node->value && strcmp(node->value, "print") == 0) {
                 // Generate code for arguments
+                // Check children array (legacy/multi-arg)
                 for (int i = 0; i < node->child_count; i++) {
                     ir_generate_from_ast_node(func, node->children[i]);
+                }
+                // Check left (enhanced parser single arg)
+                if (node->child_count == 0 && node->left) {
+                    ir_generate_from_ast_node(func, node->left);
                 }
                 
                 IRInstruction *print = ir_instruction_create(IR_PRINT);
@@ -197,8 +210,45 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
             break;
             
         case AST_BINARY_EXPR: {
-            // Generate left and right operands
+            // Check for assignment (=)
+            if (node->value && strcmp(node->value, "=") == 0) {
+                // Left side must be identifier
+                if (node->left && node->left->type == AST_IDENTIFIER && node->left->value) {
+                    // Find variable register
+                     int reg_num = -1;
+                    IRInstruction *scan = func->instructions;
+                    while (scan) {
+                        if (scan->opcode == IR_ALLOC && scan->dest && 
+                            scan->dest->name && strcmp(scan->dest->name, node->left->value) == 0) {
+                            reg_num = scan->dest->data.reg_num;
+                            break;
+                        }
+                        scan = scan->next;
+                    }
+                    
+                    if (reg_num != -1) {
+                        // Generate right side (value)
+                        if (node->right) ir_generate_from_ast_node(func, node->right);
+                        
+                        // Store result to variable
+                        IRInstruction *store = ir_instruction_create(IR_STORE);
+                        store->dest = ir_value_create_reg(reg_num, IR_TYPE_INT);
+                        ir_function_add_instruction(func, store);
+                    } else {
+                        fprintf(stderr, "Warning: Assignment to undefined variable %s\n", node->left->value);
+                    }
+                }
+                break;
+            }
+
+            // Generate left operand
             if (node->left) ir_generate_from_ast_node(func, node->left);
+            
+            // Push left result (RAX) to stack
+            IRInstruction *push = ir_instruction_create(IR_PUSH);
+            ir_function_add_instruction(func, push);
+            
+            // Generate right operand
             if (node->right) ir_generate_from_ast_node(func, node->right);
             
             // Determine operation
@@ -208,6 +258,12 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
                 else if (strcmp(node->value, "-") == 0) op = IR_SUB;
                 else if (strcmp(node->value, "*") == 0) op = IR_MUL;
                 else if (strcmp(node->value, "/") == 0) op = IR_DIV;
+                else if (strcmp(node->value, ">") == 0) op = IR_GT;
+                else if (strcmp(node->value, "<") == 0) op = IR_LT;
+                else if (strcmp(node->value, ">=") == 0) op = IR_GE;
+                else if (strcmp(node->value, "<=") == 0) op = IR_LE;
+                else if (strcmp(node->value, "==") == 0) op = IR_EQ;
+                else if (strcmp(node->value, "!=") == 0) op = IR_NE;
             }
             
             IRInstruction *bin_op = ir_instruction_create(op);
@@ -229,8 +285,120 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
             break;
         }
             
+        case AST_IF_STMT: {
+            // Generate condition
+            ir_generate_from_ast_node(func, node->condition);
+            
+            // Assume the result of condition is in the last register
+            IRValue *cond_reg = ir_value_create_reg(func->reg_count - 1, IR_TYPE_INT);
+            
+            // Create labels
+            char label_else[32], label_end[32];
+            static int label_counter = 0;
+            snprintf(label_else, sizeof(label_else), "L_ELSE_%d", label_counter);
+            snprintf(label_end, sizeof(label_end), "L_END_%d", label_counter++);
+            
+            // Jump to else if condition is false (0)
+            IRInstruction *jump_if_false = ir_instruction_create(IR_JUMP_IF_NOT);
+            jump_if_false->src1 = cond_reg;
+            jump_if_false->dest = ir_value_create_label(node->right ? label_else : label_end);
+            ir_function_add_instruction(func, jump_if_false);
+            
+            // Generate 'then' block
+            ir_generate_from_ast_node(func, node->body);
+            
+            // Jump to end
+            IRInstruction *jump_end = ir_instruction_create(IR_JUMP);
+            jump_end->dest = ir_value_create_label(label_end);
+            ir_function_add_instruction(func, jump_end);
+            
+            // Generate 'else' block if it exists
+            if (node->right) {
+                IRInstruction *label_instr = ir_instruction_create(IR_LABEL);
+                label_instr->dest = ir_value_create_label(label_else);
+                ir_function_add_instruction(func, label_instr);
+                
+                ir_generate_from_ast_node(func, node->right);
+            }
+            
+            // End label
+            IRInstruction *label_end_instr = ir_instruction_create(IR_LABEL);
+            label_end_instr->dest = ir_value_create_label(label_end);
+            ir_function_add_instruction(func, label_end_instr);
+            break;
+        }
+            
+        case AST_WHILE_STMT: {
+            // Create labels
+            char label_start[32], label_end[32];
+            static int loop_counter = 0;
+            snprintf(label_start, sizeof(label_start), "L_LOOP_%d", loop_counter);
+            snprintf(label_end, sizeof(label_end), "L_LOOP_END_%d", loop_counter++);
+            
+            // Start label
+            IRInstruction *label_start_instr = ir_instruction_create(IR_LABEL);
+            label_start_instr->dest = ir_value_create_label(label_start);
+            ir_function_add_instruction(func, label_start_instr);
+            
+            // Generate condition
+            ir_generate_from_ast_node(func, node->condition);
+            IRValue *cond_reg = ir_value_create_reg(func->reg_count - 1, IR_TYPE_INT);
+            
+            // Jump to end if condition is false
+            IRInstruction *jump_if_false = ir_instruction_create(IR_JUMP_IF_NOT);
+            jump_if_false->src1 = cond_reg;
+            jump_if_false->dest = ir_value_create_label(label_end);
+            ir_function_add_instruction(func, jump_if_false);
+            
+            // Generate body
+            ir_generate_from_ast_node(func, node->body);
+            
+            // Jump back to start
+            IRInstruction *jump_loop = ir_instruction_create(IR_JUMP);
+            jump_loop->dest = ir_value_create_label(label_start);
+            ir_function_add_instruction(func, jump_loop);
+            
+            // End label
+            IRInstruction *label_end_instr = ir_instruction_create(IR_LABEL);
+            label_end_instr->dest = ir_value_create_label(label_end);
+            ir_function_add_instruction(func, label_end_instr);
+            break;
+        }
+
+        case AST_BLOCK:
+            // Process block statements
+            for (ASTNode *stmt = node->body; stmt != NULL; stmt = stmt->next) {
+                ir_generate_from_ast_node(func, stmt);
+            }
+            break;
+            
+        case AST_IDENTIFIER: {
+            // Find variable declaration to get its register index
+            // Simple linear scan of instructions for now
+            int reg_num = -1;
+            IRInstruction *scan = func->instructions;
+            while (scan) {
+                if (scan->opcode == IR_ALLOC && scan->dest && 
+                    scan->dest->name && strcmp(scan->dest->name, node->value) == 0) {
+                    reg_num = scan->dest->data.reg_num;
+                    break;
+                }
+                scan = scan->next;
+            }
+            
+            if (reg_num != -1) {
+                IRInstruction *load = ir_instruction_create(IR_LOAD);
+                load->dest = ir_value_create_reg(func->reg_count++, IR_TYPE_INT); // Temporary result reg
+                load->src1 = ir_value_create_reg(reg_num, IR_TYPE_INT); // Source variable reg
+                ir_function_add_instruction(func, load);
+            } else {
+                fprintf(stderr, "Warning: Undefined variable %s in IR generation\n", node->value);
+            }
+            break;
+        }
+
         default:
-            // Recurse on children
+            // Recurse on children if not handled above
             for (int i = 0; i < node->child_count; i++) {
                 ir_generate_from_ast_node(func, node->children[i]);
             }
@@ -272,9 +440,30 @@ void ir_print(IRModule *module) {
                 case IR_CONST_INT: 
                     printf("CONST_INT %ld", instr->src1->data.int_val); 
                     break;
+                case IR_ALLOC:
+                    printf("ALLOC %d", instr->dest->data.reg_num);
+                    if (instr->dest->name) printf(" (%s)", instr->dest->name);
+                    break;
+                case IR_STORE:
+                    printf("STORE %d", instr->dest->data.reg_num);
+                    break;
+                case IR_LOAD:
+                    printf("LOAD %d", instr->src1 ? instr->src1->data.reg_num : -1);
+                    break;
+                case IR_PUSH: printf("PUSH"); break;
+                case IR_POP: printf("POP"); break;
                 case IR_PRINT: printf("PRINT"); break;
                 case IR_RETURN: printf("RETURN"); break;
-                default: printf("UNKNOWN"); break;
+                case IR_EQ: printf("EQ"); break;
+                case IR_NE: printf("NE"); break;
+                case IR_LT: printf("LT"); break;
+                case IR_LE: printf("LE"); break;
+                case IR_GT: printf("GT"); break;
+                case IR_GE: printf("GE"); break;
+                case IR_JUMP: printf("JUMP"); break;
+                case IR_JUMP_IF_NOT: printf("JUMP_IF_NOT"); break;
+                case IR_LABEL: printf("LABEL %s", instr->dest->data.label); break;
+                default: printf("UNKNOWN (%d)", instr->opcode); break;
             }
             printf("\n");
             instr = instr->next;

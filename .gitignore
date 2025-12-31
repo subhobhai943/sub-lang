@@ -1,54 +1,22 @@
-# Build artifacts
-*.out
-*.exe
-output_*.code
-build/
-
-# Compiled binaries
+# Binaries
 subc-native
 sublang
-subc
-example_output
-example_native
-
-# Object files
+output_bin
+debug_*
+*.on
 *.o
-*.obj
+*.exe
+uni_test
 
-# Assembly files
-*.s
-
-# Output files
-output.*
-SubProgram.*
-
-# Test artifacts
-test_temp.*
-test_output*
-
-# Rust
-target/
-**/*.rs.bk
-
-# Editor files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Temporary files
-*.tmp
-*.log
-
-# Personal project documentation
-.project/
-
-# cmake
-cmake-build-*/
-CMakeCache.txt
-CMakeFiles/
+# Test outputs
+*_output.txt
+*.py
+*.js
+*.rb
+*.java
+*.cpp
+*.rs
+*.kt
+*.swift
+!tests/*.py
+!examples/*.sb

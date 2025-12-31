@@ -1,0 +1,55 @@
+# SUB Language Comprehensive Test
+# Tests variables, control flow, functions, loops, and recursion
+
+# Variable declarations
+var x = 10
+var y = 20
+var name = "SUB"
+var is_active = true
+
+print("Starting checks for " + name)
+
+# Function definition
+function add(a, b) {
+    return a + b
+}
+
+# Function call
+var sum = add(x, y)
+print("Sum of 10 + 20 is:")
+print(sum)
+
+# If/Else logic
+if (sum > 25) {
+    print("Sum is greater than 25")
+} elif (sum == 25) {
+    print("Sum is exactly 25")
+} else {
+    print("Sum is less than 25")
+}
+
+# Recursion test (Factorial)
+function factorial(n) {
+    if (n <= 1) {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+print("Factorial of 5 is:")
+print(factorial(5))
+
+# Loop test with dynamic range
+print("Counting from 0 to 4:")
+for i in range(5) {
+    print(i)
+}
+
+# Dynamic range from variable
+var limit = 3
+print("Counting to limit 3:")
+for j in range(limit) {
+    print(j)
+}
+
+print("Test Complete")

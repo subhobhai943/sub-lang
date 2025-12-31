@@ -53,6 +53,7 @@ static Token* current_token(ParserState *state) {
 }
 
 /* Peek ahead n tokens */
+static Token* peek_token(ParserState *state, int offset) __attribute__((unused));
 static Token* peek_token(ParserState *state, int offset) {
     int pos = state->current + offset;
     if (pos >= state->token_count) {
@@ -82,7 +83,7 @@ static bool expect(ParserState *state, TokenType type) {
     }
     Token *tok = current_token(state);
     fprintf(stderr, "Parser Error: Expected token type %d, got %d at line %d\n", 
-            type, tok ? tok->type : -1, tok ? tok->line : 0);
+            type, tok ? tok->type : (TokenType)-1, tok ? tok->line : 0);
     state->errors++;
     return false;
 }
@@ -160,6 +161,20 @@ static ASTNode* parse_primary(ParserState *state) {
     return NULL;
 }
 
+/* Get precedence level for operator */
+static int get_operator_precedence(const char *op) {
+    if (!op) return -1;
+    if (strcmp(op, "=") == 0) return 0;
+    if (strcmp(op, "||") == 0) return 1;
+    if (strcmp(op, "&&") == 0) return 2;
+    if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) return 3;
+    if (strcmp(op, "<") == 0 || strcmp(op, ">") == 0 || 
+        strcmp(op, "<=") == 0 || strcmp(op, ">=") == 0) return 4;
+    if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0) return 5;
+    if (strcmp(op, "*") == 0 || strcmp(op, "/") == 0) return 6;
+    return -1;
+}
+
 /* Parse binary expressions with precedence */
 static ASTNode* parse_binary(ParserState *state, int precedence) {
     if (precedence >= 7) {
@@ -170,14 +185,29 @@ static ASTNode* parse_binary(ParserState *state, int precedence) {
     if (!left) return NULL;
     
     while (true) {
-        Token *op = current_token(state);
-        if (!op || !match(state, TOKEN_OPERATOR)) break;
+        Token *op_token = current_token(state);
+        // Check if current token is operator
+        if (!op_token || op_token->type != TOKEN_OPERATOR) {
+            break;
+        }
+
+        // Check precedence match
+        int op_prec = get_operator_precedence(op_token->value);
+        if (op_prec != precedence) break;
         
-        // Simple precedence check (can be enhanced)
         advance(state);
-        ASTNode *right = parse_binary(state, precedence + 1);
         
-        ASTNode *binary = create_node(AST_BINARY_EXPR, op->value);
+        ASTNode *right = parse_binary(state, precedence + 1); // Right-associative? No, left for standard, right for assign.
+        // For assignment (=), we might want right associativity: a = b = c -> a = (b = c)
+        // If so, we should call parse_binary(state, precedence) instead of precedence + 1?
+        // But for mixed, precedence + 1 is fine if we are strict. 
+        // Let's stick to standard recurse + 1 for now, effectively left-assoc, but grouped by level.
+        // Wait, for `x = x - 1`:
+        // Level 0 (=). Left (x) parsed. Op (=) matches prec 0. Eat. 
+        // Right calls Level 1. Level 1..5 recurse. Level 5 parses (x - 1). Returns.
+        // So `x = (x-1)`. Correct.
+        
+        ASTNode *binary = create_node(AST_BINARY_EXPR, op_token->value);
         binary->left = left;
         binary->right = right;
         left = binary;
@@ -200,23 +230,35 @@ static ASTNode* parse_block(ParserState *state) {
     skip_newlines(state);
     
     while (!match(state, TOKEN_END) && !match(state, TOKEN_EOF) && 
-           !match(state, TOKEN_ELIF) && !match(state, TOKEN_ELSE)) {
+           !match(state, TOKEN_ELIF) && !match(state, TOKEN_ELSE) && 
+           !match(state, TOKEN_RBRACE)) {
         
+        // Handle comments (lines starting with #)
         if (match(state, TOKEN_HASH)) {
-            advance(state);
-            ASTNode *stmt = parse_statement(state);
-            
-            if (stmt) {
-                if (!first_stmt) {
-                    first_stmt = stmt;
-                    last_stmt = stmt;
-                } else {
-                    last_stmt->next = stmt;
-                    last_stmt = stmt;
-                }
+            int line = state->tokens[state->current].line;
+            while (!match(state, TOKEN_EOF) && state->tokens[state->current].line == line) {
+                advance(state);
+            }
+            continue;
+        }
+        
+        ASTNode *stmt = parse_statement(state);
+        
+        if (stmt) {
+            if (!first_stmt) {
+                first_stmt = stmt;
+                last_stmt = stmt;
+            } else {
+                last_stmt->next = stmt;
+                last_stmt = stmt;
             }
         } else {
-            advance(state);
+             // If known end token, we will exit loop check next time
+             // If unknown token, skip it
+             if (!match(state, TOKEN_END) && !match(state, TOKEN_ELIF) && 
+                 !match(state, TOKEN_ELSE) && !match(state, TOKEN_EOF)) {
+                 advance(state);
+             }
         }
         
         skip_newlines(state);
@@ -227,6 +269,7 @@ static ASTNode* parse_block(ParserState *state) {
 }
 
 /* Parse print statement */
+static ASTNode* parse_print(ParserState *state) __attribute__((unused));
 static ASTNode* parse_print(ParserState *state) {
     advance(state); // skip 'print'
     
@@ -254,6 +297,13 @@ static ASTNode* parse_if(ParserState *state) {
     // Parse then block
     if_node->body = parse_block(state);
     
+    // Consume closing brace if present
+    if (match(state, TOKEN_RBRACE)) {
+        advance(state);
+    }
+    
+    skip_newlines(state);
+    
     // Handle elif/else
     if (match(state, TOKEN_ELIF)) {
         // Recursively parse elif as nested if
@@ -277,20 +327,52 @@ static ASTNode* parse_for(ParserState *state) {
     
     ASTNode *for_node = create_node(AST_FOR_STMT, NULL);
     
-    // Parse loop variable (simplified)
+    // Parse loop variable
     if (match(state, TOKEN_IDENTIFIER)) {
         Token *var = current_token(state);
         for_node->value = strdup(var->value);
         advance(state);
     }
     
-    // Skip 'in' keyword (add TOKEN_IN if needed)
-    while (!match(state, TOKEN_NEWLINE) && !match(state, TOKEN_EOF)) {
+    // Parse 'in' (expect identifier 'in' since we don't have TOKEN_IN)
+    Token *in_token = current_token(state);
+    if (in_token && in_token->type == TOKEN_IDENTIFIER && strcmp(in_token->value, "in") == 0) {
         advance(state);
+    }
+    
+    // Check for range(...) or collection
+    Token *tok = current_token(state);
+    if (tok && tok->type == TOKEN_IDENTIFIER && strcmp(tok->value, "range") == 0) {
+        // Parse range expression
+        advance(state);
+        expect(state, TOKEN_LPAREN);
+        
+        ASTNode *range_node = create_node(AST_RANGE_EXPR, "range");
+        range_node->left = parse_expression(state); // Start or Count
+        
+        if (match(state, TOKEN_COMMA)) {
+            advance(state);
+            range_node->right = parse_expression(state); // End
+        }
+        
+        expect(state, TOKEN_RPAREN);
+        
+        // Store range node as first child
+        for_node->children = malloc(sizeof(ASTNode*));
+        for_node->children[0] = range_node;
+        for_node->child_count = 1;
+    } else {
+        // Iterating over collection or variable
+        ASTNode *collection = parse_expression(state);
+        for_node->condition = collection; // Store valid collection in condition field if children not used
     }
     
     skip_newlines(state);
     for_node->body = parse_block(state);
+    
+    if (match(state, TOKEN_RBRACE)) {
+        advance(state);
+    }
     
     if (match(state, TOKEN_END)) {
         advance(state);
@@ -307,6 +389,10 @@ static ASTNode* parse_while(ParserState *state) {
     while_node->condition = parse_expression(state);
     skip_newlines(state);
     while_node->body = parse_block(state);
+    
+    if (match(state, TOKEN_RBRACE)) {
+        advance(state);
+    }
     
     if (match(state, TOKEN_END)) {
         advance(state);
@@ -331,19 +417,52 @@ static ASTNode* parse_function(ParserState *state) {
     // Parse parameters
     if (match(state, TOKEN_LPAREN)) {
         advance(state);
-        // TODO: Parse parameter list
-        while (!match(state, TOKEN_RPAREN) && !match(state, TOKEN_EOF)) {
-            advance(state);
+        
+        // Allocate space for up to 32 parameters (simplified)
+        func->children = malloc(sizeof(ASTNode*) * 32);
+        func->child_count = 0;
+        
+        if (!match(state, TOKEN_RPAREN)) {
+            while (true) {
+                if (match(state, TOKEN_IDENTIFIER)) {
+                    Token *param_token = current_token(state);
+                    ASTNode *param = create_node(AST_PARAM_DECL, param_token->value);
+                    advance(state);
+                    
+                    // Optional type annotation: param: type
+                    if (match(state, TOKEN_COLON)) {
+                        advance(state);
+                        if (match(state, TOKEN_INT) || match(state, TOKEN_FLOAT) || 
+                            match(state, TOKEN_STRING) || match(state, TOKEN_BOOL)) {
+                            // TODO: Store type in param->data_type
+                            advance(state);
+                        } else if (match(state, TOKEN_IDENTIFIER)) {
+                            advance(state);
+                        }
+                    }
+                    
+                    func->children[func->child_count++] = param;
+                }
+                
+                if (match(state, TOKEN_COMMA)) {
+                    advance(state);
+                } else {
+                    break;
+                }
+            }
         }
-        if (match(state, TOKEN_RPAREN)) {
-            advance(state);
-        }
+        
+        expect(state, TOKEN_RPAREN);
     }
     
     skip_newlines(state);
     
     // Parse function body
     func->body = parse_block(state);
+    
+    if (match(state, TOKEN_RBRACE)) {
+        advance(state);
+    }
     
     if (match(state, TOKEN_END)) {
         advance(state);
@@ -366,8 +485,8 @@ static ASTNode* parse_statement(ParserState *state) {
         ASTNode *var_decl = create_node(AST_VAR_DECL, NULL);
         
         if (match(state, TOKEN_IDENTIFIER)) {
+            tok = current_token(state); // Refresh token
             var_decl->value = strdup(tok->value);
-            tok = current_token(state);
             advance(state);
             
             // Check for assignment
@@ -426,19 +545,21 @@ static ASTNode* parse_statement(ParserState *state) {
     }
     
     // Print (handle as special function)
-    if (match(state, TOKEN_IDENTIFIER)) {
-        if (tok->value && strcmp(tok->value, "print") == 0) {
-            return parse_print(state);
-        }
+    // Expression statement (assignment, function call)
+    if (match(state, TOKEN_IDENTIFIER) || match(state, TOKEN_NUMBER) || 
+        match(state, TOKEN_STRING_LITERAL) || match(state, TOKEN_TRUE) || 
+        match(state, TOKEN_FALSE) || match(state, TOKEN_LPAREN)) {
+        return parse_expression(state);
     }
     
     // Skip unknown tokens
+    // fprintf(stderr, "Warning: Unexpected token '%s'\n", tok ? tok->value : "EOF");
     advance(state);
     return NULL;
 }
 
 /* Main parser function */
-ASTNode* parser_parse_enhanced(Token *tokens, int token_count) {
+ASTNode* parser_parse(Token *tokens, int token_count) {
     if (!tokens || token_count <= 0) {
         fprintf(stderr, "Error: Invalid tokens or token count\n");
         return NULL;
@@ -454,21 +575,34 @@ ASTNode* parser_parse_enhanced(Token *tokens, int token_count) {
     while (!match(&state, TOKEN_EOF)) {
         skip_newlines(&state);
         
+        if (match(&state, TOKEN_EOF)) break;
+        
+        // Handle comments (lines starting with #)
         if (match(&state, TOKEN_HASH)) {
-            advance(&state);
-            ASTNode *stmt = parse_statement(&state);
-            
-            if (stmt) {
-                if (!first_stmt) {
-                    first_stmt = stmt;
-                    last_stmt = stmt;
-                } else {
-                    last_stmt->next = stmt;
-                    last_stmt = stmt;
-                }
+            int line = state.tokens[state.current].line;
+            while (!match(&state, TOKEN_EOF) && state.tokens[state.current].line == line) {
+                advance(&state);
             }
-        } else if (!match(&state, TOKEN_EOF)) {
-            advance(&state);
+            continue;
+        }
+        
+        ASTNode *stmt = parse_statement(&state);
+        
+        if (stmt) {
+            if (!first_stmt) {
+                first_stmt = stmt;
+                last_stmt = stmt;
+            } else {
+                last_stmt->next = stmt;
+                last_stmt = stmt;
+            }
+        } else {
+            // If we couldn't parse a statement but aren't at EOF, skip token to avoid infinite loop
+            // But only if parse_statement didn't already advance
+             if (!match(&state, TOKEN_EOF)) {
+                 // fprintf(stderr, "Warning: Skipping unexpected token '%s'\n", state.tokens[state.current].value);
+                 advance(&state);
+             }
         }
     }
     

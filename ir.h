@@ -60,6 +60,8 @@ typedef enum {
     IR_PRINT,
     IR_INPUT,
     IR_CAST,
+    IR_PUSH,   // Push generic register/value to stack
+    IR_POP,    // Pop to generic register
     IR_PHI
 } IROpcode;
 

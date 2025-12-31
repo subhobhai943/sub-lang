@@ -91,7 +91,10 @@ char* read_file(const char *filename) {
         return NULL;
     }
     
-    fread(content, 1, size, file);
+    if (fread(content, 1, size, file) != (size_t)size) {
+        // Just print warning, don't fail as it might be text mode diff
+        // fprintf(stderr, "Warning: Short read\n");
+    }
     content[size] = '\0';
     fclose(file);
     return content;

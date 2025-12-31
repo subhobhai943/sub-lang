@@ -6,12 +6,12 @@ CFLAGS = -Wall -Wextra -std=c11 -O2 -I.
 LDFLAGS = 
 
 # Source files for native compiler
-NATIVE_SOURCES = sub_native_compiler.c lexer.c parser.c semantic.c ir.c codegen_x64.c
+NATIVE_SOURCES = sub_native_compiler.c lexer.c parser_enhanced.c semantic.c ir.c codegen_x64.c
 NATIVE_OBJECTS = $(NATIVE_SOURCES:.c=.o)
 NATIVE_TARGET = subc-native
 
 # Source files for transpiler
-TRANS_SOURCES = sub_multilang.c lexer.c parser.c semantic.c codegen.c codegen_multilang.c
+TRANS_SOURCES = sub_multilang.c lexer.c parser_enhanced.c semantic.c codegen.c codegen_multilang.c type_system.c
 TRANS_OBJECTS = $(TRANS_SOURCES:.c=.o)
 TRANS_TARGET = sublang
 
@@ -95,8 +95,9 @@ test: all
 	@echo "[TEST 2] Native compilation..."
 	./$(NATIVE_TARGET) test_temp.sb test_output && echo "✓ Native compilation passed"
 	@echo ""
-	@echo "[TEST 3] Python transpilation..."
-	./$(TRANS_TARGET) test_temp.sb python && echo "✓ Python transpilation passed"
+	@echo "[TEST 3] Python transpilation test: $(TRANS_TARGET)"
+	@echo "Running comprehensive verification..."
+	@python3 tests/run_tests.py
 	@echo ""
 	@echo "[TEST 4] JavaScript transpilation..."
 	./$(TRANS_TARGET) test_temp.sb javascript && echo "✓ JavaScript transpilation passed"
