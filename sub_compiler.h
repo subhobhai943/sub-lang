@@ -168,6 +168,7 @@ typedef enum {
     AST_OBJECT_LITERAL,
     AST_MEMBER_ACCESS,
     AST_ARRAY_ACCESS,
+    AST_NEW_EXPR,         // new ClassName()
     AST_RANGE_EXPR,       // range(n) or range(start, end)
     AST_ARRAY_ITERATION,  // for item in collection
     AST_PARAM_DECL        // Function parameter declaration
@@ -231,6 +232,23 @@ typedef struct {
     int scope_level;
 } SymbolTable;
 
+/* Class field information */
+typedef struct ClassField {
+    char *name;
+    DataType type;
+    int offset;
+    struct ClassField *next;
+} ClassField;
+
+/* Class definition */
+typedef struct ClassDef {
+    char *name;
+    ClassField *fields;
+    int field_count;
+    int size;
+    struct ClassDef *next;
+} ClassDef;
+
 /* Compiler Context */
 typedef struct {
     Token *tokens;
@@ -238,6 +256,7 @@ typedef struct {
     int current_token;
     ASTNode *ast;
     SymbolTable *symbol_table;
+    ClassDef *classes;
     Platform target_platform;
     CompilationOptions options;
     char *output_path;
@@ -261,6 +280,7 @@ ASTNode* parser_parse_statement(CompilerContext *ctx);
 
 // Semantic Analysis
 int semantic_analyze(ASTNode *ast);
+int semantic_check_types(ASTNode *ast);
 bool semantic_type_check(ASTNode *node);
 DataType semantic_infer_type(ASTNode *node);
 
@@ -272,12 +292,19 @@ SymbolTableEntry* symbol_table_lookup(SymbolTable *table, const char *name);
 void symbol_table_enter_scope(SymbolTable *table);
 void symbol_table_exit_scope(SymbolTable *table);
 
+// Class management
+ClassDef* class_def_create(const char *name);
+void class_def_add_field(ClassDef *cls, const char *field_name, DataType type);
+ClassDef* class_def_lookup(ClassDef *classes, const char *name);
+void class_def_free(ClassDef *cls);
+
 // Code Generation
 char* codegen_generate(ASTNode *ast, Platform platform);
 char* codegen_generate_cpp(ASTNode *ast, Platform platform);
 char* codegen_generate_c(ASTNode *ast, Platform platform);
 char* codegen_embed_cpp(const char *cpp_code);
 char* codegen_embed_c(const char *c_code);
+void optimize_c_output(ASTNode *node);
 
 // Optimization
 void optimizer_optimize(ASTNode *ast, int level);
@@ -289,6 +316,7 @@ void optimizer_inline_expansion(ASTNode *ast);
 char* read_file(const char *filename);
 void write_file(const char *filename, const char *content);
 void compile_error(const char *message, int line);
+void compile_error_with_col(const char *message, int line, int column);
 void compile_warning(const char *message, int line);
 
 // Compiler Interface

@@ -42,6 +42,14 @@ void compile_error(const char *message, int line) {
     fprintf(stderr, "Compilation error at line %d: %s\n", line, message);
 }
 
+void compile_error_with_col(const char *message, int line, int column) {
+    if (column > 0) {
+        fprintf(stderr, "Compilation error at line %d:%d: %s\n", line, column, message);
+    } else {
+        fprintf(stderr, "Compilation error at line %d: %s\n", line, message);
+    }
+}
+
 // Get proper file extension for platform
 const char* get_file_extension(Platform platform) {
     switch (platform) {

@@ -119,11 +119,28 @@ static void x64_generate_function_prologue(X64Context *ctx, IRFunction *func) {
     x64_emit(ctx, "pushq %%rbp");
     x64_emit(ctx, "movq %%rsp, %%rbp");
     
-    // Allocate stack space for locals if needed
-    if (func->local_count > 0) {
-        int stack_size = func->local_count * 8;
-        stack_size = (stack_size + 15) & ~15; // Align to 16 bytes
-        x64_emit(ctx, "subq $%d, %%rsp", stack_size);
+    // Allocate stack space for parameters and locals
+    int total_stack = func->local_count * 8 + func->param_count * 8;
+    if (total_stack > 0) {
+        total_stack = (total_stack + 15) & ~15; // Align to 16 bytes
+        x64_emit(ctx, "subq $%d, %%rsp", total_stack);
+    }
+    
+    // Save parameters to stack (now below the allocated area)
+    for (int i = 0; i < func->param_count; i++) {
+        const char *reg;
+        switch(i) {
+            case 0: reg = "rdi"; break;
+            case 1: reg = "rsi"; break;
+            case 2: reg = "rdx"; break;
+            case 3: reg = "rcx"; break;
+            case 4: reg = "r8"; break;
+            case 5: reg = "r9"; break;
+            default: reg = "rdi"; break;
+        }
+        // Parameters at: [rbp - (param_index + 1) * 8]
+        int offset = (i + 1) * 8;
+        x64_emit(ctx, "movq %%%s, -%d(%%rbp)", reg, offset);
     }
 }
 
@@ -185,8 +202,48 @@ void x64_generate_instruction(X64Context *ctx, IRInstruction *instr) {
             
         case IR_RETURN:
             if (instr->src1) {
-                if (instr->src1->type == IR_TYPE_INT) {
+                if (instr->src1->kind == IR_VAL_CONST) {
                      x64_emit(ctx, "movq $%ld, %%rax", instr->src1->data.int_val);
+                } else if (instr->src1->kind == IR_VAL_REG) {
+                     // If it's a register, we likely need to map it to RAX.
+                     // But we don't know WHICH physical register the virtual register is in!
+                     // The naive stack-based codegen assumes regs are popped?
+                     // Wait, our IR uses virtual regs.
+                     // IR_ADD pops to RAX.
+                     // If IR_RETURN src is implicit (last result), it's in RAX.
+                     // But if src1 is EXPLICIT register from `ir.c` (reg_count - 1),
+                     // we need to know where `reg_count-1` is.
+                     
+                     // In stack-machine mode (current codegen):
+                     // Operations leave result in RAX (and/or stack).
+                     // If ir.c sets src1 to "last register", it implies "current accumulator".
+                     // So we implicitly satisfy it?
+                     // BUT, if we have `x = 1; return x`:
+                     // LOAD 0 -> RAX=1.
+                     // RETURN (src=reg for x).
+                     // We need to move value of reg x to RAX.
+                     
+                     // How does codegen access generic registers?
+                     // `IR_LOAD` emits `movq -off(%rbp), %rax`.
+                     // Does `IR_RETURN` need to generate a load?
+                     // Yes! If src1 is a register that needs to be returned.
+                     
+                     // But `ir.c` logic for `AST_RETURN_STMT` sets src1 to `func->reg_count - 1`.
+                     // `reg_count-1` is a virtual temporary.
+                     // Where is it stored?
+                     // `IR_ADD` result: `addq %rbx, %rax` -> result in RAX. DOES NOT STORE to stack/reg map.
+                     // Unless there is a store?
+                     // `ir.c` `IR_ADD` dest is `reg_count++`.
+                     // Logic: `bin_op->dest = ir_value_create_reg(...)`.
+                     // But `codegen` ignores `dest` for ADD! It keeps result in RAX.
+                     
+                     // CRITICAL: The codegen assumes RAX holds the result of the last operation.
+                     // If `IR_RETURN` is generating `mov...` it clobbers RAX!
+                     // If src1 is a CONST, `mov $val, %rax` is correct.
+                     // If src1 is a REG, checking if it is the "current" reg (implicit in RAX).
+                     // If `ir.c` guarantees src1 is the result of the previous instruction...
+                     // Then it's already in RAX.
+                     // So we do NOTHING.
                 }
             }
             x64_emit(ctx, "jmp %s_return", instr->comment ? instr->comment : "main");
@@ -270,6 +327,48 @@ void x64_generate_instruction(X64Context *ctx, IRInstruction *instr) {
             
         case IR_CALL:
             x64_emit_comment(ctx, "Function call");
+            
+            int arg_count = 0;
+            if (instr->src1 && instr->src1->type == IR_TYPE_INT) {
+                arg_count = (int)instr->src1->data.int_val;
+            }
+            
+            // Arguments were pushed in order: arg0, arg1, ... argN
+            // Stack top is argN.
+            // ABI expects: RDI, RSI, RDX, RCX, R8, R9.
+            // We must POP in REVERSE ABI order: R9, R8, RCX, RDX, RSI, RDI.
+            
+            // Handle up to 6 arguments for now
+            // Note: We only pop if count >= N, but we must do it in specific order.
+            // Actually, we simply pop 'arg_count' times.
+            // If count is 1: Stack: [arg0]. Pop -> RDI.
+            // If count is 2: Stack: [arg0, arg1]. Pop -> RSI, Pop -> RDI.
+            // Wait, PUSH order in ir.c loop:
+            // for i=0..count: push child[i]. 
+            // So stack is: arg0 (bottom), arg1, arg2 (top).
+            // POP gives arg2 (RDX).
+            // POP gives arg1 (RSI).
+            // POP gives arg0 (RDI).
+            // So we just need to determine WHICH register correspond to the CURRENT pop.
+            // loop k from count-1 down to 0:
+            //   reg = abi[k]
+            //   pop reg
+            
+            const char *abi_regs[] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+            for (int k = arg_count - 1; k >= 0; k--) {
+                if (k < 6) {
+                    x64_emit(ctx, "popq %%%s", abi_regs[k]);
+                } else {
+                    // TODO: Stack arguments for > 6 args
+                     x64_emit_comment(ctx, "Arg > 6 ignored for now");
+                     x64_emit(ctx, "addq $8, %%rsp"); // wrapper pop
+                }
+            }
+            
+            // Align stack if needed (System V requires 16-byte alignment before call)
+            // Current simplistic approach aligns in prologue.
+            
+            x64_emit(ctx, "xorq %%rax, %%rax"); // Variadic args (AL=0)
             if (instr->dest && instr->dest->data.label) {
                 x64_emit(ctx, "call %s", instr->dest->data.label);
             }

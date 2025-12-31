@@ -38,6 +38,7 @@ typedef struct {
     int string_counter;        // For string literals
     int stack_offset;          // Current stack offset
     bool reg_in_use[X64_REG_COUNT]; // Register allocation tracker
+    IRFunction *current_func;   // Current function being generated
 } X64Context;
 
 /* Main code generation functions */

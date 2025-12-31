@@ -1,0 +1,12 @@
+function add(a, b) {
+    return a + b
+}
+
+function sub(a, b) {
+    return a - b
+}
+
+var x = 10
+var y = 2
+print(add(x, y))
+print(sub(x, y))

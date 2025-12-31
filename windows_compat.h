@@ -8,8 +8,15 @@
 #define WINDOWS_COMPAT_H
 
 #ifdef _WIN32
-    #include <string.h>
-    #include <stdlib.h>
+    #ifdef _MSC_VER
+        // MSVC-specific: include <string.h> instead of <strings.h>
+        #include <string.h>
+        #include <stdlib.h>
+    #else
+        // MinGW and other Windows compilers
+        #include <string.h>
+        #include <stdlib.h>
+    #endif
     
     // MSVC uses _strdup instead of strdup
     #define strdup _strdup

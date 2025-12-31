@@ -6,12 +6,12 @@ CFLAGS = -Wall -Wextra -std=c11 -O2 -I.
 LDFLAGS = 
 
 # Source files for native compiler
-NATIVE_SOURCES = sub_native_compiler.c lexer.c parser_enhanced.c semantic.c ir.c codegen_x64.c
+NATIVE_SOURCES = sub_native_compiler.c lexer.c parser_enhanced.c semantic.c ir.c codegen_x64.c utils.c
 NATIVE_OBJECTS = $(NATIVE_SOURCES:.c=.o)
 NATIVE_TARGET = subc-native
 
 # Source files for transpiler
-TRANS_SOURCES = sub_multilang.c lexer.c parser_enhanced.c semantic.c codegen.c codegen_multilang.c type_system.c
+TRANS_SOURCES = sub_multilang.c lexer.c parser_enhanced.c semantic.c codegen.c codegen_multilang.c codegen_rust.c type_system.c error_handler.c codegen_cpp.c targets.c
 TRANS_OBJECTS = $(TRANS_SOURCES:.c=.o)
 TRANS_TARGET = sublang
 
@@ -24,8 +24,9 @@ else ifeq ($(UNAME_S),Linux)
     # Linux
     CFLAGS += -DLINUX
 else
-    # Windows
+    # Windows (MinGW/Cygwin/MSYS2)
     CFLAGS += -DWINDOWS
+    LDFLAGS += -static
     NATIVE_TARGET = subc-native.exe
     TRANS_TARGET = sublang.exe
 endif
@@ -74,12 +75,16 @@ $(TRANS_TARGET): $(TRANS_OBJECTS)
 # Install (optional)
 install: all
 	@echo "Installing SUB compilers..."
+ifeq ($(OS),Windows_NT)
+	@echo "Windows: Copy executables to current directory or add to PATH manually"
+else
 	mkdir -p /usr/local/bin
 	cp $(NATIVE_TARGET) /usr/local/bin/subc
 	cp $(TRANS_TARGET) /usr/local/bin/sublang
 	@echo "✅ Installed:"
 	@echo "   /usr/local/bin/subc     - Native compiler"
 	@echo "   /usr/local/bin/sublang  - Transpiler"
+endif
 
 # Test suite
 test: all

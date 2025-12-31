@@ -9,6 +9,13 @@
 #include "windows_compat.h"
 #include <stdarg.h>
 
+/* Optimization Context */
+typedef struct {
+    bool has_main;
+    int function_count;
+    bool optimized;
+} OptimizationContext;
+
 /* String Builder for code generation */
 typedef struct {
     char *buffer;
@@ -75,6 +82,143 @@ static char* sb_to_string(StringBuilder *sb) {
 /* Forward declarations */
 static void generate_node(StringBuilder *sb, ASTNode *node, int indent);
 static void generate_expression(StringBuilder *sb, ASTNode *node);
+static void optimize_remove_dead_code(ASTNode *node);
+static bool is_node_pure(ASTNode *node);
+static void optimize_constant_folding(ASTNode *node);
+
+/* Dead Code Elimination */
+static bool is_node_pure(ASTNode *node) {
+    if (!node) return false;
+    
+    switch (node->type) {
+        case AST_LITERAL:
+        case AST_IDENTIFIER:
+            return true;
+        case AST_BINARY_EXPR:
+            return is_node_pure(node->left) && is_node_pure(node->right);
+        case AST_UNARY_EXPR:
+            return is_node_pure(node->left);
+        default:
+            return false;
+    }
+}
+
+static void optimize_remove_dead_code(ASTNode *node) {
+    if (!node) return;
+    
+    switch (node->type) {
+        case AST_PROGRAM:
+        case AST_BLOCK: {
+            ASTNode **new_children = malloc(sizeof(ASTNode*) * node->child_count);
+            int new_count = 0;
+            
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *child = node->children[i];
+                
+                if (!child) continue;
+                
+                optimize_remove_dead_code(child);
+                
+                bool keep = true;
+                if (child->type == AST_LITERAL && !is_node_pure(child)) {
+                    keep = false;
+                }
+                
+                if (keep && (child->type == AST_VAR_DECL || 
+                    child->type == AST_CONST_DECL ||
+                    child->type == AST_FUNCTION_DECL ||
+                    child->type == AST_ASSIGN_STMT ||
+                    child->type == AST_CALL_EXPR ||
+                    child->type == AST_RETURN_STMT ||
+                    child->type == AST_IF_STMT ||
+                    child->type == AST_FOR_STMT ||
+                    child->type == AST_WHILE_STMT ||
+                    child->type == AST_BLOCK ||
+                    child->type == AST_BINARY_EXPR)) {
+                    new_children[new_count++] = child;
+                }
+            }
+            
+            free(node->children);
+            node->children = new_children;
+            node->child_count = new_count;
+            break;
+        }
+        default:
+            for (int i = 0; i < node->child_count; i++) {
+                optimize_remove_dead_code(node->children[i]);
+            }
+            if (node->left) optimize_remove_dead_code(node->left);
+            if (node->right) optimize_remove_dead_code(node->right);
+            if (node->condition) optimize_remove_dead_code(node->condition);
+            if (node->body) optimize_remove_dead_code(node->body);
+            break;
+    }
+}
+
+static void optimize_constant_folding(ASTNode *node) {
+    if (!node) return;
+    
+    if (node->type == AST_BINARY_EXPR) {
+        optimize_constant_folding(node->left);
+        optimize_constant_folding(node->right);
+        
+        if (node->left && node->right && 
+            node->left->type == AST_LITERAL && 
+            node->right->type == AST_LITERAL) {
+            
+            if (node->value) {
+                char *left_end, *right_end;
+                long left_val = strtol(node->left->value, &left_end, 10);
+                long right_val = strtol(node->right->value, &right_end, 10);
+                
+                if (*left_end == '\0' && *right_end == '\0') {
+                    long result = 0;
+                    
+                    if (strcmp(node->value, "+") == 0) {
+                        result = left_val + right_val;
+                    } else if (strcmp(node->value, "-") == 0) {
+                        result = left_val - right_val;
+                    } else if (strcmp(node->value, "*") == 0) {
+                        result = left_val * right_val;
+                    } else if (strcmp(node->value, "/") == 0 && right_val != 0) {
+                        result = left_val / right_val;
+                    } else {
+                        return;
+                    }
+                    
+                    char folded_val[32];
+                    snprintf(folded_val, sizeof(folded_val), "%ld", result);
+                    
+                    node->type = AST_LITERAL;
+                    free(node->value);
+                    node->value = strdup(folded_val);
+                    
+                    parser_free_ast(node->left);
+                    parser_free_ast(node->right);
+                    node->left = NULL;
+                    node->right = NULL;
+                }
+            }
+        }
+    } else {
+        for (int i = 0; i < node->child_count; i++) {
+            optimize_constant_folding(node->children[i]);
+        }
+        if (node->left) optimize_constant_folding(node->left);
+        if (node->right) optimize_constant_folding(node->right);
+        if (node->condition) optimize_constant_folding(node->condition);
+        if (node->body) optimize_constant_folding(node->body);
+    }
+}
+
+/* Optimization stub - can be expanded */
+void optimize_c_output(ASTNode *node) {
+    if (!node) return;
+    
+    optimize_constant_folding(node);
+    optimize_remove_dead_code(node);
+}
 
 /* Helper to generate indentation */
 static void indent_code(StringBuilder *sb, int level) {
@@ -90,7 +234,17 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
     switch (node->type) {
         case AST_LITERAL:
             if (node->value) {
-                sb_append(sb, "%s", node->value);
+                if (node->data_type == TYPE_STRING) {
+                    sb_append(sb, "\"%s\"", node->value);
+                } else if (node->data_type == TYPE_BOOL) {
+                    if (strcmp(node->value, "true") == 0) {
+                        sb_append(sb, "true");
+                    } else {
+                        sb_append(sb, "false");
+                    }
+                } else {
+                    sb_append(sb, "%s", node->value);
+                }
             }
             break;
             
@@ -110,10 +264,23 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
             }
             break;
             
+        case AST_UNARY_EXPR:
+            sb_append(sb, "(%s", node->value ? node->value : "-");
+            if (node->left) {
+                generate_expression(sb, node->left);
+            }
+            sb_append(sb, ")");
+            break;
+            
         case AST_CALL_EXPR:
             if (node->value) {
                 sb_append(sb, "%s(", node->value);
-                // TODO: Generate arguments
+                for (ASTNode *arg = node->left; arg != NULL; arg = arg->next) {
+                    generate_expression(sb, arg);
+                    if (arg->next) {
+                        sb_append(sb, ", ");
+                    }
+                }
                 sb_append(sb, ")");
             }
             break;
@@ -129,7 +296,6 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
     
     switch (node->type) {
         case AST_PROGRAM:
-            // Generate all statements in the program
             for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
                 generate_node(sb, stmt, indent);
             }
@@ -137,26 +303,53 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_VAR_DECL:
             indent_code(sb, indent);
-            // Default to int type for now, can be enhanced with type inference
-            if (node->right) {
-                sb_append(sb, "int %s = ", node->value ? node->value : "var");
-                generate_expression(sb, node->right);
+            if (node->data_type == TYPE_STRING) {
+                sb_append(sb, "char *%s", node->value ? node->value : "var");
+                if (node->right) {
+                    sb_append(sb, " = sub_strdup(");
+                    generate_expression(sb, node->right);
+                    sb_append(sb, ")");
+                }
+            } else if (node->data_type == TYPE_BOOL) {
+                sb_append(sb, "bool %s", node->value ? node->value : "var");
+                if (node->right) {
+                    sb_append(sb, " = ");
+                    generate_expression(sb, node->right);
+                }
+            } else if (node->data_type == TYPE_FLOAT) {
+                sb_append(sb, "double %s", node->value ? node->value : "var");
+                if (node->right) {
+                    sb_append(sb, " = ");
+                    generate_expression(sb, node->right);
+                }
             } else {
-                sb_append(sb, "int %s", node->value ? node->value : "var");
+                sb_append(sb, "long %s", node->value ? node->value : "var");
+                if (node->right) {
+                    sb_append(sb, " = ");
+                    generate_expression(sb, node->right);
+                }
             }
             sb_append(sb, ";\n");
             break;
             
         case AST_CONST_DECL:
             indent_code(sb, indent);
-            sb_append(sb, "const int %s = ", node->value ? node->value : "const");
+            if (node->data_type == TYPE_STRING) {
+                sb_append(sb, "const char *%s", node->value ? node->value : "const");
+            } else if (node->data_type == TYPE_BOOL) {
+                sb_append(sb, "const bool %s", node->value ? node->value : "const");
+            } else if (node->data_type == TYPE_FLOAT) {
+                sb_append(sb, "const double %s", node->value ? node->value : "const");
+            } else {
+                sb_append(sb, "const long %s", node->value ? node->value : "const");
+            }
+            sb_append(sb, " = ");
             generate_expression(sb, node->right);
             sb_append(sb, ";\n");
             break;
             
         case AST_FUNCTION_DECL:
-            sb_append(sb, "\nvoid %s() {\n", node->value ? node->value : "func");
-            // Generate function body
+            sb_append(sb, "\nvoid %s(void) {\n", node->value ? node->value : "func");
             if (node->body) {
                 generate_node(sb, node->body, indent + 1);
             }
@@ -178,7 +371,7 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_FOR_STMT:
             indent_code(sb, indent);
-            sb_append(sb, "for (int i = 0; i < 10; i++) {\n");
+            sb_append(sb, "for (long i = 0; i < 10; i++) {\n");
             generate_node(sb, node->body, indent + 1);
             indent_code(sb, indent);
             sb_append(sb, "}\n");
@@ -219,23 +412,22 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_EMBED_CODE:
         case AST_EMBED_C:
-            // For embedded C code, include it directly
             if (node->value) {
-                sb_append(sb, "\n// Embedded C code\n");
+                sb_append(sb, "\n/* Embedded C code */\n");
                 sb_append(sb, "%s\n", node->value);
             }
             break;
             
         case AST_EMBED_CPP:
-            // For embedded C++ code
             if (node->value) {
-                sb_append(sb, "\n// Embedded C++ code\n");
+                sb_append(sb, "\n/* Embedded C++ code */\n");
+                sb_append(sb, "#ifdef __cplusplus\n");
                 sb_append(sb, "%s\n", node->value);
+                sb_append(sb, "#endif\n");
             }
             break;
             
         default:
-            // Process child nodes
             for (int i = 0; i < node->child_count; i++) {
                 generate_node(sb, node->children[i], indent);
             }
@@ -248,25 +440,60 @@ static char* generate_c_code(ASTNode *ast) {
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     
-    // Generate standard headers
-    sb_append(sb, "// Generated by SUB Language Compiler\n");
-    sb_append(sb, "// This is REAL compiled code, not a dummy template!\n\n");
+    // Apply optimizations before code generation
+    optimize_c_output(ast);
+    
+    // Generate standard headers (C99 compliant)
+    sb_append(sb, "/*\n");
+    sb_append(sb, " * Generated by SUB Language Compiler\n");
+    sb_append(sb, " * C99 Compliant Output\n");
+    sb_append(sb, " */\n\n");
+    
+    sb_append(sb, "/* Standard Library Headers */\n");
     sb_append(sb, "#include <stdio.h>\n");
     sb_append(sb, "#include <stdlib.h>\n");
     sb_append(sb, "#include <string.h>\n");
-    sb_append(sb, "#include <stdbool.h>\n\n");
+    sb_append(sb, "#include <stdbool.h>\n");
+    sb_append(sb, "#include <stddef.h>\n\n");
+    
+    sb_append(sb, "/* Memory Management Helpers */\n");
+    sb_append(sb, "#ifndef SUB_STRSAFE\n");
+    sb_append(sb, "#define SUB_STRSAFE\n");
+    sb_append(sb, "static inline char* sub_strdup(const char *s) {\n");
+    sb_append(sb, "    if (!s) return NULL;\n");
+    sb_append(sb, "    size_t len = strlen(s) + 1;\n");
+    sb_append(sb, "    char *copy = malloc(len);\n");
+    sb_append(sb, "    if (copy) memcpy(copy, s, len);\n");
+    sb_append(sb, "    return copy;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "#define SUB_FREE(p) do { if (p) { free(p); (p) = NULL; } } while(0)\n");
+    sb_append(sb, "#endif /* SUB_STRSAFE */\n\n");
+    
+    sb_append(sb, "/* Error Handling Helpers */\n");
+    sb_append(sb, "#ifndef SUB_ERROR_H\n");
+    sb_append(sb, "#define SUB_ERROR_H\n");
+    sb_append(sb, "#define SUB_CHECK_NULL(ptr, msg) do { \\\n");
+    sb_append(sb, "    if (!(ptr)) { \\\n");
+    sb_append(sb, "        fprintf(stderr, \"Error: %s at %s:%d\\n\", (msg), __FILE__, __LINE__); \\\n");
+    sb_append(sb, "        exit(EXIT_FAILURE); \\\n");
+    sb_append(sb, "    } \\\n");
+    sb_append(sb, "} while(0)\n");
+    sb_append(sb, "#endif /* SUB_ERROR_H */\n\n");
     
     // Generate code from AST
     generate_node(sb, ast, 0);
     
     // Add main function wrapper if not present
-    sb_append(sb, "\n// Auto-generated main if needed\n");
+    sb_append(sb, "/* Auto-generated main if not defined */\n");
     sb_append(sb, "#ifndef MAIN_DEFINED\n");
     sb_append(sb, "int main(int argc, char *argv[]) {\n");
+    sb_append(sb, "    (void)argc;\n");
+    sb_append(sb, "    (void)argv;\n");
     sb_append(sb, "    printf(\"SUB Language Program Running...\\n\");\n");
-    sb_append(sb, "    return 0;\n");
+    sb_append(sb, "    return EXIT_SUCCESS;\n");
     sb_append(sb, "}\n");
-    sb_append(sb, "#endif\n");
+    sb_append(sb, "#define MAIN_DEFINED 1\n");
+    sb_append(sb, "#endif /* MAIN_DEFINED */\n");
     
     return sb_to_string(sb);
 }

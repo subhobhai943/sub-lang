@@ -36,6 +36,9 @@ typedef enum {
     IR_LOAD,
     IR_STORE,
     IR_ALLOC,
+    IR_ALLOC_ARRAY,
+    IR_LOAD_ELEM,
+    IR_STORE_ELEM,
     
     // Control flow
     IR_LABEL,
@@ -62,7 +65,11 @@ typedef enum {
     IR_CAST,
     IR_PUSH,   // Push generic register/value to stack
     IR_POP,    // Pop to generic register
-    IR_PHI
+    IR_PHI,
+    IR_NEW,    // Allocate object (new ClassName)
+    IR_GET_FIELD, // Get object field (obj.field)
+    IR_SET_FIELD, // Set object field (obj.field = value)
+    IR_CLASS_DEF  // Define class (metadata)
 } IROpcode;
 
 /* IR Value Types */
@@ -73,12 +80,21 @@ typedef enum {
     IR_TYPE_STRING,
     IR_TYPE_BOOL,
     IR_TYPE_POINTER,
-    IR_TYPE_LABEL
+    IR_TYPE_LABEL,
+    IR_TYPE_OBJECT
 } IRType;
+
+typedef enum {
+    IR_VAL_CONST,
+    IR_VAL_REG,
+    IR_VAL_VAR, // Stack variable (pre-reg allocation)
+    IR_VAL_LABEL
+} IRValueKind;
 
 /* IR Value */
 typedef struct IRValue {
     IRType type;
+    IRValueKind kind;
     union {
         int64_t int_val;
         double float_val;
@@ -111,9 +127,27 @@ typedef struct IRFunction {
     struct IRFunction *next;
 } IRFunction;
 
+/* IR Class field information */
+typedef struct IRClassField {
+    char *name;
+    IRType type;
+    int offset;
+    struct IRClassField *next;
+} IRClassField;
+
+/* IR Class definition */
+typedef struct IRClass {
+    char *name;
+    IRClassField *fields;
+    int field_count;
+    int size;
+    struct IRClass *next;
+} IRClass;
+
 /* IR Module (represents entire program) */
 typedef struct IRModule {
     IRFunction *functions;
+    IRClass *classes;        // Class definitions
     char **string_literals;  // Global string constants
     int string_count;
     char *entry_point;       // Name of main function
@@ -136,6 +170,12 @@ IRValue* ir_value_create_label(const char *label);
 
 /* Convert AST to IR */
 IRModule* ir_generate_from_ast(void *ast_root);
+
+/* Class management */
+IRClass* ir_class_create(const char *name);
+void ir_class_add_field(IRClass *cls, const char *field_name, IRType type);
+IRClass* ir_class_lookup(IRModule *module, const char *name);
+void ir_class_free(IRClass *cls);
 
 /* Optimize IR */
 void ir_optimize(IRModule *module);
