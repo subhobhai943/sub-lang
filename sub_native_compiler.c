@@ -90,6 +90,14 @@ int compile_to_native(const char *input_file, const char *output_file) {
     }
     printf("      ✓ Passed\n");
     
+    // Phase 4.5: Strict Type Checking
+    printf("[4.5/7] 🔬 Type checking...\n");
+    if (!semantic_check_types(ast)) {
+        fprintf(stderr, "      ✗ Type checking failed\n");
+        return 1;
+    }
+    printf("      ✓ Passed\n");
+    
     // Phase 5: IR Generation
     printf("[5/7] 🔄 Generating intermediate representation...\n");
     IRModule *ir_module = ir_generate_from_ast(ast);
@@ -100,6 +108,15 @@ int compile_to_native(const char *input_file, const char *output_file) {
     // Debug: Print IR
     ir_print(ir_module);
     printf("      ✓ IR generated\n");
+    
+    // Phase 5.5: IR Optimization
+    printf("[5.5/7] ⚡ Optimizing IR...\n");
+    ir_optimize(ir_module);
+    printf("      ✓ IR optimized\n");
+    
+    // Debug: Print optimized IR
+    printf("\n      === Optimized IR ===\n");
+    ir_print(ir_module);
     
     // Phase 6: x86-64 Code Generation
     printf("[6/7] ⚙️  Generating x86-64 assembly...\n");

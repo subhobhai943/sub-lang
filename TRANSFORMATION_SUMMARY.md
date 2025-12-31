@@ -12,14 +12,39 @@ We have successfully implemented a functional native compiler capable of generat
   - Supports arithmetic operations (`+`, `-`, `*`, `/`) using stack logic to ensure correct register usage.
   - Implements control flow: `if`, `else`, `while` loops using labels and conditional jumps (`cmp`, `je`, `jmp`).
   - Implements `print(...)` using `printf` from libc.
+  - **NEW**: String support - variables can hold string pointers (char*), with runtime concatenation support.
 - **`ir.c` & `ir.h`**: A new Intermediate Representation layer.
   - Decouples parsing from code generation.
   - Converts AST into a linear sequence of instructions (`IR_LOAD`, `IR_STORE`, `IR_ADD`, `IR_JUMP_IF_NOT`, etc.).
   - Handles variable resolution and scope management.
+  - **NEW**: Supports string type handling (`IR_TYPE_STRING`, `IR_CONST_STRING`) and string concatenation.
 - **`sub_native_compiler.c`**: The driver program for the native compiler.
   - Links `lexer`, `parser_enhanced`, `semantic`, `ir`, and `codegen_x64`.
 
-## 2. Parser Enhancements (`parser_enhanced.c`)
+## 2. String Support Implementation
+
+String variables are now first-class citizens in the native compiler.
+
+### IR Layer (ir.c):
+- **String Literals**: `IR_CONST_STRING` instruction creates string constant references (ir.c:319-331)
+- **Variable Declarations**: `AST_VAR_DECL` now handles `TYPE_STRING` with proper `IR_TYPE_STRING` typing (ir.c:174-193)
+- **String Concatenation**: `AST_BINARY_EXPR` detects `+` operator with string operands and generates `IR_CALL` to `str_concat` runtime function (ir.c:288-310)
+- **Variable Loading**: `AST_IDENTIFIER` and assignment handlers now preserve string type information (ir.c:480-503, 257-283)
+
+### Code Generation (codegen_x64.c):
+- **String Storage**: String variables stored as pointers (char*) on stack (8 bytes each)
+- **String Literals**: Generated as .rodata labels, loaded via `leaq` instruction (codegen_x64.c:156-162)
+- **String Printing**: `IR_PRINT` detects string types and uses `%s\n` format specifier (codegen_x64.c:271-286)
+- **Runtime Helper**: `str_concat()` function provides string concatenation using `strlen`, `malloc`, and `strcpy` (codegen_x64.c:380-405)
+
+### Example Usage:
+```sub
+var greeting = "Hello"
+var name = "World"
+print(greeting + " " + name)  # Output: Hello World
+```
+
+## 3. Parser Enhancements (`parser_enhanced.c`)
 
 The parser was significantly refactored to support complex control flow and fix critical bugs.
 
@@ -29,7 +54,7 @@ The parser was significantly refactored to support complex control flow and fix 
 - **Block Handling**: Updated `parse_block` to correctly handle brace-delimited blocks (`{ ... }`) for `if`, `while`, and functions.
 - **Expression Statements**: Added support for generic expression statements (assignments, function calls) as top-level statements.
 
-## 3. Testing Infrastructure
+## 4. Testing Infrastructure
 
 We introduced a comprehensive verification suite.
 
@@ -43,7 +68,7 @@ We introduced a comprehensive verification suite.
   - Transpiles to Python, JS, etc. (regression testing).
   - Runs the native binary and verifies output matches expected results.
 
-## 4. Build System
+## 5. Build System
 
 - **`Makefile`**: Updated to build both:
   - `subc-native`: The native compiler.

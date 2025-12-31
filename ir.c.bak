@@ -12,6 +12,8 @@
 #include <string.h>
 #include <stdio.h>
 
+static IRModule *current_module = NULL;
+
 /* Create IR module */
 IRModule* ir_module_create(void) {
     IRModule *module = calloc(1, sizeof(IRModule));
@@ -96,7 +98,6 @@ IRInstruction* ir_instruction_create(IROpcode opcode) {
 IRValue* ir_value_create_int(int64_t value) {
     IRValue *val = calloc(1, sizeof(IRValue));
     val->type = IR_TYPE_INT;
-    val->kind = IR_VAL_CONST;
     val->data.int_val = value;
     return val;
 }
@@ -104,7 +105,6 @@ IRValue* ir_value_create_int(int64_t value) {
 IRValue* ir_value_create_float(double value) {
     IRValue *val = calloc(1, sizeof(IRValue));
     val->type = IR_TYPE_FLOAT;
-    val->kind = IR_VAL_CONST;
     val->data.float_val = value;
     return val;
 }
@@ -112,7 +112,6 @@ IRValue* ir_value_create_float(double value) {
 IRValue* ir_value_create_string(const char *value) {
     IRValue *val = calloc(1, sizeof(IRValue));
     val->type = IR_TYPE_STRING;
-    val->kind = IR_VAL_CONST;
     val->data.string_val = strdup(value);
     return val;
 }
@@ -120,15 +119,13 @@ IRValue* ir_value_create_string(const char *value) {
 IRValue* ir_value_create_reg(int reg_num, IRType type) {
     IRValue *val = calloc(1, sizeof(IRValue));
     val->type = type;
-    val->kind = IR_VAL_REG;
     val->data.reg_num = reg_num;
     return val;
 }
 
 IRValue* ir_value_create_label(const char *label) {
     IRValue *val = calloc(1, sizeof(IRValue));
-    val->type = IR_TYPE_LABEL; // Keep type label for safety
-    val->kind = IR_VAL_LABEL;
+    val->type = IR_TYPE_LABEL;
     val->data.label = strdup(label);
     return val;
 }
@@ -143,59 +140,18 @@ IRModule* ir_generate_from_ast(void *ast_root) {
     
     // Create main function
     IRFunction *main_func = ir_function_create("main", IR_TYPE_INT);
-    module->functions = main_func;
     
     // Generate IR from AST
     ASTNode *root = (ASTNode*)ast_root;
+    ir_generate_from_ast_node(main_func, root);
     
-    if (root->type == AST_PROGRAM) {
-        // Iterate over all top-level statements
-        ASTNode *stmt = root->left;
-        while (stmt) {
-             if (stmt->type == AST_FUNCTION_DECL) {
-                 if (stmt->value) {
-                     // Create new function
-                     IRFunction *func = ir_function_create(stmt->value, IR_TYPE_INT); // TODO: return type
-                     
-                     // Add to module linked list
-                     IRFunction *last = module->functions;
-                     while (last->next) last = last->next;
-                     last->next = func;
-                     
-                     // Generate body
-                     if (stmt->children && stmt->child_count > 0) {
-                        for (int i = 0; i < stmt->child_count; i++) {
-                            ASTNode *param = stmt->children[i];
-                            if (param && param->value) {
-                                // Allocate stack slot for parameter (local 0 matches param 0)
-                                IRInstruction *alloc = ir_instruction_create(IR_ALLOC);
-                                alloc->dest = ir_value_create_reg(func->local_count++, IR_TYPE_INT);
-                                alloc->dest->name = strdup(param->value);
-                                ir_function_add_instruction(func, alloc);
-                                func->param_count++;
-                            }
-                        }
-                     }
-
-                     if (stmt->body) {
-                         ir_generate_from_ast_node(func, stmt->body);
-                     }
-                 }
-             } else {
-                 // Regular statement -> add to main
-                 ir_generate_from_ast_node(main_func, stmt);
-             }
-             stmt = stmt->next;
-        }
-    } else {
-        ir_generate_from_ast_node(main_func, root);
-    }
-    
-    // Add return 0 to main if not present
+    // Add return 0 if not present
     IRInstruction *ret_instr = ir_instruction_create(IR_RETURN);
     ret_instr->src1 = ir_value_create_int(0);
     ret_instr->comment = strdup("main");
     ir_function_add_instruction(main_func, ret_instr);
+    
+    module->functions = main_func;
     
     return module;
 }
@@ -208,48 +164,24 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
         case AST_PROGRAM:
             // fprintf(stderr, "DEBUG: Visiting AST_PROGRAM (left=%p, children=%d)\n", node->left, node->child_count);
             // Process linked list of statements (via node->left)
-            // Process statements
             for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
-                if (stmt->type == AST_FUNCTION_DECL) {
-                    if (stmt->value) {
-                         IRFunction *new_func = ir_function_create(stmt->value, IR_TYPE_INT);
-                         // Add to module (we need to pass module to this function or link it)
-                         // Helper needed: ir_module_add_function(module, new_func)
-                         // Since we don't have 'module' arg here, we might need to change signature.
-                         // But wait, ir_generate_from_ast creates the module.
-                    }
-                } else {
-                    ir_generate_from_ast_node(func, stmt);
-                }
+                ir_generate_from_ast_node(func, stmt);
+            }
+            // Also check children if any (hybrid approach)
+            for (int i = 0; i < node->child_count; i++) {
+                ir_generate_from_ast_node(func, node->children[i]);
             }
             break;
-
-        // AST_FUNCTION_DECL handled at top level in ir_generate_from_ast
-        case AST_FUNCTION_DECL:
-            break;
-
-        case AST_RETURN_STMT: {
-            if (node->left) ir_generate_from_ast_node(func, node->left);
-            else if (node->child_count > 0) ir_generate_from_ast_node(func, node->children[0]);
-            else {
-                // Return 0 if void
-                IRInstruction *zero = ir_instruction_create(IR_CONST_INT);
-                zero->dest = ir_value_create_reg(func->reg_count++, IR_TYPE_INT);
-                zero->src1 = ir_value_create_int(0);
-                ir_function_add_instruction(func, zero);
-            }
-            
-            IRInstruction *ret = ir_instruction_create(IR_RETURN);
-            // Use the last register as return value
-            ret->src1 = ir_value_create_reg(func->reg_count - 1, IR_TYPE_INT); 
-            ir_function_add_instruction(func, ret);
-            break;
-        }
             
         case AST_VAR_DECL: {
-            // Variable declaration: allocate space
+            // Variable declaration: allocate space based on type
+            IRType var_type = IR_TYPE_INT;
+            if (node->data_type == TYPE_STRING) {
+                var_type = IR_TYPE_STRING;
+            }
+            
             IRInstruction *alloc = ir_instruction_create(IR_ALLOC);
-            alloc->dest = ir_value_create_reg(func->local_count++, IR_TYPE_INT);
+            alloc->dest = ir_value_create_reg(func->local_count++, var_type);
             alloc->dest->name = node->value ? strdup(node->value) : NULL;
             ir_function_add_instruction(func, alloc);
             
@@ -281,44 +213,58 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
                 
                 IRInstruction *print = ir_instruction_create(IR_PRINT);
                 ir_function_add_instruction(func, print);
-            } else {
-                // Generic function call
-                // Generate arguments (pushing them to stack/regs)
-                for (int i = 0; i < node->child_count; i++) {
-                    ir_generate_from_ast_node(func, node->children[i]);
-                    // Result of arg is in last reg. Push it?
-                    // Yes, consistency: expr leaves result in reg. We PUSH it to save for call.
-                    IRInstruction *push = ir_instruction_create(IR_PUSH);
-                    ir_function_add_instruction(func, push);
-                }
-                
-                IRInstruction *call = ir_instruction_create(IR_CALL);
-                call->dest = ir_value_create_label(node->value);
-                call->src1 = ir_value_create_int(node->child_count); // Store arg count
-                ir_function_add_instruction(func, call);
-                
-                // Result of call is in RAX. Put it in a new register for subsequent use.
-                IRInstruction *move_ret = ir_instruction_create(IR_ADD); // Hack: use ADD 0 to move? Or define IR_MOVE/IR_COPY.
-                // Or just assume result is implicit. But our IR uses explicit regs.
-                // Let's create a dummy instruction that signifies "result of call".
-                // Actually, if we use RAX, we can just treat it as a source.
-                // But let's assume we want to use it.
-                // For now, let's leave it in RAX (implicit).
             }
             break;
             
         case AST_BINARY_EXPR: {
             // Check for assignment (=)
             if (node->value && strcmp(node->value, "=") == 0) {
-                // Left side must be identifier
+                // Handle array element assignment: arr[i] = value
+                if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                    ASTNode *array_access = node->left;
+                    
+                    // Evaluate array expression
+                    ir_generate_from_ast_node(func, array_access->left);
+                    
+                    // Push array pointer to stack
+                    IRInstruction *push_arr = ir_instruction_create(IR_PUSH);
+                    ir_function_add_instruction(func, push_arr);
+                    
+                    // Evaluate index expression
+                    ir_generate_from_ast_node(func, array_access->right);
+                    
+                    // Push index to stack
+                    IRInstruction *push_idx = ir_instruction_create(IR_PUSH);
+                    ir_function_add_instruction(func, push_idx);
+                    
+                    // Generate right side (value)
+                    if (node->right) ir_generate_from_ast_node(func, node->right);
+                    
+                    // Pop index to RBX
+                    IRInstruction *pop_idx = ir_instruction_create(IR_POP);
+                    ir_function_add_instruction(func, pop_idx);
+                    
+                    // Pop array pointer to RCX
+                    IRInstruction *pop_arr = ir_instruction_create(IR_POP);
+                    ir_function_add_instruction(func, pop_arr);
+                    
+                    // Store element at arr[index]
+                    IRInstruction *store_elem = ir_instruction_create(IR_STORE_ELEM);
+                    ir_function_add_instruction(func, store_elem);
+                    break;
+                }
+                
+                // Handle simple variable assignment
                 if (node->left && node->left->type == AST_IDENTIFIER && node->left->value) {
                     // Find variable register
                      int reg_num = -1;
+                    IRType var_type = IR_TYPE_INT;
                     IRInstruction *scan = func->instructions;
                     while (scan) {
-                        if (scan->opcode == IR_ALLOC && scan->dest && 
+                        if ((scan->opcode == IR_ALLOC || scan->opcode == IR_ALLOC_ARRAY) && scan->dest && 
                             scan->dest->name && strcmp(scan->dest->name, node->left->value) == 0) {
                             reg_num = scan->dest->data.reg_num;
+                            var_type = scan->dest->type;
                             break;
                         }
                         scan = scan->next;
@@ -330,7 +276,7 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
                         
                         // Store result to variable
                         IRInstruction *store = ir_instruction_create(IR_STORE);
-                        store->dest = ir_value_create_reg(reg_num, IR_TYPE_INT);
+                        store->dest = ir_value_create_reg(reg_num, var_type);
                         ir_function_add_instruction(func, store);
                     } else {
                         fprintf(stderr, "Warning: Assignment to undefined variable %s\n", node->left->value);
@@ -371,15 +317,28 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
         }
             
         case AST_LITERAL: {
-            // Load constant
-            IRInstruction *load_const = ir_instruction_create(IR_CONST_INT);
-            load_const->dest = ir_value_create_reg(func->reg_count++, IR_TYPE_INT);
-            if (node->value) {
-                load_const->src1 = ir_value_create_int(atoi(node->value));
+            // Load constant based on type
+            if (node->data_type == TYPE_STRING) {
+                // String literal
+                IRInstruction *load_str = ir_instruction_create(IR_CONST_STRING);
+                load_str->dest = ir_value_create_reg(func->reg_count++, IR_TYPE_STRING);
+                if (node->value) {
+                    load_str->src1 = ir_value_create_string(node->value);
+                } else {
+                    load_str->src1 = ir_value_create_string("");
+                }
+                ir_function_add_instruction(func, load_str);
             } else {
-                load_const->src1 = ir_value_create_int(0);
+                // Integer constant
+                IRInstruction *load_const = ir_instruction_create(IR_CONST_INT);
+                load_const->dest = ir_value_create_reg(func->reg_count++, IR_TYPE_INT);
+                if (node->value) {
+                    load_const->src1 = ir_value_create_int(atoi(node->value));
+                } else {
+                    load_const->src1 = ir_value_create_int(0);
+                }
+                ir_function_add_instruction(func, load_const);
             }
-            ir_function_add_instruction(func, load_const);
             break;
         }
             
@@ -470,15 +429,68 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
             }
             break;
             
+        case AST_ARRAY_LITERAL: {
+            // Allocate array with number of elements
+            int num_elements = node->child_count;
+            
+            // Generate IR_ALLOC_ARRAY instruction
+            IRInstruction *alloc_array = ir_instruction_create(IR_ALLOC_ARRAY);
+            alloc_array->src1 = ir_value_create_int(num_elements);
+            alloc_array->dest = ir_value_create_reg(func->reg_count++, IR_TYPE_POINTER);
+            ir_function_add_instruction(func, alloc_array);
+            
+            // Initialize each element
+            for (int i = 0; i < num_elements; i++) {
+                if (node->children[i]) {
+                    // Generate code for element value
+                    ir_generate_from_ast_node(func, node->children[i]);
+                    
+                    // Store element at index i
+                    IRInstruction *store_elem = ir_instruction_create(IR_STORE_ELEM);
+                    store_elem->src1 = alloc_array->dest; // Array pointer
+                    store_elem->src2 = ir_value_create_int(i); // Index
+                    ir_function_add_instruction(func, store_elem);
+                }
+            }
+            break;
+        }
+            
+        case AST_ARRAY_ACCESS: {
+            // Array access: arr[index]
+            // Left side is array, right side is index
+            if (node->left && node->right) {
+                // Evaluate array expression (should result in array pointer in RAX)
+                ir_generate_from_ast_node(func, node->left);
+                
+                // Push array pointer to stack
+                IRInstruction *push_arr = ir_instruction_create(IR_PUSH);
+                ir_function_add_instruction(func, push_arr);
+                
+                // Evaluate index expression
+                ir_generate_from_ast_node(func, node->right);
+                
+                // Pop array pointer back
+                IRInstruction *pop_arr = ir_instruction_create(IR_POP);
+                ir_function_add_instruction(func, pop_arr);
+                
+                // Load element
+                IRInstruction *load_elem = ir_instruction_create(IR_LOAD_ELEM);
+                load_elem->dest = ir_value_create_reg(func->reg_count++, IR_TYPE_INT);
+                ir_function_add_instruction(func, load_elem);
+            }
+            break;
+        }
+
         case AST_IDENTIFIER: {
-            // Find variable declaration to get its register index
-            // Simple linear scan of instructions for now
+            // Check if this is an array being accessed (via assignment target)
             int reg_num = -1;
+            IRType var_type = IR_TYPE_INT;
             IRInstruction *scan = func->instructions;
             while (scan) {
-                if (scan->opcode == IR_ALLOC && scan->dest && 
+                if ((scan->opcode == IR_ALLOC || scan->opcode == IR_ALLOC_ARRAY) && scan->dest && 
                     scan->dest->name && strcmp(scan->dest->name, node->value) == 0) {
                     reg_num = scan->dest->data.reg_num;
+                    var_type = scan->dest->type;
                     break;
                 }
                 scan = scan->next;
@@ -486,8 +498,8 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
             
             if (reg_num != -1) {
                 IRInstruction *load = ir_instruction_create(IR_LOAD);
-                load->dest = ir_value_create_reg(func->reg_count++, IR_TYPE_INT); // Temporary result reg
-                load->src1 = ir_value_create_reg(reg_num, IR_TYPE_INT); // Source variable reg
+                load->dest = ir_value_create_reg(func->reg_count++, var_type);
+                load->src1 = ir_value_create_reg(reg_num, var_type);
                 ir_function_add_instruction(func, load);
             } else {
                 fprintf(stderr, "Warning: Undefined variable %s in IR generation\n", node->value);
@@ -502,14 +514,6 @@ static void ir_generate_from_ast_node(IRFunction *func, ASTNode *node) {
             }
             break;
     }
-}
-
-/* Optimize IR (placeholder) */
-void ir_optimize(IRModule *module) {
-    // TODO: Implement optimizations
-    // - Dead code elimination
-    // - Constant folding
-    // - Common subexpression elimination
     (void)module;
 }
 
@@ -542,6 +546,15 @@ void ir_print(IRModule *module) {
                     printf("ALLOC %d", instr->dest->data.reg_num);
                     if (instr->dest->name) printf(" (%s)", instr->dest->name);
                     break;
+                case IR_ALLOC_ARRAY:
+                    printf("ALLOC_ARRAY %ld elements", instr->src1 ? instr->src1->data.int_val : 0);
+                    break;
+                case IR_STORE_ELEM:
+                    printf("STORE_ELEM");
+                    break;
+                case IR_LOAD_ELEM:
+                    printf("LOAD_ELEM");
+                    break;
                 case IR_STORE:
                     printf("STORE %d", instr->dest->data.reg_num);
                     break;
@@ -561,9 +574,6 @@ void ir_print(IRModule *module) {
                 case IR_JUMP: printf("JUMP"); break;
                 case IR_JUMP_IF_NOT: printf("JUMP_IF_NOT"); break;
                 case IR_LABEL: printf("LABEL %s", instr->dest->data.label); break;
-                case IR_CALL: 
-                    printf("CALL %s (args=%ld)", instr->dest->data.label, instr->src1 ? instr->src1->data.int_val : 0); 
-                    break;
                 default: printf("UNKNOWN (%d)", instr->opcode); break;
             }
             printf("\n");

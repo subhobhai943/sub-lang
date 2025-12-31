@@ -1,0 +1,16 @@
+# Class definition test
+#class Point
+  #var x = 0
+  #var y = 0
+#end
+
+# Create instance
+#var p = Point.new
+
+# Set fields
+p.x = 10
+p.y = 20
+
+# Print values
+print(p.x)
+print(p.y)

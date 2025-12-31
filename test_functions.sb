@@ -1,0 +1,20 @@
+# Test user-defined functions
+
+function add(a, b) {
+    return a + b
+}
+
+function greet(name) {
+    print(name)
+    return 0
+}
+
+# Test in main
+print("Testing function add:")
+var result = add(5, 3)
+print(result)
+
+print("Testing function greet:")
+greet("Hello, World!")
+
+print("Done!")

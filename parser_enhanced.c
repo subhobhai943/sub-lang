@@ -135,8 +135,25 @@ static ASTNode* parse_primary(ParserState *state) {
             ASTNode *call = create_node(AST_CALL_EXPR, name);
             
             // Parse arguments (simplified for now)
+            // Parse arguments
             if (!match(state, TOKEN_RPAREN)) {
-                call->left = parse_expression(state);
+                // Use a dynamic array for children
+                while (1) {
+                    ASTNode *arg = parse_expression(state);
+                    
+                    if (call->child_count == 0) {
+                        call->children = malloc(sizeof(ASTNode*));
+                    } else {
+                        call->children = realloc(call->children, sizeof(ASTNode*) * (call->child_count + 1));
+                    }
+                    call->children[call->child_count++] = arg;
+                    
+                    if (match(state, TOKEN_COMMA)) {
+                        advance(state);
+                    } else {
+                        break;
+                    }
+                }
             }
             
             expect(state, TOKEN_RPAREN);
