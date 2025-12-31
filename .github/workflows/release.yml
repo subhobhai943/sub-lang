@@ -60,7 +60,8 @@ jobs:
       - name: Build transpiler (Windows)
         if: runner.os == 'Windows'
         run: |
-          cl /I. sub_multilang.c parser_enhanced.c lexer.c semantic.c codegen.c codegen_multilang.c type_system.c /Fe:${{ matrix.artifact_name }}
+          choco install mingw --params "/threads:posix /exception:seh" -y
+          make transpiler
 
       - name: Build native compiler (Linux/macOS)
         if: runner.os != 'Windows'
