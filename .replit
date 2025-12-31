@@ -1,0 +1,29 @@
+modules = ["c-clang14", "bash", "nodejs-20"]
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Build and Test"
+
+[[workflows.workflow]]
+name = "Build and Test"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "make clean && make all && echo \"\" && echo \"=== Running example ===\" && ./subc-native example.sb example_output"
+
+[workflows.workflow.metadata]
+outputType = "console"
