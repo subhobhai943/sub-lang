@@ -1,0 +1,7 @@
+# Array test for native compiler
+var arr = [1, 2, 3]
+var x = arr[0]
+arr[1] = 10
+var y = arr[1]
+print(x)
+print(y)

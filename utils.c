@@ -5,6 +5,16 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include <stdarg.h>
+
+// Utility: Print compilation error
+void compile_error(const char *message, int line) {
+    fprintf(stderr, "Compilation error at line %d: %s\n", line, message);
+}
+
+void compile_error_with_col(const char *message, int line, int column) {
+    fprintf(stderr, "Compilation error at line %d, column %d: %s\n", line, column, message);
+}
 
 // String utilities
 char* string_concat(const char *s1, const char *s2) {

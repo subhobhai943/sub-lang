@@ -1,0 +1,10 @@
+function add(a, b) {
+    var result = a + b
+    return result
+}
+
+var x = 5
+var y = 3
+print(add(x, y))
+print(100)
+print(200)
