@@ -33,7 +33,7 @@ jobs:
           mkdir -p src/ir
           mkdir -p src/compilers
           mkdir -p src/include
-          echo "✓ Directories created"
+          echo "Directories created"
       
       - name: Move core compiler files
         run: |
@@ -47,7 +47,7 @@ jobs:
           git mv error_handler.c src/core/ || true
           git mv error_handler.h src/core/ || true
           git mv utils.c src/core/ || true
-          echo "✓ Core files moved (9 files)"
+          echo "Core files moved (9 files)"
       
       - name: Move code generation files
         run: |
@@ -64,14 +64,14 @@ jobs:
           git mv codegen_x64.h src/codegen/ || true
           git mv targets.c src/codegen/ || true
           git mv targets.h src/codegen/ || true
-          echo "✓ Codegen files moved (12 files)"
+          echo "Codegen files moved (12 files)"
       
       - name: Move IR files
         run: |
           echo "Moving IR files..."
           git mv ir.c src/ir/ || true
           git mv ir.h src/ir/ || true
-          echo "✓ IR files moved (2 files)"
+          echo "IR files moved (2 files)"
       
       - name: Move compiler files
         run: |
@@ -80,115 +80,105 @@ jobs:
           git mv sub_multilang.c src/compilers/ || true
           git mv sub_native.c src/compilers/ || true
           git mv sub_native_compiler.c src/compilers/ || true
-          echo "✓ Compiler files moved (4 files)"
+          echo "Compiler files moved (4 files)"
       
       - name: Move header files
         run: |
           echo "Moving header files..."
           git mv sub_compiler.h src/include/ || true
           git mv windows_compat.h src/include/ || true
-          echo "✓ Header files moved (2 files)"
+          echo "Header files moved (2 files)"
       
       - name: Create README files for each directory
         run: |
-          cat > src/core/README.md << 'EOF'
-# Core Compiler Components
-
-This directory contains the core components of the SUB language compiler:
-
-## Files
-
-- **lexer.c** - Tokenization and lexical analysis
-- **parser.c** - Basic parser implementation
-- **parser_enhanced.c** - Enhanced parser with additional features
-- **semantic.c** - Semantic analysis and symbol table management
-- **type_system.c** - Type system implementation
-- **type_system.h** - Type system header and definitions
-- **error_handler.c** - Error handling implementation
-- **error_handler.h** - Error handling header
-- **utils.c** - Utility functions for the compiler
-
-These files form the foundation of the SUB compiler pipeline.
-EOF
-
-          cat > src/codegen/README.md << 'EOF'
-# Code Generation Backends
-
-This directory contains all code generation backends for SUB language:
-
-## Files
-
-### Main Code Generation
-- **codegen.c** - Main code generation logic
-- **targets.c** - Target platform management
-- **targets.h** - Target platform definitions
-
-### Language-Specific Backends
-- **codegen_cpp.c/h** - C++ code generation
-- **codegen_rust.c/h** - Rust code generation
-- **codegen_x64.c/h** - x86-64 assembly generation
-- **codegen_native.c/h** - Native compilation support
-- **codegen_multilang.c** - Multi-language transpilation (Python, Java, JS, etc.)
-
-Each backend translates SUB IR to the target language or platform.
-EOF
-
-          cat > src/ir/README.md << 'EOF'
-# Intermediate Representation (IR)
-
-This directory contains the intermediate representation layer:
-
-## Files
-
-- **ir.c** - IR generation from AST
-- **ir.h** - IR data structures and definitions
-
-The IR is a platform-independent representation that sits between
-the AST and code generation, enabling optimizations and multiple backends.
-EOF
-
-          cat > src/compilers/README.md << 'EOF'
-# Main Compiler Executables
-
-This directory contains the main compiler driver programs:
-
-## Files
-
-- **sub.c** - Standard SUB compiler
-- **sub_multilang.c** - Multi-language transpiler (sublang)
-- **sub_native.c** - Native compiler (older version)
-- **sub_native_compiler.c** - Native compiler (newer version)
-
-Each file contains a main() function and orchestrates the compilation pipeline.
-EOF
-
-          cat > src/include/README.md << 'EOF'
-# Public Headers
-
-This directory contains public header files used across the compiler:
-
-## Files
-
-- **sub_compiler.h** - Main compiler header with all declarations
-- **windows_compat.h** - Windows compatibility definitions
-
-These headers should be included by all source files in the compiler.
-EOF
-
+          cat > src/core/README.md <<'EOFCORE'
+          # Core Compiler Components
+          
+          This directory contains the core components of the SUB language compiler.
+          
+          ## Files
+          
+          - lexer.c - Tokenization and lexical analysis
+          - parser.c - Basic parser implementation
+          - parser_enhanced.c - Enhanced parser with additional features
+          - semantic.c - Semantic analysis and symbol table management
+          - type_system.c - Type system implementation
+          - type_system.h - Type system header and definitions
+          - error_handler.c - Error handling implementation
+          - error_handler.h - Error handling header
+          - utils.c - Utility functions for the compiler
+          EOFCORE
+          
+          cat > src/codegen/README.md <<'EOFCODEGEN'
+          # Code Generation Backends
+          
+          This directory contains all code generation backends for SUB language.
+          
+          ## Files
+          
+          ### Main Code Generation
+          - codegen.c - Main code generation logic
+          - targets.c - Target platform management
+          - targets.h - Target platform definitions
+          
+          ### Language-Specific Backends
+          - codegen_cpp.c/h - C++ code generation
+          - codegen_rust.c/h - Rust code generation
+          - codegen_x64.c/h - x86-64 assembly generation
+          - codegen_native.c/h - Native compilation support
+          - codegen_multilang.c - Multi-language transpilation
+          EOFCODEGEN
+          
+          cat > src/ir/README.md <<'EOFIR'
+          # Intermediate Representation
+          
+          This directory contains the intermediate representation layer.
+          
+          ## Files
+          
+          - ir.c - IR generation from AST
+          - ir.h - IR data structures and definitions
+          EOFIR
+          
+          cat > src/compilers/README.md <<'EOFCOMPILERS'
+          # Main Compiler Executables
+          
+          This directory contains the main compiler driver programs.
+          
+          ## Files
+          
+          - sub.c - Standard SUB compiler
+          - sub_multilang.c - Multi-language transpiler
+          - sub_native.c - Native compiler (older version)
+          - sub_native_compiler.c - Native compiler (newer version)
+          EOFCOMPILERS
+          
+          cat > src/include/README.md <<'EOFINCLUDE'
+          # Public Headers
+          
+          This directory contains public header files used across the compiler.
+          
+          ## Files
+          
+          - sub_compiler.h - Main compiler header with all declarations
+          - windows_compat.h - Windows compatibility definitions
+          EOFINCLUDE
+          
           git add src/*/README.md
-          echo "✓ README files created"
+          echo "README files created"
       
       - name: Verify reorganization
         run: |
-          echo "\n=== Source Directory Structure ==="
-          tree src/ || ls -R src/
-          echo "\n=== File Count ==="
-          echo "Core files: $(ls src/core/*.c src/core/*.h 2>/dev/null | wc -l)"
-          echo "Codegen files: $(ls src/codegen/*.c src/codegen/*.h 2>/dev/null | wc -l)"
-          echo "IR files: $(ls src/ir/*.c src/ir/*.h 2>/dev/null | wc -l)"
-          echo "Compiler files: $(ls src/compilers/*.c 2>/dev/null | wc -l)"
-          echo "Header files: $(ls src/include/*.h 2>/dev/null | wc -l)"
-          echo "Total: $(find src/ -name '*.c' -o -name '*.h' | wc -l) files"
+          echo "Source Directory Structure:"
+          ls -R src/
+          echo ""
+          echo "File Count:"
+          echo "Core files: $(find src/core -name '*.c' -o -name '*.h' 2>/dev/null | wc -l)"
+          echo "Codegen files: $(find src/codegen -name '*.c' -o -name '*.h' 2>/dev/null | wc -l)"
+          echo "IR files: $(find src/ir -name '*.c' -o -name '*.h' 2>/dev/null | wc -l)"
+          echo "Compiler files: $(find src/compilers -name '*.c' 2>/dev/null | wc -l)"
+          echo "Header files: $(find src/include -name '*.h' 2>/dev/null | wc -l)"
+          echo "Total: $(find src/ -name '*.c' -o -name '*.h' 2>/dev/null | wc -l) files"
       
       - name: Commit changes
         run: |
@@ -218,21 +208,22 @@ EOF
       - name: Push changes
         run: |
           git push origin main
-          echo "✓ Changes pushed successfully!"
+          echo "Changes pushed successfully"
       
       - name: Summary
         run: |
-          echo "\n═══════════════════════════════════════════════"
-          echo "   SOURCE REORGANIZATION COMPLETE! ✓"
-          echo "═══════════════════════════════════════════════"
+          echo ""
+          echo "================================================"
+          echo "   SOURCE REORGANIZATION COMPLETE"
+          echo "================================================"
           echo ""
           echo "All source files have been moved to src/ directory."
           echo ""
           echo "Next steps:"
           echo "  1. Update Makefile to use new paths"
           echo "  2. Update CMakeLists.txt"
-          echo "  3. Update #include paths in source files"
+          echo "  3. Update include paths in source files"
           echo "  4. Test compilation"
           echo ""
           echo "See: docs/implementation/SRC_REORGANIZATION_PLAN.md"
-          echo "═══════════════════════════════════════════════"
+          echo "================================================"
