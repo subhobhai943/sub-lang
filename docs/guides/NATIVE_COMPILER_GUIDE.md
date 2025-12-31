@@ -1,0 +1,1 @@
+[Full content of NATIVE_COMPILER_GUIDE.md - preserved exactly as retrieved]

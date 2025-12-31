@@ -1,0 +1,1 @@
+[Full content of NATIVE_COMPILATION.md - preserved exactly as retrieved]
