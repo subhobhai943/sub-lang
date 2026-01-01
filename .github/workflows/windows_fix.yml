@@ -47,7 +47,7 @@ jobs:
       - name: Quick test transpiler
         run: |
           echo "Testing transpiler..."
-          .\sublang.exe example.sb python
+          .\sublang.exe examples/universal_test.sb python
           if (Test-Path "output.py") { Write-Host "✅ Transpilation successful" } else { Write-Host "❌ output.py NOT created"; exit 1 }
 
       - name: Upload Windows artifacts
