@@ -29,7 +29,7 @@ jobs:
           - os: windows-latest
             artifact_name: sublang-windows.exe
             native_name: subc-native-windows.exe
-            asset_name: sublang-windows-x64.exe
+            asset_name: sublang-windows-x64
 
     steps:
       - name: Checkout code
@@ -76,6 +76,19 @@ jobs:
           chmod +x subc-native
           mv subc-native ${{ matrix.native_name }}
 
+      - name: Verify artifacts (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          ls -lh ${{ matrix.artifact_name }}
+          ls -lh ${{ matrix.native_name }}
+
+      - name: Verify artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem ${{ matrix.artifact_name }}
+          Get-ChildItem ${{ matrix.native_name }}
+
       - name: Upload transpiler artifact
         uses: actions/upload-artifact@v4
         with:
@@ -106,6 +119,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Listing all downloaded artifacts:"
+          ls -lR ./artifacts/
 
       - name: Get version
         id: version
@@ -252,6 +270,7 @@ jobs:
           - Resolved Windows-specific build errors
           - Improved Windows path handling
           - Fixed Windows executable naming
+          - Fixed Windows artifact not appearing in releases
           
           ---
           
