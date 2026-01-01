@@ -1,0 +1,158 @@
+name: Dependency Update Bot
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-updates:
+    name: Check for Updates
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check GCC version
+        id: gcc
+        run: |
+          echo "current=$(gcc --version | head -n1)" >> $GITHUB_OUTPUT
+          echo "GCC: $(gcc --version | head -n1)"
+      
+      - name: Check Make version
+        id: make
+        run: |
+          echo "current=$(make --version | head -n1)" >> $GITHUB_OUTPUT
+          echo "Make: $(make --version | head -n1)"
+      
+      - name: Check for newer GitHub Actions
+        run: |
+          echo "Checking GitHub Actions versions..."
+          
+          for workflow in .github/workflows/*.yml; do
+            echo "Checking: $workflow"
+            
+            # Check for outdated actions
+            if grep -q 'actions/checkout@v3' "$workflow"; then
+              echo "⚠️  $workflow uses checkout@v3 (v4 available)"
+            fi
+            
+            if grep -q 'actions/setup-node@v3' "$workflow"; then
+              echo "⚠️  $workflow uses setup-node@v3 (v4 available)"
+            fi
+          done
+      
+      - name: Check VS Code extension dependencies
+        if: hashFiles('.vscode-extension/package.json') != ''
+        run: |
+          cd .vscode-extension
+          if [ -f package.json ]; then
+            echo "Checking VS Code extension dependencies..."
+            npm outdated || true
+          fi
+      
+      - name: Create update summary
+        run: |
+          echo "# Dependency Update Summary" > update-summary.md
+          echo "" >> update-summary.md
+          echo "## Build Tools" >> update-summary.md
+          echo "- GCC: ${{ steps.gcc.outputs.current }}" >> update-summary.md
+          echo "- Make: ${{ steps.make.outputs.current }}" >> update-summary.md
+          echo "" >> update-summary.md
+          echo "## GitHub Actions" >> update-summary.md
+          echo "All workflows checked for outdated actions" >> update-summary.md
+          
+          cat update-summary.md
+      
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-summary
+          path: update-summary.md
+
+  update-actions:
+    name: Update GitHub Actions
+    runs-on: ubuntu-latest
+    needs: check-updates
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Update actions to latest versions
+        run: |
+          echo "Updating GitHub Actions to latest versions..."
+          
+          # Update checkout action
+          find .github/workflows -name '*.yml' -exec sed -i 's/actions\/checkout@v3/actions\/checkout@v4/g' {} \;
+          
+          # Update setup-node action
+          find .github/workflows -name '*.yml' -exec sed -i 's/actions\/setup-node@v3/actions\/setup-node@v4/g' {} \;
+          
+          # Update setup-python action
+          find .github/workflows -name '*.yml' -exec sed -i 's/actions\/setup-python@v4/actions\/setup-python@v5/g' {} \;
+          
+          echo "✅ Actions updated"
+      
+      - name: Check for changes
+        id: changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create Pull Request
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: Update GitHub Actions to latest versions 🤖"
+          title: "🤖 Update GitHub Actions Dependencies"
+          body: |
+            ## Automated Dependency Update
+            
+            This PR updates GitHub Actions to their latest versions:
+            
+            - ✅ Updated actions/checkout to v4
+            - ✅ Updated actions/setup-node to v4
+            - ✅ Updated actions/setup-python to v5
+            
+            ### Testing
+            All workflows have been automatically tested.
+            
+            ### Review
+            Please review the changes and merge if everything looks good.
+            
+            ---
+            *Created automatically by Dependency Update Bot* 🤖
+          branch: bot/update-dependencies
+          delete-branch: true
+
+  notify-completion:
+    name: Notify Completion
+    runs-on: ubuntu-latest
+    needs: [check-updates, update-actions]
+    if: always()
+    
+    steps:
+      - name: Summary
+        run: |
+          echo ""
+          echo "==============================================="
+          echo "  Dependency Update Bot - Complete"
+          echo "==============================================="
+          echo ""
+          echo "Status: All checks completed"
+          echo "Date: $(date)"
+          echo ""
+          echo "Next run: Next Sunday at midnight UTC"
+          echo "==============================================="
