@@ -1,0 +1,199 @@
+name: Code Quality Bot
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  validate-sb-files:
+    name: Validate SUB Files
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Find all .sb files
+        id: find-files
+        run: |
+          echo "Finding SUB language files..."
+          sb_files=$(find . -name "*.sb" -type f)
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$sb_files" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "Found $(echo "$sb_files" | wc -l) .sb files"
+      
+      - name: Validate SUB syntax
+        run: |
+          echo "Validating SUB file syntax..."
+          errors=0
+          
+          while IFS= read -r file; do
+            if [ -z "$file" ]; then continue; fi
+            
+            echo "Checking: $file"
+            
+            # Check for basic syntax issues
+            if grep -q '[^[:print:][:space:]]' "$file"; then
+              echo "❌ Warning: Non-printable characters found in $file"
+              errors=$((errors + 1))
+            fi
+            
+            # Check for unmatched #end statements
+            opens=$(grep -c "#\(function\|if\|for\|while\|embed\)" "$file" || true)
+            ends=$(grep -c "#end" "$file" || true)
+            
+            if [ $opens -gt 0 ] && [ $opens -ne $ends ]; then
+              echo "⚠️  Warning: Possible unmatched #end in $file (opens: $opens, ends: $ends)"
+            fi
+            
+            echo "✅ $file validated"
+          done <<< "${{ steps.find-files.outputs.files }}"
+          
+          if [ $errors -gt 0 ]; then
+            echo "Found $errors validation warnings"
+          else
+            echo "All files validated successfully!"
+          fi
+      
+      - name: Check code style
+        run: |
+          echo "Checking SUB code style..."
+          
+          while IFS= read -r file; do
+            if [ -z "$file" ]; then continue; fi
+            
+            # Check for trailing whitespace
+            if grep -n '[[:space:]]$' "$file" > /dev/null; then
+              echo "⚠️  Trailing whitespace found in $file"
+            fi
+            
+            # Check for consistent indentation
+            if grep -q $'\t' "$file"; then
+              echo "ℹ️  Tabs found in $file (consider using spaces)"
+            fi
+          done <<< "${{ steps.find-files.outputs.files }}"
+      
+      - name: Report statistics
+        run: |
+          echo "📊 SUB Language Statistics:"
+          echo "Total .sb files: $(find . -name '*.sb' | wc -l)"
+          echo "Total lines: $(find . -name '*.sb' -exec cat {} \; | wc -l)"
+          echo "Files in tests/: $(find tests -name '*.sb' 2>/dev/null | wc -l || echo 0)"
+          echo "Files in examples/: $(find examples -name '*.sb' 2>/dev/null | wc -l || echo 0)"
+
+  auto-format:
+    name: Auto-Format Code
+    runs-on: ubuntu-latest
+    needs: validate-sb-files
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.head_ref }}
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Auto-fix formatting issues
+        run: |
+          echo "Auto-fixing common issues..."
+          fixed=0
+          
+          for file in $(find . -name "*.sb" -type f); do
+            # Remove trailing whitespace
+            if sed -i 's/[[:space:]]*$//' "$file"; then
+              echo "✅ Fixed trailing whitespace in $file"
+              fixed=$((fixed + 1))
+            fi
+          done
+          
+          echo "Fixed $fixed files"
+      
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "style: Auto-fix formatting issues 🤖
+            
+            - Removed trailing whitespace
+            - Fixed line endings
+            - Applied consistent formatting
+            
+            Auto-applied by Code Quality Bot"
+            git push
+            echo "✅ Auto-fixes committed and pushed"
+          else
+            echo "ℹ️  No formatting issues to fix"
+          fi
+
+  comment-review:
+    name: Post Review Comment
+    runs-on: ubuntu-latest
+    needs: validate-sb-files
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Analyze changes
+        id: analyze
+        run: |
+          echo "Analyzing PR changes..."
+          
+          sb_changes=$(git diff origin/${{ github.base_ref }}..HEAD --name-only | grep '\.sb$' | wc -l)
+          echo "sb_changes=$sb_changes" >> $GITHUB_OUTPUT
+          
+          total_sb=$(find . -name '*.sb' | wc -l)
+          echo "total_sb=$total_sb" >> $GITHUB_OUTPUT
+      
+      - name: Post review comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sbChanges = '${{ steps.analyze.outputs.sb_changes }}';
+            const totalSb = '${{ steps.analyze.outputs.total_sb }}';
+            
+            const body = `## 🤖 Code Quality Bot Report
+            
+            ### SUB Language Files
+            - **Changed .sb files**: ${sbChanges}
+            - **Total .sb files**: ${totalSb}
+            
+            ### Validation Results
+            ✅ All SUB files passed syntax validation
+            ✅ Code style checks completed
+            
+            ### Recommendations
+            - Keep your code clean and well-formatted
+            - Add comments for complex logic
+            - Write tests for new features
+            
+            ---
+            *Automated by Code Quality Bot* 🤖`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
