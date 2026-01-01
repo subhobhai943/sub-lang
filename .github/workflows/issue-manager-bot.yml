@@ -1,0 +1,249 @@
+name: Issue Manager Bot
+
+on:
+  issues:
+    types: [opened, labeled, unlabeled]
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: '0 0 * * *'  # Daily
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  welcome-new-contributor:
+    name: Welcome New Contributors
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+    
+    steps:
+      - name: Check if first-time contributor
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const creator = context.payload.issue.user.login;
+            
+            // Check if user has any previous issues or PRs
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              creator: creator,
+              state: 'all'
+            });
+            
+            const prs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all'
+            });
+            
+            const userPRs = prs.data.filter(pr => pr.user.login === creator);
+            
+            // If this is their first issue
+            if (issues.data.length === 1 && userPRs.length === 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `## Welcome to SUB Language! 👋
+                
+                Thank you for opening your first issue! We're excited to have you in our community.
+                
+                ### Getting Help
+                - 📚 Check our [Documentation](https://github.com/${context.repo.owner}/${context.repo.repo}/tree/main/docs)
+                - 💬 Join our [Discussions](https://github.com/${context.repo.owner}/${context.repo.repo}/discussions)
+                - ❓ See [FAQs](https://github.com/${context.repo.owner}/${context.repo.repo}/wiki/FAQ)
+                
+                ### Contributing
+                Interested in contributing? Check out:
+                - [Contributing Guide](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CONTRIBUTING.md)
+                - [Good First Issues](https://github.com/${context.repo.owner}/${context.repo.repo}/labels/good%20first%20issue)
+                
+                A maintainer will review your issue soon. Thank you for your patience!
+                
+                ---
+                *Welcome message by Issue Manager Bot* 🤖`
+              });
+              
+              // Add first-time contributor label
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: ['first-time contributor']
+              });
+            }
+
+  auto-label:
+    name: Auto-Label Issues
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+    
+    steps:
+      - name: Label based on content
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const title = issue.title.toLowerCase();
+            const body = issue.body?.toLowerCase() || '';
+            const labels = [];
+            
+            // Bug reports
+            if (title.includes('bug') || title.includes('error') || title.includes('crash') ||
+                body.includes('error') || body.includes('crash') || body.includes('exception')) {
+              labels.push('bug');
+            }
+            
+            // Feature requests
+            if (title.includes('feature') || title.includes('enhancement') || 
+                title.includes('add') || body.includes('feature request')) {
+              labels.push('enhancement');
+            }
+            
+            // Documentation
+            if (title.includes('doc') || title.includes('readme') || 
+                body.includes('documentation')) {
+              labels.push('documentation');
+            }
+            
+            // Questions
+            if (title.includes('how') || title.includes('question') || title.includes('help') ||
+                title.startsWith('?')) {
+              labels.push('question');
+            }
+            
+            // Compiler related
+            if (body.includes('compiler') || body.includes('compilation') || 
+                title.includes('compile')) {
+              labels.push('compiler');
+            }
+            
+            // Syntax highlighting
+            if (body.includes('syntax') || body.includes('highlight') || 
+                title.includes('syntax')) {
+              labels.push('syntax-highlighting');
+            }
+            
+            // Performance
+            if (body.includes('slow') || body.includes('performance') || 
+                title.includes('speed') || title.includes('optimization')) {
+              labels.push('performance');
+            }
+            
+            // Add labels if any found
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: labels
+              });
+              
+              console.log(`Added labels: ${labels.join(', ')}`);
+            }
+
+  respond-to-common-questions:
+    name: Auto-Respond to Common Questions
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+    
+    steps:
+      - name: Check for common questions
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const title = issue.title.toLowerCase();
+            const body = issue.body?.toLowerCase() || '';
+            
+            let response = '';
+            
+            // Installation help
+            if (title.includes('install') || body.includes('how to install')) {
+              response = `## Installation Help 🛠️
+              
+              To install SUB language:
+              
+              \`\`\`bash
+              git clone https://github.com/${context.repo.owner}/${context.repo.repo}.git
+              cd sub-lang
+              make all
+              \`\`\`
+              
+              See our [Installation Guide](https://github.com/${context.repo.owner}/${context.repo.repo}#-installation--build) for more details!`;
+            }
+            
+            // Syntax highlighting
+            if (title.includes('syntax highlight') || body.includes('syntax highlighting')) {
+              response = `## Syntax Highlighting Info 🌈
+              
+              SUB language has syntax highlighting support! Check:
+              - [Syntax Highlighting Guide](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/docs/SYNTAX_HIGHLIGHTING.md)
+              - VS Code Extension: \`.vscode-extension/\`
+              
+              For GitHub highlighting, it may take a few minutes to process after pushing changes.`;
+            }
+            
+            // Compilation errors
+            if (title.includes('compilation error') || body.includes('compile error')) {
+              response = `## Compilation Troubleshooting 🔧
+              
+              Common fixes:
+              1. Make sure GCC/Clang is installed
+              2. Run \`make clean && make\`
+              3. Check file paths in Makefile
+              4. Verify all source files exist in \`src/\`
+              
+              Please share:
+              - Your OS and compiler version
+              - Full error message
+              - Build command used`;
+            }
+            
+            if (response) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: response + '\n\n---\n*Auto-response by Issue Manager Bot* 🤖\n\nIf this doesn\'t help, a maintainer will assist you soon!'
+              });
+            }
+
+  manage-stale-issues:
+    name: Manage Stale Issues
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Close stale issues
+        uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          stale-issue-message: |
+            This issue has been automatically marked as stale because it has not had recent activity.
+            
+            It will be closed in 7 days if no further activity occurs.
+            
+            If this issue is still relevant, please:
+            - Add a comment to keep it open
+            - Provide additional information
+            - Remove the 'stale' label
+            
+            Thank you for your contributions! 🙏
+          close-issue-message: |
+            This issue has been automatically closed due to inactivity.
+            
+            If you believe this is still relevant, please:
+            - Reopen the issue
+            - Provide updated information
+            - Start a new discussion
+            
+            Thank you!
+          days-before-stale: 30
+          days-before-close: 7
+          stale-issue-label: 'stale'
+          exempt-issue-labels: 'pinned,security,roadmap'
