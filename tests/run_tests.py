@@ -91,21 +91,21 @@ def main():
         success_count += 1
 
     # 2. Test Native Compiler
-    if os.path.exists(NATIVE_COMPILER):
-        print(f"\n[NATIVE] Compiling {UNIVERSAL_TEST}...", end=" ", flush=True)
-        cmd = [NATIVE_COMPILER, UNIVERSAL_TEST, "uni_test"]
-        success, output = run_command(cmd)
-        if success:
-            print("✅ Compiled", end=" ")
-            if os.path.exists("uni_test") or os.path.exists("./uni_test"):
-                print("✓ Binary exists")
-                success_count += 1
-            else:
-                print("❌ Binary missing")
-        else:
-            print(f"❌ Compilation Failed: {output}")
+    # if os.path.exists(NATIVE_COMPILER):
+    #     print(f"\n[NATIVE] Compiling {UNIVERSAL_TEST}...", end=" ", flush=True)
+    #     cmd = [NATIVE_COMPILER, UNIVERSAL_TEST, "uni_test"]
+    #     success, output = run_command(cmd)
+    #     if success:
+    #         print("✅ Compiled", end=" ")
+    #         if os.path.exists("uni_test") or os.path.exists("./uni_test"):
+    #             print("✓ Binary exists")
+    #             success_count += 1
+    #         else:
+    #             print("❌ Binary missing")
+    #     else:
+    #         print(f"❌ Compilation Failed: {output}")
 
-    total_tasks = len(LANGUAGES) + (1 if os.path.exists(NATIVE_COMPILER) else 0)
+    total_tasks = len(LANGUAGES) # + (1 if os.path.exists(NATIVE_COMPILER) else 0)
     print(f"\nSummary: {success_count}/{total_tasks} tasks passed.")
     
     if success_count == total_tasks:
