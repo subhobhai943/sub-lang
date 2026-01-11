@@ -8,9 +8,7 @@
 
 static LanguageInfo language_info_table[] = {
     {"c",          ".c",     "gcc",        "gcc output.c -o program && ./program"},
-    {"cpp",        ".cpp",   "g++",        "g++ -std=c++17 output.cpp -o program && ./program"},
-    {"cpp17",      ".cpp",   "g++",        "g++ -std=c++17 output.cpp -o program && ./program"},
-    {"cpp20",      ".cpp",   "g++",        "g++ -std=c++20 output.cpp -o program && ./program"},
+    
     {"python",     ".py",    "python3",    "python3 output.py"},
     {"java",       ".java",  "javac",      "javac SubProgram.java && java SubProgram"},
     {"swift",      ".swift", "swiftc",     "swiftc output.swift -o program && ./program"},
@@ -47,31 +45,11 @@ static char* codegen_unimplemented(ASTNode *ast, const char *source) {
     return NULL;
 }
 
-#include "codegen_cpp.h"
 
-static char* codegen_cpp_default(ASTNode *ast, const char *source) {
-    CPPCodegenOptions options;
-    codegen_cpp_get_default_options(CPP_VER_17, &options);
-    return codegen_cpp(ast, source, &options);
-}
-
-static char* codegen_cpp_17(ASTNode *ast, const char *source) {
-    CPPCodegenOptions options;
-    codegen_cpp_get_default_options(CPP_VER_17, &options);
-    return codegen_cpp(ast, source, &options);
-}
-
-static char* codegen_cpp_20(ASTNode *ast, const char *source) {
-    CPPCodegenOptions options;
-    codegen_cpp_get_default_options(CPP_VER_20, &options);
-    return codegen_cpp(ast, source, &options);
-}
 
 static TargetRegistry target_registry[] = {
     {LANG_C,          "c",          NULL,                  true},
-    {LANG_CPP,        "cpp",        codegen_cpp_default,   true},
-    {LANG_CPP17,      "cpp17",      codegen_cpp_17,        true},
-    {LANG_CPP20,      "cpp20",      codegen_cpp_20,        true},
+    
     {LANG_PYTHON,     "python",     codegen_python,        true},
     {LANG_JAVA,       "java",       codegen_java,          true},
     {LANG_SWIFT,      "swift",      codegen_swift,         true},
@@ -110,9 +88,7 @@ TargetLanguage parse_language(const char *lang_str) {
     if (!lang_str) return LANG_C;
     
     if (strcasecmp(lang_str, "c") == 0) return LANG_C;
-    if (strcasecmp(lang_str, "cpp") == 0 || strcasecmp(lang_str, "c++") == 0) return LANG_CPP;
-    if (strcasecmp(lang_str, "cpp17") == 0 || strcasecmp(lang_str, "c++17") == 0) return LANG_CPP17;
-    if (strcasecmp(lang_str, "cpp20") == 0 || strcasecmp(lang_str, "c++20") == 0) return LANG_CPP20;
+    
     if (strcasecmp(lang_str, "python") == 0 || strcasecmp(lang_str, "py") == 0) return LANG_PYTHON;
     if (strcasecmp(lang_str, "java") == 0) return LANG_JAVA;
     if (strcasecmp(lang_str, "swift") == 0) return LANG_SWIFT;

@@ -5,10 +5,13 @@
    ======================================== */
 
 #include "codegen_native.h"
+#include "ir.h"
 #include "windows_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include "codegen_x64.h"
 
 /* Assembly code buffer */
 typedef struct {

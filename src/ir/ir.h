@@ -116,19 +116,19 @@ typedef struct IRInstruction {
 } IRInstruction;
 
 /* Symbol Table Entry */
-typedef struct Symbol {
+typedef struct IRSymbol {
     char *name;
     int stack_offset; // Offset from base pointer (RBP)
     IRType type;
-    struct Symbol *next;
-} Symbol;
+    struct IRSymbol *next;
+} IRSymbol;
 
 /* Symbol Table (Scope) */
-typedef struct SymbolTable {
-    Symbol *head;
-    struct SymbolTable *parent;
+typedef struct IRSymbolTable {
+    IRSymbol *head;
+    struct IRSymbolTable *parent;
     int current_offset;
-} SymbolTable;
+} IRSymbolTable;
 
 /* IR Function */
 typedef struct IRFunction {
@@ -139,7 +139,7 @@ typedef struct IRFunction {
     IRInstruction *instructions;  // Linked list of instructions
     int local_count;      // Number of local variables
     int reg_count;        // Number of virtual registers used
-    SymbolTable *sym_table; // Function's symbol table
+    IRSymbolTable *sym_table; // Function's symbol table
     struct IRFunction *next;
 } IRFunction;
 
@@ -170,16 +170,16 @@ typedef struct IRModule {
 } IRModule;
 
 /* Symbol Table Functions */
-SymbolTable* symbol_table_create(SymbolTable *parent);
-void symbol_table_free(SymbolTable *table);
-Symbol* symbol_table_add(SymbolTable *table, const char *name, IRType type);
-Symbol* symbol_table_lookup(SymbolTable *table, const char *name);
+IRSymbolTable* ir_symbol_table_create(IRSymbolTable *parent);
+void ir_symbol_table_free(IRSymbolTable *table);
+IRSymbol* ir_symbol_table_add(IRSymbolTable *table, const char *name, IRType type);
+IRSymbol* ir_symbol_table_lookup(IRSymbolTable *table, const char *name);
 
 /* IR Builder API */
 IRModule* ir_module_create(void);
 void ir_module_free(IRModule *module);
 
-IRFunction* ir_function_create(const char *name, IRType return_type, SymbolTable *parent_scope);
+IRFunction* ir_function_create(const char *name, IRType return_type, IRSymbolTable *parent_scope);
 void ir_function_add_param(IRFunction *func, IRValue *param);
 void ir_function_add_instruction(IRFunction *func, IRInstruction *instr);
 

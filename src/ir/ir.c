@@ -8,6 +8,7 @@
 #include "ir.h"
 #include "sub_compiler.h"
 #include "windows_compat.h"
+#include "codegen_x64.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -17,8 +18,8 @@
    Symbol Table Implementation
    ======================================== */
 
-SymbolTable* symbol_table_create(SymbolTable *parent) {
-    SymbolTable *table = calloc(1, sizeof(SymbolTable));
+IRSymbolTable* ir_symbol_table_create(IRSymbolTable *parent) {
+    IRSymbolTable *table = calloc(1, sizeof(IRSymbolTable));
     table->parent = parent;
     table->head = NULL;
     // Stack grows down. First local is at -8, next at -16, etc.
@@ -26,11 +27,11 @@ SymbolTable* symbol_table_create(SymbolTable *parent) {
     return table;
 }
 
-void symbol_table_free(SymbolTable *table) {
+void ir_symbol_table_free(IRSymbolTable *table) {
     if (!table) return;
-    Symbol *current = table->head;
+    IRSymbol *current = table->head;
     while (current) {
-        Symbol *next = current->next;
+        IRSymbol *next = current->next;
         free(current->name);
         free(current);
         current = next;
@@ -38,9 +39,9 @@ void symbol_table_free(SymbolTable *table) {
     free(table);
 }
 
-Symbol* symbol_table_add(SymbolTable *table, const char *name, IRType type) {
+IRSymbol* ir_symbol_table_add(IRSymbolTable *table, const char *name, IRType type) {
     if (!table || !name) return NULL;
-    Symbol *sym = calloc(1, sizeof(Symbol));
+    IRSymbol *sym = calloc(1, sizeof(IRSymbol));
     sym->name = strdup(name);
     sym->type = type;
     // Each local variable is 8 bytes (for simplicity)
@@ -54,11 +55,11 @@ Symbol* symbol_table_add(SymbolTable *table, const char *name, IRType type) {
     return sym;
 }
 
-Symbol* symbol_table_lookup(SymbolTable *table, const char *name) {
+IRSymbol* ir_symbol_table_lookup(IRSymbolTable *table, const char *name) {
     if (!table || !name) return NULL;
-    SymbolTable *current_scope = table;
+    IRSymbolTable *current_scope = table;
     while (current_scope) {
-        Symbol *sym = current_scope->head;
+        IRSymbol *sym = current_scope->head;
         while (sym) {
             if (strcmp(sym->name, name) == 0) {
                 return sym;
@@ -96,7 +97,7 @@ void ir_module_free(IRModule *module) {
             free(instr);
             instr = next_instr;
         }
-        symbol_table_free(func->sym_table);
+        ir_symbol_table_free(func->sym_table);
         free(func->name);
         free(func);
         func = next;
@@ -110,11 +111,11 @@ void ir_module_free(IRModule *module) {
     free(module);
 }
 
-IRFunction* ir_function_create(const char *name, IRType return_type, SymbolTable *parent_scope) {
+IRFunction* ir_function_create(const char *name, IRType return_type, IRSymbolTable *parent_scope) {
     IRFunction *func = calloc(1, sizeof(IRFunction));
     func->name = strdup(name);
     func->return_type = return_type;
-    func->sym_table = symbol_table_create(parent_scope);
+    func->sym_table = ir_symbol_table_create(parent_scope);
     return func;
 }
 
@@ -186,7 +187,7 @@ IRModule* ir_generate_from_ast(void *ast_root) {
     
     ASTNode *root = (ASTNode*)ast_root;
     IRModule *module = ir_module_create();
-    SymbolTable *global_scope = symbol_table_create(NULL);
+    IRSymbolTable *global_scope = ir_symbol_table_create(NULL);
     
     // Create main function
     IRFunction *main_func = ir_function_create("main", IR_TYPE_INT, global_scope);
@@ -229,7 +230,7 @@ IRModule* ir_generate_from_ast(void *ast_root) {
                 for (int i = 0; i < func_ast->child_count; i++) {
                     ASTNode *param = func_ast->children[i];
                     if (param && param->value) {
-                        symbol_table_add(func->sym_table, param->value, IR_TYPE_INT); // TODO type
+                        ir_symbol_table_add(func->sym_table, param->value, IR_TYPE_INT); // TODO type
                         func->param_count++;
                     }
                 }
@@ -254,7 +255,7 @@ IRModule* ir_generate_from_ast(void *ast_root) {
         ir_function_add_instruction(func, ret_instr);
     }
     
-    symbol_table_free(global_scope);
+    ir_symbol_table_free(global_scope);
     return module;
 }
 
@@ -284,7 +285,7 @@ static void ir_generate_from_ast_node(IRModule *module, IRFunction *func, ASTNod
         }
             
         case AST_VAR_DECL: {
-            Symbol *sym = symbol_table_add(func->sym_table, node->value, IR_TYPE_INT); // TODO: type
+            IRSymbol *sym = ir_symbol_table_add(func->sym_table, node->value, IR_TYPE_INT); // TODO: type
             func->local_count++;
             
             if (node->right) {
@@ -338,7 +339,7 @@ static void ir_generate_from_ast_node(IRModule *module, IRFunction *func, ASTNod
         case AST_BINARY_EXPR: {
             if (node->value && strcmp(node->value, "=") == 0) {
                 if (node->left && node->left->type == AST_IDENTIFIER) {
-                    Symbol *sym = symbol_table_lookup(func->sym_table, node->left->value);
+                    IRSymbol *sym = ir_symbol_table_lookup(func->sym_table, node->left->value);
                     if (sym) {
                         ir_generate_from_ast_node(module, func, node->right);
                         IRInstruction *store = ir_instruction_create(IR_STORE);
@@ -388,7 +389,7 @@ static void ir_generate_from_ast_node(IRModule *module, IRFunction *func, ASTNod
         }
             
         case AST_IDENTIFIER: {
-            Symbol *sym = symbol_table_lookup(func->sym_table, node->value);
+            IRSymbol *sym = ir_symbol_table_lookup(func->sym_table, node->value);
             if (sym) {
                 IRInstruction *load = ir_instruction_create(IR_LOAD);
                 load->src1 = ir_value_create_int(sym->stack_offset);

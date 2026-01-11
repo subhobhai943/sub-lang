@@ -1,19 +1,18 @@
 # SUB Language Compiler Makefile
-# Supports both native compilation and transpilation
 
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -O2 -Isrc/include -Isrc/core -Isrc/codegen -Isrc/ir -I.
 LDFLAGS = 
 
-# Source files for native compiler
-NATIVE_SOURCES = src/compilers/sub_native_compiler.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/ir/ir.c src/codegen/codegen_x64.c src/core/utils.c
-NATIVE_OBJECTS = $(NATIVE_SOURCES:.c=.o)
-NATIVE_TARGET = subc-native
+# Source files for the main compiler/transpiler (sub)
+COMPILER_SRC = src/compilers/sub.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/targets.c src/core/utils.c
+COMPILER_OBJ = $(COMPILER_SRC:.c=.o)
+COMPILER_TARGET = sub
 
-# Source files for transpiler
-TRANS_SOURCES = src/compilers/sub_multilang.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/core/type_system.c src/core/utils.c src/codegen/codegen_cpp.c src/codegen/targets.c
-TRANS_OBJECTS = $(TRANS_SOURCES:.c=.o)
-TRANS_TARGET = sublang
+# Source files for the native compiler (subc)
+NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/ir/ir.c src/codegen/codegen_native.c src/core/utils.c
+NATIVE_COMPILER_OBJ = $(NATIVE_COMPILER_SRC:.c=.o)
+NATIVE_COMPILER_TARGET = subc
 
 # Platform detection
 UNAME_S := $(shell uname -s)
@@ -27,136 +26,48 @@ else
     # Windows (MinGW/Cygwin/MSYS2)
     CFLAGS += -DWINDOWS
     LDFLAGS += -static
-    NATIVE_TARGET = subc-native.exe
-    TRANS_TARGET = sublang.exe
+    COMPILER_TARGET = sub.exe
+    NATIVE_COMPILER_TARGET = subc.exe
 endif
 
-.PHONY: all clean native transpiler install test help
+.PHONY: all clean compiler native_compiler help
 
 # Default target - build both
-all: native transpiler
-	@echo ""
-	@echo "✅ Build complete!"
-	@echo ""
-	@echo "Native Compiler: ./$(NATIVE_TARGET)"
-	@echo "  Usage: ./$(NATIVE_TARGET) program.sb [output]"
-	@echo "  Example: ./$(NATIVE_TARGET) example.sb myapp"
-	@echo ""
-	@echo "Transpiler: ./$(TRANS_TARGET)"
-	@echo "  Usage: ./$(TRANS_TARGET) program.sb <language>"
-	@echo "  Example: ./$(TRANS_TARGET) example.sb python"
-	@echo ""
+all: compiler native_compiler
+	@echo "Build complete!"
+	@echo "Compiler/Transpiler: ./$(COMPILER_TARGET)"
+	@echo "Native Compiler: ./$(NATIVE_COMPILER_TARGET)"
 
-# Native compiler (machine code)
-native: $(NATIVE_TARGET)
-	@echo ""
-	@echo "✅ Native compiler ready!"
-	@echo "   ./$(NATIVE_TARGET) program.sb"
+# Main compiler/transpiler
+compiler: $(COMPILER_TARGET)
 
-$(NATIVE_TARGET): $(NATIVE_OBJECTS)
-	@echo "🔗 Linking native compiler..."
+$(COMPILER_TARGET): $(COMPILER_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-# Transpiler (multi-language)
-transpiler: $(TRANS_TARGET)
-	@echo ""
-	@echo "✅ Transpiler ready!"
-	@echo "   ./$(TRANS_TARGET) program.sb python"
+# Native compiler
+native_compiler: $(NATIVE_COMPILER_TARGET)
 
-$(TRANS_TARGET): $(TRANS_OBJECTS)
-	@echo "🔗 Linking transpiler..."
+$(NATIVE_COMPILER_TARGET): $(NATIVE_COMPILER_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-# Compile C files
 %.o: %.c
-	@echo "⚙️  Compiling $<..."
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-# Install (optional)
-install: all
-	@echo "Installing SUB compilers..."
-ifeq ($(OS),Windows_NT)
-	@echo "Windows: Copy executables to current directory or add to PATH manually"
-else
-	mkdir -p /usr/local/bin
-	cp $(NATIVE_TARGET) /usr/local/bin/subc
-	cp $(TRANS_TARGET) /usr/local/bin/sublang
-	@echo "✅ Installed:"
-	@echo "   /usr/local/bin/subc     - Native compiler"
-	@echo "   /usr/local/bin/sublang  - Transpiler"
-endif
-
-# Test suite
-test: all
-	@echo ""
-	@echo "🧪 Running test suite..."
-	@echo ""
-	@echo "[TEST 1] Creating test program..."
-	@echo '#var x = 5' > test_temp.sb
-	@echo '#var y = 10' >> test_temp.sb
-	@echo '#print(x + y)' >> test_temp.sb
-	@echo "✓ Test file created"
-	@echo ""
-	@echo "[TEST 2] Native compilation..."
-	./$(NATIVE_TARGET) test_temp.sb test_output && echo "✓ Native compilation passed"
-	@echo ""
-	@echo "[TEST 3] Python transpilation test: $(TRANS_TARGET)"
-	@echo "Running comprehensive verification..."
-	@python3 tests/run_tests.py
-	@echo ""
-	@echo "[TEST 4] JavaScript transpilation..."
-	./$(TRANS_TARGET) test_temp.sb javascript && echo "✓ JavaScript transpilation passed"
-	@echo ""
-	@rm -f test_temp.sb test_output* output.*
-	@echo "✅ All tests passed!"
-	@echo ""
-
-# Quick test with example
-example: all
-	@echo "🚀 Compiling example.sb..."
-	@echo ""
-	@echo "[1] Native compilation:"
-	./$(NATIVE_TARGET) example.sb example_native
-	@echo ""
-	@echo "[2] Python transpilation:"
-	./$(TRANS_TARGET) example.sb python
-	@echo ""
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Clean build artifacts
 clean:
-	@echo "🧹 Cleaning build artifacts..."
-	@rm -f $(NATIVE_OBJECTS) $(TRANS_OBJECTS)
-	@rm -f $(NATIVE_TARGET) $(TRANS_TARGET)
-	@rm -f subc subc.exe sublang.exe
-	@rm -f *.o *.s *.out a.out
-	@rm -f output.* SubProgram.* test_temp.* test_output*
-	@echo "✓ Clean complete"
+	@echo "Cleaning build artifacts..."
+	@rm -f $(COMPILER_OBJ) $(NATIVE_COMPILER_OBJ)
+	@rm -f $(COMPILER_TARGET) $(NATIVE_COMPILER_TARGET)
+	@rm -f *.o
+	@echo "Clean complete."
 
 # Help
 help:
-	@echo "╭────────────────────────────────────────────────────╮"
-	@echo "│  SUB Language Compiler - Build System        │"
-	@echo "╰────────────────────────────────────────────────────╯"
-	@echo ""
-	@echo "🎯 Build Targets:"
-	@echo "  all         - Build both compilers (default)"
-	@echo "  native      - Build native machine code compiler"
-	@echo "  transpiler  - Build multi-language transpiler"
-	@echo "  install     - Install to /usr/local/bin"
-	@echo "  test        - Run test suite"
-	@echo "  example     - Compile example.sb"
-	@echo "  clean       - Remove build artifacts"
-	@echo "  help        - Show this help"
-	@echo ""
-	@echo "💻 Usage Examples:"
-	@echo "  make              # Build everything"
-	@echo "  make native       # Build native compiler only"
-	@echo "  make test         # Run tests"
-	@echo "  make example      # Try with example.sb"
-	@echo ""
-	@echo "⚙️  Compiler Usage:"
-	@echo "  Native:     ./$(NATIVE_TARGET) program.sb [output]"
-	@echo "  Transpile:  ./$(TRANS_TARGET) program.sb <language>"
-	@echo ""
-	@echo "  Languages: python, javascript, java, ruby, rust, etc."
-	@echo ""
+	@echo "SUB Language Build System"
+	@echo "--------------------------"
+	@echo "Targets:"
+	@echo "  all              - Build both the compiler/transpiler and the native compiler (default)"
+	@echo "  compiler         - Build the main compiler/transpiler (sub)"
+	@echo "  native_compiler  - Build the native compiler (subc)"
+	@echo "  clean            - Remove build artifacts"
+	@echo "  help             - Show this help message"

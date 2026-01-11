@@ -13,7 +13,7 @@
 #include <string.h>
 
 /* Read file */
-static char* read_file(const char *filename) {
+static char* read_file_native(const char *filename) {
     FILE *file = fopen(filename, "r");
     if (!file) {
         fprintf(stderr, "Error: Cannot open file %s\n", filename);
@@ -37,7 +37,7 @@ static char* read_file(const char *filename) {
 }
 
 /* Write file */
-static void write_file(const char *filename, const char *content) {
+static void write_file_native(const char *filename, const char *content) {
     FILE *file = fopen(filename, "w");
     if (!file) {
         fprintf(stderr, "Error: Cannot write to file %s\n", filename);
@@ -125,7 +125,7 @@ int main(int argc, char *argv[]) {
     
     // Phase 1: Read source
     if (verbose) printf("[1/6] 📖 Reading source file...\n");
-    char *source = read_file(input_file);
+    char *source = read_file_native(input_file);
     if (!source) return 1;
     if (verbose) printf("      ✓ Read %zu bytes\n", strlen(source));
     
@@ -199,7 +199,7 @@ int main(int argc, char *argv[]) {
         snprintf(asm_file, sizeof(asm_file), "/tmp/sub_temp_%d.s", getpid());
     }
     
-    write_file(asm_file, asm_code);
+    write_file_native(asm_file, asm_code);
     
     if (emit_asm) {
         printf("\n✅ Assembly generation successful!\n");
