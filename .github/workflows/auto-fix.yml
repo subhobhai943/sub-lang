@@ -1,0 +1,52 @@
+name: auto-fix-on-push
+
+on:
+  push:
+    branches-ignore: [main]
+
+jobs:
+  autofix-dolphin:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Auto-fix with Dolphin Mistral
+        uses: opencodeco/opencode-action@v1
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          model: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+          task: "Auto-format code, fix linting errors, add missing tests, improve documentation."
+        continue-on-error: true
+          
+      - run: |
+          git config user.name 'OpenCode Bot'
+          git config user.email 'bot@opencode.ai'
+          git add .
+          git commit -m "🔧 Auto-fixes [Dolphin]" || echo "No changes"
+          git push
+
+  autofix-deepseek:
+    runs-on: ubuntu-latest
+    needs: autofix-dolphin
+    if: failure()
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Auto-fix with DeepSeek R1
+        uses: opencodeco/opencode-action@v1
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          model: "deepseek/deepseek-r1-0528:free"
+          task: "Auto-format code, fix linting errors, add missing tests, improve documentation."
+        continue-on-error: true
+          
+      - run: |
+          git config user.name 'OpenCode Bot'
+          git config user.email 'bot@opencode.ai'
+          git add .
+          git commit -m "🔧 Auto-fixes [DeepSeek]" || echo "No changes"
+          git push
