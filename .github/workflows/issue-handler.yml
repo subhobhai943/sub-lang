@@ -14,10 +14,10 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Handle with Hermes
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.HERMES_API_KEY }}
           model: "nousresearch/hermes-3-405b-instruct:free"
@@ -31,10 +31,10 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Handle with DeepSeek
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
           model: "deepseek/deepseek-r1-0528:free"
@@ -48,10 +48,10 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Handle with Trinity
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.TRINITY_API_KEY }}
           model: "arcee-ai/trinity-large-preview:free"
@@ -65,10 +65,10 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Handle with Solar
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.SOLAR_API_KEY }}
           model: "upstage/solar-pro-3:free"
