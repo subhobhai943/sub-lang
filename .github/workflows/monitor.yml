@@ -1,0 +1,41 @@
+name: continuous-monitoring
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+jobs:
+  security-scan-trinity:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Security Scan with Trinity
+        uses: opencodeco/opencode-action@v1
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          model: "arcee-ai/trinity-large-preview:free"
+          task: "Scan for security vulnerabilities, outdated packages, code smells. Create issues for findings and PRs for auto-fixable items."
+        continue-on-error: true
+
+  performance-check-solar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Performance Check with Solar Pro
+        uses: opencodeco/opencode-action@v1
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          model: "upstage/solar-pro-3:free"
+          task: "Analyze code performance, identify bottlenecks, suggest optimizations, and create PRs for improvements."
+        continue-on-error: true
