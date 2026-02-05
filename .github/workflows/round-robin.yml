@@ -1,0 +1,67 @@
+name: round-robin-coding
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    types: [opened, synchronize]
+  schedule:
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+
+jobs:
+  task-dolphin:
+    runs-on: ubuntu-latest
+    if: github.run_number % 4 == 0
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opencodeco/opencode-action@v1
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          model: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+          task: "Review code, fix bugs, optimize performance, update documentation."
+
+  task-deepseek:
+    runs-on: ubuntu-latest
+    if: github.run_number % 4 == 1
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opencodeco/opencode-action@v1
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          model: "deepseek/deepseek-r1-0528:free"
+          task: "Review code, fix bugs, optimize performance, update documentation."
+
+  task-trinity:
+    runs-on: ubuntu-latest
+    if: github.run_number % 4 == 2
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opencodeco/opencode-action@v1
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          model: "arcee-ai/trinity-large-preview:free"
+          task: "Review code, fix bugs, optimize performance, update documentation."
+
+  task-solar:
+    runs-on: ubuntu-latest
+    if: github.run_number % 4 == 3
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opencodeco/opencode-action@v1
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          model: "upstage/solar-pro-3:free"
+          task: "Review code, fix bugs, optimize performance, update documentation."
