@@ -10,10 +10,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Auto-fix with Hermes 3
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.HERMES_API_KEY }}
           model: "nousresearch/hermes-3-405b-instruct:free"
@@ -34,10 +34,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Auto-fix with DeepSeek R1
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
           model: "deepseek/deepseek-r1-0528:free"
@@ -49,10 +49,10 @@ jobs:
           git config user.email 'bot@opencode.ai'
           git add .
           git commit -m "🔧 Auto-fixes [DeepSeek]" || echo "No changes"
-          git push      - uses: actions/checkout@v4
+          git push      - uses: actions/checkout@v6
       
       - name: Auto-fix with DeepSeek R1
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
           model: "deepseek/deepseek-r1-0528:free"
