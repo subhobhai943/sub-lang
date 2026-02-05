@@ -27,7 +27,3 @@ jobs:
            OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }} # Changed from ANTHROPIC_API_KEY
          with:
            model: deepseek/deepseek-r1-0528 
-           prompt: |
-      Review this pull request:
-      - Check for code quality issues
-      - Look for potential bug
