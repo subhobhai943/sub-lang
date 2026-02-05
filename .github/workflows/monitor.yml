@@ -18,7 +18,7 @@ jobs:
       - name: Security Scan with Trinity
         uses: opencodeco/opencode-action@v1
         with:
-          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          openrouter_api_key: ${{ secrets.TRINITY_API_KEY }}
           model: "arcee-ai/trinity-large-preview:free"
           task: "Scan for security vulnerabilities, outdated packages, code smells. Create issues for findings and PRs for auto-fixable items."
         continue-on-error: true
@@ -35,7 +35,24 @@ jobs:
       - name: Performance Check with Solar Pro
         uses: opencodeco/opencode-action@v1
         with:
-          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          openrouter_api_key: ${{ secrets.SOLAR_API_KEY }}
           model: "upstage/solar-pro-3:free"
           task: "Analyze code performance, identify bottlenecks, suggest optimizations, and create PRs for improvements."
+        continue-on-error: true
+
+  code-quality-hermes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Code Quality Check with Hermes
+        uses: opencodeco/opencode-action@v1
+        with:
+          openrouter_api_key: ${{ secrets.HERMES_API_KEY }}
+          model: "nousresearch/hermes-3-405b-instruct:free"
+          task: "Review code quality, identify technical debt, suggest refactoring opportunities."
         continue-on-error: true
