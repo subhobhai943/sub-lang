@@ -21,13 +21,13 @@ jobs:
       id-token: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           
       - name: Auto Review with Hermes
         if: github.event_name == 'pull_request'
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.HERMES_API_KEY }}
           model: "nousresearch/hermes-3-405b-instruct:free"
@@ -52,13 +52,13 @@ jobs:
       id-token: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           
       - name: Auto Review with DeepSeek
         if: github.event_name == 'pull_request'
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
           model: "deepseek/deepseek-r1-0528:free"
@@ -82,10 +82,10 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Fix Issue with Trinity
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.TRINITY_API_KEY }}
           model: "arcee-ai/trinity-large-preview:free"
@@ -99,10 +99,10 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Maintenance with Solar
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.SOLAR_API_KEY }}
           model: "upstage/solar-pro-3:free"
