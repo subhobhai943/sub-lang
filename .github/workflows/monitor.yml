@@ -13,10 +13,10 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Security Scan with Trinity
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.TRINITY_API_KEY }}
           model: "arcee-ai/trinity-large-preview:free"
@@ -30,10 +30,10 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Performance Check with Solar Pro
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.SOLAR_API_KEY }}
           model: "upstage/solar-pro-3:free"
@@ -47,10 +47,10 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Code Quality Check with Hermes
-        uses: opencodeco/opencode-action@v1
+        uses: anomalyco/opencode/github@latest
         with:
           openrouter_api_key: ${{ secrets.HERMES_API_KEY }}
           model: "nousresearch/hermes-3-405b-instruct:free"
