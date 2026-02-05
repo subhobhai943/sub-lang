@@ -1,16 +1,12 @@
 name: round-robin-coding
 
 on:
-  push:
-    branches: [ main, dev ]
-  pull_request:
-    types: [opened, synchronize]
   schedule:
     - cron: '0 */2 * * *'
   workflow_dispatch:
 
 jobs:
-  task-dolphin:
+  task-hermes:
     runs-on: ubuntu-latest
     if: github.run_number % 4 == 0
     permissions:
@@ -20,8 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: opencodeco/opencode-action@v1
         with:
-          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          model: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+          openrouter_api_key: ${{ secrets.HERMES_API_KEY }}
+          model: "nousresearch/hermes-3-405b-instruct:free"
           task: "Review code, fix bugs, optimize performance, update documentation."
 
   task-deepseek:
@@ -34,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: opencodeco/opencode-action@v1
         with:
-          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          openrouter_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
           model: "deepseek/deepseek-r1-0528:free"
           task: "Review code, fix bugs, optimize performance, update documentation."
 
@@ -48,7 +44,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: opencodeco/opencode-action@v1
         with:
-          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          openrouter_api_key: ${{ secrets.TRINITY_API_KEY }}
           model: "arcee-ai/trinity-large-preview:free"
           task: "Review code, fix bugs, optimize performance, update documentation."
 
@@ -62,6 +58,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: opencodeco/opencode-action@v1
         with:
-          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          openrouter_api_key: ${{ secrets.SOLAR_API_KEY }}
           model: "upstage/solar-pro-3:free"
           task: "Review code, fix bugs, optimize performance, update documentation."
