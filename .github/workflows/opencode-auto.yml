@@ -12,63 +12,87 @@ on:
   workflow_dispatch:
 
 jobs:
-  auto-code-review:
+  auto-review-hermes:
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
       issues: write
       id-token: write
-    strategy:
-      matrix:
-        model: 
-          - "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
-          - "deepseek/deepseek-r1-0528:free"
-          - "arcee-ai/trinity-large-preview:free"
-          - "upstage/solar-pro-3:free"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           
-      - name: Auto Review & Fix PRs
+      - name: Auto Review with Hermes
         if: github.event_name == 'pull_request'
         uses: opencodeco/opencode-action@v1
         with:
-          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          model: ${{ matrix.model }}
+          openrouter_api_key: ${{ secrets.HERMES_API_KEY }}
+          model: "nousresearch/hermes-3-405b-instruct:free"
           task: "Review this PR for bugs, security issues, and code quality. Auto-fix any issues found."
         continue-on-error: true
           
-      - name: Auto Fix Issues
-        if: github.event_name == 'issues'
-        uses: opencodeco/opencode-action@v1
-        with:
-          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          model: ${{ matrix.model }}
-          task: "Analyze and fix the issue described. Create a PR with the solution."
-        continue-on-error: true
-          
-      - name: Scheduled Code Maintenance
-        if: github.event_name == 'schedule'
-        uses: opencodeco/opencode-action@v1
-        with:
-          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          model: ${{ matrix.model }}
-          task: "Scan codebase for potential improvements, update dependencies, fix linting issues, and optimize performance."
-        continue-on-error: true
-          
-      - name: Auto-commit changes
+      - name: Auto commit changes
         if: success()
         run: |
           git config --global user.name 'OpenCode Bot'
           git config --global user.email 'bot@opencode.ai'
           git add .
-          git diff --staged --quiet || git commit -m "🤖 Auto-fixes by OpenCode [${{ matrix.model }}]"
+          git diff --staged --quiet || git commit -m "🤖 Auto-fixes by Hermes"
           git push
 
-  auto-dependency-updates:
+  auto-review-deepseek:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Auto Review with DeepSeek
+        if: github.event_name == 'pull_request'
+        uses: opencodeco/opencode-action@v1
+        with:
+          openrouter_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
+          model: "deepseek/deepseek-r1-0528:free"
+          task: "Review this PR for bugs, security issues, and code quality. Auto-fix any issues found."
+        continue-on-error: true
+          
+      - name: Auto commit changes
+        if: success()
+        run: |
+          git config --global user.name 'OpenCode Bot'
+          git config --global user.email 'bot@opencode.ai'
+          git add .
+          git diff --staged --quiet || git commit -m "🤖 Auto-fixes by DeepSeek"
+          git push
+
+  auto-fix-trinity:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues'
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Fix Issue with Trinity
+        uses: opencodeco/opencode-action@v1
+        with:
+          openrouter_api_key: ${{ secrets.TRINITY_API_KEY }}
+          model: "arcee-ai/trinity-large-preview:free"
+          task: "Analyze and fix the issue described. Create a PR with the solution."
+        continue-on-error: true
+
+  maintenance-solar:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
     permissions:
@@ -77,10 +101,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Update Dependencies with Dolphin
+      - name: Maintenance with Solar
         uses: opencodeco/opencode-action@v1
         with:
-          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          model: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
-          task: "Check for outdated dependencies, update them safely, and run tests."
+          openrouter_api_key: ${{ secrets.SOLAR_API_KEY }}
+          model: "upstage/solar-pro-3:free"
+          task: "Scan codebase for potential improvements, update dependencies, fix linting issues, and optimize performance."
         continue-on-error: true
