@@ -8,6 +8,7 @@
 #define SUB_CODEGEN_NATIVE_H
 
 #include "ir.h"
+#include <stddef.h>
 
 typedef enum {
     NATIVE_TARGET_X86_64,
