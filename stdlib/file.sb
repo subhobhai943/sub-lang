@@ -1,5 +1,5 @@
 # ==========================================
-# SUB Standard Library - File I/O Module  
+# SUB Standard Library - File I/O Module
 # File: stdlib/file.sb
 # File system operations
 # ==========================================
@@ -10,14 +10,14 @@
     #if file == null {
         #return null
     }
-    
+
     #var content = ""
     #var line = readline(file)
     #while line != null {
         content = content + line + "\n"
         line = readline(file)
     }
-    
+
     close(file)
     #return content
 }
@@ -27,14 +27,14 @@
     #if file == null {
         #return null
     }
-    
+
     #var lines = []
     #var line = readline(file)
     #while line != null {
         lines.append(line)
         line = readline(file)
     }
-    
+
     close(file)
     #return lines
 }
@@ -44,7 +44,7 @@
     #if file == null {
         #return null
     }
-    
+
     #var data = read(file)
     close(file)
     #return data
@@ -56,7 +56,7 @@
     #if file == null {
         #return false
     }
-    
+
     write(file, content)
     close(file)
     #return true
@@ -67,7 +67,7 @@
     #if file == null {
         #return false
     }
-    
+
     write(file, content)
     close(file)
     #return true
@@ -78,11 +78,11 @@
     #if file == null {
         #return false
     }
-    
+
     #for line in lines {
         write(file, line + "\n")
     }
-    
+
     close(file)
     #return true
 }
@@ -155,7 +155,7 @@
     #if is_windows() {
         separator = "\\"
     }
-    
+
     #var result = ""
     #for i in range(len(parts)) {
         #if i > 0 {
@@ -171,7 +171,7 @@
     #if is_windows() {
         separator = "\\"
     }
-    
+
     #var last_sep = last_index_of(path, separator)
     #if last_sep == -1 {
         #return path
@@ -184,7 +184,7 @@
     #if is_windows() {
         separator = "\\"
     }
-    
+
     #var last_sep = last_index_of(path, separator)
     #if last_sep == -1 {
         #return "."
@@ -214,10 +214,10 @@
     #if is_windows() {
         separator = "\\"
     }
-    
+
     #var parts = split(path, separator)
     #var result = []
-    
+
     #for part in parts {
         #if part == ".." {
             #if len(result) > 0 {
@@ -227,6 +227,6 @@
             result.append(part)
         }
     }
-    
+
     #return join(result, separator)
 }

@@ -73,7 +73,7 @@
 #func find(s, substr) -> int {
     #var s_len = len(s)
     #var sub_len = len(substr)
-    
+
     #for i in range(s_len - sub_len + 1) {
         #var match = true
         #for j in range(sub_len) {
@@ -126,7 +126,7 @@
 #func title_case(s) -> str {
     #var result = ""
     #var capitalize_next = true
-    
+
     #for i in range(len(s)) {
         #var ch = s[i]
         #if ch == ' ' || ch == '\t' || ch == '\n' {
@@ -170,7 +170,7 @@
     #var result = ""
     #var i = 0
     #var old_len = len(old)
-    
+
     #while i < len(s) {
         #if substr(s, i, old_len) == old {
             result = result + new
@@ -187,7 +187,7 @@
 #func split(s, delimiter) -> array {
     #var parts = []
     #var current = ""
-    
+
     #for i in range(len(s)) {
         #if s[i] == delimiter {
             #if len(current) > 0 {
@@ -198,11 +198,11 @@
             current = current + s[i]
         }
     }
-    
+
     #if len(current) > 0 {
         parts.append(current)
     }
-    
+
     #return parts
 }
 
@@ -211,7 +211,7 @@
     #if len(arr) == 0 {
         #return ""
     }
-    
+
     #var result = str(arr[0])
     #for i in range(1, len(arr)) {
         result = result + separator + str(arr[i])
@@ -279,7 +279,7 @@
     #if padding <= 0 {
         #return s
     }
-    
+
     #var result = ""
     #for i in range(padding) {
         result = result + fill_char
@@ -292,7 +292,7 @@
     #if padding <= 0 {
         #return s
     }
-    
+
     #var result = s
     #for i in range(padding) {
         result = result + fill_char
@@ -305,10 +305,10 @@
     #if padding <= 0 {
         #return s
     }
-    
+
     #var left_pad = padding / 2
     #var right_pad = padding - left_pad
-    
+
     #var result = ""
     #for i in range(left_pad) {
         result = result + fill_char
