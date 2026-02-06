@@ -4,10 +4,11 @@ on:
   push:
     tags:
       - 'v*.*.*'
+      - 'v*.*.*-beta'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., v1.0.7)'
+        description: 'Version to release (e.g., v1.0.7-beta)'
         required: true
         type: string
 
@@ -16,20 +17,37 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
-            artifact_name: sublang-linux
-            native_name: subc-native-linux
-            asset_name: sublang-linux-x64
-          - os: macos-latest
-            artifact_name: sublang-macos
-            native_name: subc-native-macos
-            asset_name: sublang-macos-x64
+            arch: x86_64
+            compiler_name: sub
+            native_name: subc
+            asset_name: sub-linux-x86_64
+          - os: ubuntu-24.04-arm64
+            arch: arm64
+            compiler_name: sub
+            native_name: subc
+            asset_name: sub-linux-arm64
+          - os: macos-13
+            arch: x86_64
+            compiler_name: sub
+            native_name: subc
+            asset_name: sub-macos-x86_64
+          - os: macos-14
+            arch: arm64
+            compiler_name: sub
+            native_name: subc
+            asset_name: sub-macos-arm64
           - os: windows-latest
-            artifact_name: sublang-windows.exe
-            native_name: subc-native-windows.exe
-            asset_name: sublang-windows-x64
+            arch: x86_64
+            compiler_name: sub.exe
+            native_name: subc.exe
+            asset_name: sub-windows-x86_64
+          - os: windows-11-arm64
+            arch: arm64
+            compiler_name: sub.exe
+            native_name: subc.exe
+            asset_name: sub-windows-arm64
 
     steps:
       - name: Checkout code
@@ -49,51 +67,40 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Build transpiler (Linux/macOS)
+      - name: Build compiler + native compiler (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
           make clean
-          make transpiler
-          chmod +x sublang
-          mv sublang ${{ matrix.artifact_name }}
+          make all
+          chmod +x sub subc
+          mv sub ${{ matrix.compiler_name }}
+          mv subc ${{ matrix.native_name }}
 
-      - name: Build transpiler (Windows)
+      - name: Build compiler + native compiler (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cl /Isrc/include /Isrc/core /Isrc/codegen /Isrc/ir src/compilers/sub_multilang.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/core/type_system.c src/core/utils.c src/codegen/codegen_cpp.c src/codegen/targets.c /Fe:${{ matrix.artifact_name }}
-
-      - name: Build native compiler (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cl /Isrc/include /Isrc/core /Isrc/codegen /Isrc/ir src/compilers/sub_native_compiler.c src/core/parser_enhanced.c src/core/lexer.c src/core/semantic.c src/ir/ir.c src/codegen/codegen_x64.c src/core/utils.c /Fe:${{ matrix.native_name }}
-
-      - name: Build native compiler (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          make native
-          chmod +x subc-native
-          mv subc-native ${{ matrix.native_name }}
+          cl /Isrc/include /Isrc/core /Isrc/codegen /Isrc/ir src/compilers/sub.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/targets.c src/core/utils.c /Fe:${{ matrix.compiler_name }}
+          cl /Isrc/include /Isrc/core /Isrc/codegen /Isrc/ir src/compilers/sub_native.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/ir/ir.c src/codegen/codegen_native.c src/core/utils.c /Fe:${{ matrix.native_name }}
 
       - name: Verify artifacts (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
-          ls -lh ${{ matrix.artifact_name }}
+          ls -lh ${{ matrix.compiler_name }}
           ls -lh ${{ matrix.native_name }}
 
       - name: Verify artifacts (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Get-ChildItem ${{ matrix.artifact_name }}
+          Get-ChildItem ${{ matrix.compiler_name }}
           Get-ChildItem ${{ matrix.native_name }}
 
-      - name: Upload transpiler artifact
+      - name: Upload compiler artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}-transpiler
-          path: ${{ matrix.artifact_name }}
+          name: ${{ matrix.asset_name }}-compiler
+          path: ${{ matrix.compiler_name }}
           retention-days: 5
 
       - name: Upload native compiler artifact
@@ -134,171 +141,23 @@ jobs:
             echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Determine prerelease
+        id: prerelease
+        run: |
+          if [[ "${{ steps.version.outputs.VERSION }}" == *"-beta"* ]]; then
+            echo "PRERELEASE=true" >> $GITHUB_OUTPUT
+          else
+            echo "PRERELEASE=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Generate release notes
         id: release_notes
         run: |
-          cat > release_notes.md << 'EOF'
-          ## 🎉 SUB Language ${{ steps.version.outputs.VERSION }}
-          
-          ### 🪟 Windows Support Restored - Full Cross-Platform Release!
-          
-          **Release Date**: January 1, 2026  
-          **Type**: Platform Expansion Release  
-          **Focus**: Windows Support + Full Cross-Platform Functionality
-          
-          ---
-          
-          ## ✨ What's New in v1.0.7
-          
-          ### 1. **Windows Support Fully Restored** 🪟✅
-          - Native x86-64 compiler for Windows
-          - Transpiler working on Windows x64
-          - MSVC build toolchain integration
-          - All features now available on Windows
-          
-          ### 2. **Enhanced Build System** 🛠️
-          - MSVC development environment setup in CI/CD
-          - Improved Windows compilation pipeline
-          - Better error handling for Windows builds
-          - Cross-platform build consistency
-          
-          ### 3. **Platform Parity** 🌍
-          - Identical feature set across Linux, macOS, and Windows
-          - Consistent command-line interface on all platforms
-          - Unified user experience regardless of OS
-          
-          ---
-          
-          ## 📦 What's Included
-          
-          ### Linux x86_64 ✅
-          - `sublang-linux` - Transpiler (Python, JS, Rust, C++)
-          - `subc-native-linux` - Native x86-64 compiler
-          
-          ### macOS x86_64 ✅
-          - `sublang-macos` - Transpiler (Python, JS, Rust, C++)
-          - `subc-native-macos` - Native x86-64 compiler
-          
-          ### Windows x64 ✅ **NOW AVAILABLE!**
-          - `sublang-windows.exe` - Transpiler (Python, JS, Rust, C++)
-          - `subc-native-windows.exe` - Native x86-64 compiler
-          
-          ---
-          
-          ## 🚀 Quick Start
-          
-          ### Native Compilation
-          
-          **Linux/macOS:**
-          ```bash
-          # Download and make executable
-          chmod +x subc-native-linux  # or subc-native-macos
-          
-          # Compile SUB to native binary
-          ./subc-native-linux program.sb myapp
-          
-          # Run your native binary
-          ./myapp
-          ```
-          
-          **Windows:**
-          ```powershell
-          # Download subc-native-windows.exe
-          
-          # Compile SUB to native binary
-          .\subc-native-windows.exe program.sb myapp.exe
-          
-          # Run your native binary
-          .\myapp.exe
-          ```
-          
-          ### Transpilation
-          
-          **Linux/macOS:**
-          ```bash
-          # Transpile to Python
-          ./sublang-linux program.sb python
-          python3 output.py
-          
-          # Transpile to Rust
-          ./sublang-linux program.sb rust
-          rustc output.rs && ./output
-          ```
-          
-          **Windows:**
-          ```powershell
-          # Transpile to Python
-          .\sublang-windows.exe program.sb python
-          python output.py
-          
-          # Transpile to Rust
-          .\sublang-windows.exe program.sb rust
-          rustc output.rs
-          .\output.exe
-          ```
-          
-          ---
-          
-          ## 📝 Example Code
-          
-          ```sub
-          # Cross-platform SUB code - works everywhere!
-          function greet(name) {
-              print("Hello, " + name + "!")
-              return 42
-          }
-          
-          var numbers = [10, 20, 30, 40, 50]
-          var total = 0
-          
-          var i = 0
-          while i < 5 {
-              total = total + numbers[i]
-              i = i + 1
-          }
-          
-          print("Total: " + total)
-          var result = greet("Windows User")
-          print("Result: " + result)
-          ```
-          
-          ---
-          
-          ## 🐛 Bug Fixes
-          
-          - Fixed Windows MSVC linker issues
-          - Resolved Windows-specific build errors
-          - Improved Windows path handling
-          - Fixed Windows executable naming
-          - Fixed Windows artifact not appearing in releases
-          
-          ---
-          
-          ## 📊 Statistics
-          
-          - **Platforms Supported**: Linux ✅ | macOS ✅ | Windows ✅
-          - **Target Languages**: 4 (Python, JS, Rust, C++)
-          - **Total Coverage**: 100% cross-platform parity
-          - **Build Success Rate**: 100%
-          
-          ---
-          
-          ## 🔗 Links
-          
-          - **Full Changelog**: https://github.com/${{ github.repository }}/compare/v1.0.6...${{ steps.version.outputs.VERSION }}
-          - **Documentation**: https://github.com/${{ github.repository }}
-          - **Report Issues**: https://github.com/${{ github.repository }}/issues
-          
-          ---
-          
-          ## 🙏 Acknowledgments
-          
-          Thank you to all contributors and users who reported Windows build issues. This release brings full platform parity and makes SUB Language truly cross-platform!
-          
-          ---
-          
-          *🎊 Windows users can now enjoy all SUB Language features!*
-          EOF
+          {
+            echo "## SUB Language ${{ steps.version.outputs.VERSION }}";
+            echo "";
+            cat docs/RELEASE_NOTES.md;
+          } > release_notes.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -307,20 +166,26 @@ jobs:
           name: SUB Language ${{ steps.version.outputs.VERSION }}
           body_path: release_notes.md
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.prerelease.outputs.PRERELEASE }}
           files: |
-            artifacts/sublang-linux-x64-transpiler/*
-            artifacts/sublang-linux-x64-native/*
-            artifacts/sublang-macos-x64-transpiler/*
-            artifacts/sublang-macos-x64-native/*
-            artifacts/sublang-windows-x64-transpiler/*
-            artifacts/sublang-windows-x64-native/*
+            artifacts/sub-linux-x86_64-compiler/*
+            artifacts/sub-linux-x86_64-native/*
+            artifacts/sub-linux-arm64-compiler/*
+            artifacts/sub-linux-arm64-native/*
+            artifacts/sub-macos-x86_64-compiler/*
+            artifacts/sub-macos-x86_64-native/*
+            artifacts/sub-macos-arm64-compiler/*
+            artifacts/sub-macos-arm64-native/*
+            artifacts/sub-windows-x86_64-compiler/*
+            artifacts/sub-windows-x86_64-native/*
+            artifacts/sub-windows-arm64-compiler/*
+            artifacts/sub-windows-arm64-native/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Release Summary
         run: |
           echo "✅ Release ${{ steps.version.outputs.VERSION }} created successfully!"
-          echo "📦 Artifacts uploaded for Linux, macOS, and Windows"
-          echo "🪟 Windows support fully restored!"
+          echo "📦 Artifacts uploaded for Linux, macOS, and Windows (x86_64 + arm64)"
+          echo "🧪 v1.0.7-beta release pipeline ready"
           echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.VERSION }}"

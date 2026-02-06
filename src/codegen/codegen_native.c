@@ -7,6 +7,7 @@
 #include "codegen_native.h"
 #include "ir.h"
 #include "windows_compat.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,7 +50,11 @@ static void asm_buffer_append(AsmBuffer *buf, const char *fmt, ...) {
 }
 
 static char* asm_buffer_to_string(AsmBuffer *buf) {
-    char *result = strdup(buf->code);
+    size_t len = strlen(buf->code);
+    char *result = malloc(len + 1);
+    if (result) {
+        memcpy(result, buf->code, len + 1);
+    }
     free(buf->code);
     free(buf);
     return result;
@@ -91,6 +96,14 @@ static const char* x86_64_get_reg(int reg_num) {
         "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
     };
     return regs[reg_num % 14];
+}
+
+static const char* arm64_get_reg(int reg_num) {
+    static const char *regs[] = {
+        "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
+        "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15"
+    };
+    return regs[reg_num % 16];
 }
 
 /* Generate x86-64 assembly from IR */
@@ -240,11 +253,162 @@ static void codegen_x86_64_function(AsmBuffer *buf, IRFunction *func) {
     asm_buffer_append(buf, "    ret\n");
 }
 
+static void codegen_arm64_function(AsmBuffer *buf, IRFunction *func) {
+    int stack_bytes = ((func->local_count * 8 + 15) / 16) * 16;
+
+    asm_buffer_append(buf, "\n// Function: %s\n", func->name);
+    asm_buffer_append(buf, "%s:\n", func->name);
+    asm_buffer_append(buf, "    stp x29, x30, [sp, #-16]!\n");
+    asm_buffer_append(buf, "    mov x29, sp\n");
+
+    if (stack_bytes > 0) {
+        asm_buffer_append(buf, "    sub sp, sp, #%d\n", stack_bytes);
+    }
+
+    IRInstruction *instr = func->instructions;
+    while (instr) {
+        switch (instr->opcode) {
+            case IR_FUNC_START:
+            case IR_FUNC_END:
+                break;
+
+            case IR_MOVE:
+                if (instr->src1 && instr->dest) {
+                    if (instr->src1->type == IR_TYPE_INT) {
+                        asm_buffer_append(buf, "    mov %s, #%lld\n",
+                            arm64_get_reg(instr->dest->data.reg_num),
+                            (long long)instr->src1->data.int_val);
+                    } else {
+                        asm_buffer_append(buf, "    mov %s, %s\n",
+                            arm64_get_reg(instr->dest->data.reg_num),
+                            arm64_get_reg(instr->src1->data.reg_num));
+                    }
+                }
+                break;
+
+            case IR_ADD:
+                if (instr->src1 && instr->src2 && instr->dest) {
+                    if (instr->src1->type == IR_TYPE_INT) {
+                        asm_buffer_append(buf, "    mov x16, #%lld\n",
+                            (long long)instr->src1->data.int_val);
+                    } else {
+                        asm_buffer_append(buf, "    mov x16, %s\n",
+                            arm64_get_reg(instr->src1->data.reg_num));
+                    }
+
+                    if (instr->src2->type == IR_TYPE_INT) {
+                        asm_buffer_append(buf, "    add x16, x16, #%lld\n",
+                            (long long)instr->src2->data.int_val);
+                    } else {
+                        asm_buffer_append(buf, "    add x16, x16, %s\n",
+                            arm64_get_reg(instr->src2->data.reg_num));
+                    }
+
+                    asm_buffer_append(buf, "    mov %s, x16\n",
+                        arm64_get_reg(instr->dest->data.reg_num));
+                }
+                break;
+
+            case IR_SUB:
+                if (instr->src1 && instr->src2 && instr->dest) {
+                    asm_buffer_append(buf, "    mov x16, %s\n",
+                        arm64_get_reg(instr->src1->data.reg_num));
+                    asm_buffer_append(buf, "    sub x16, x16, %s\n",
+                        arm64_get_reg(instr->src2->data.reg_num));
+                    asm_buffer_append(buf, "    mov %s, x16\n",
+                        arm64_get_reg(instr->dest->data.reg_num));
+                }
+                break;
+
+            case IR_MUL:
+                if (instr->src1 && instr->src2 && instr->dest) {
+                    asm_buffer_append(buf, "    mov x16, %s\n",
+                        arm64_get_reg(instr->src1->data.reg_num));
+                    asm_buffer_append(buf, "    mul x16, x16, %s\n",
+                        arm64_get_reg(instr->src2->data.reg_num));
+                    asm_buffer_append(buf, "    mov %s, x16\n",
+                        arm64_get_reg(instr->dest->data.reg_num));
+                }
+                break;
+
+            case IR_CALL:
+                if (instr->dest && instr->dest->data.string_val) {
+                    if (strcmp(instr->dest->data.string_val, "print") == 0 ||
+                        strcmp(instr->dest->data.string_val, "printf") == 0) {
+                        if (instr->src1) {
+                            if (instr->src1->type == IR_TYPE_STRING) {
+#ifdef __APPLE__
+                                asm_buffer_append(buf, "    adrp x0, .str%d@PAGE\n", 0);
+                                asm_buffer_append(buf, "    add x0, x0, .str%d@PAGEOFF\n", 0);
+#else
+                                asm_buffer_append(buf, "    adrp x0, .str%d\n", 0);
+                                asm_buffer_append(buf, "    add x0, x0, :lo12:.str%d\n", 0);
+#endif
+                            } else {
+                                asm_buffer_append(buf, "    mov x0, %s\n",
+                                    arm64_get_reg(instr->src1->data.reg_num));
+                            }
+                        }
+                        asm_buffer_append(buf, "    bl printf\n");
+                    } else {
+                        asm_buffer_append(buf, "    bl %s\n", instr->dest->data.string_val);
+                    }
+                }
+                break;
+
+            case IR_RETURN:
+                if (instr->src1) {
+                    if (instr->src1->type == IR_TYPE_INT) {
+                        asm_buffer_append(buf, "    mov x0, #%lld\n",
+                            (long long)instr->src1->data.int_val);
+                    } else {
+                        asm_buffer_append(buf, "    mov x0, %s\n",
+                            arm64_get_reg(instr->src1->data.reg_num));
+                    }
+                }
+                break;
+
+            case IR_LABEL:
+                if (instr->dest && instr->dest->data.label) {
+                    asm_buffer_append(buf, "%s:\n", instr->dest->data.label);
+                }
+                break;
+
+            case IR_JUMP:
+                if (instr->src1 && instr->src1->data.label) {
+                    asm_buffer_append(buf, "    b %s\n", instr->src1->data.label);
+                }
+                break;
+
+            case IR_JUMP_IF_NOT:
+                if (instr->src1 && instr->src2) {
+                    asm_buffer_append(buf, "    cbz %s, %s\n",
+                        arm64_get_reg(instr->src1->data.reg_num),
+                        instr->src2->data.label);
+                }
+                break;
+
+            default:
+                asm_buffer_append(buf, "    // TODO: opcode %d\n", instr->opcode);
+                break;
+        }
+
+        instr = instr->next;
+    }
+
+    if (stack_bytes > 0) {
+        asm_buffer_append(buf, "    add sp, sp, #%d\n", stack_bytes);
+    }
+    asm_buffer_append(buf, "    ldp x29, x30, [sp], #16\n");
+    asm_buffer_append(buf, "    ret\n");
+}
+
 /* Generate assembly code */
 char* codegen_native_generate_asm(IRModule *module, NativeTarget target) {
     if (!module) return NULL;
     
     AsmBuffer *buf = asm_buffer_create();
+    IRFunction *func = NULL;
     
     // Assembly header
     switch (target) {
@@ -270,7 +434,7 @@ char* codegen_native_generate_asm(IRModule *module, NativeTarget target) {
             asm_buffer_append(buf, ".extern printf\n\n");
             
             // Generate functions
-            IRFunction *func = module->functions;
+            func = module->functions;
             while (func) {
                 codegen_x86_64_function(buf, func);
                 func = func->next;
@@ -283,6 +447,38 @@ char* codegen_native_generate_asm(IRModule *module, NativeTarget target) {
                 asm_buffer_append(buf, "    .asciz \"%s\"\n", module->string_literals[i]);
             }
             
+            break;
+        case NATIVE_TARGET_ARM64:
+            asm_buffer_append(buf, "// SUB Language - Native ARM64 Assembly\n");
+            asm_buffer_append(buf, "// Generated by SUB Compiler\n\n");
+
+#ifdef __APPLE__
+            asm_buffer_append(buf, ".section __TEXT,__text,regular,pure_instructions\n");
+            asm_buffer_append(buf, ".globl _main\n");
+#else
+            asm_buffer_append(buf, ".section .text\n");
+            asm_buffer_append(buf, ".globl main\n");
+            asm_buffer_append(buf, ".type main, %function\n");
+#endif
+
+            asm_buffer_append(buf, ".extern printf\n\n");
+
+            func = module->functions;
+            while (func) {
+                codegen_arm64_function(buf, func);
+                func = func->next;
+            }
+
+#ifdef __APPLE__
+            asm_buffer_append(buf, "\n.section __TEXT,__cstring,cstring_literals\n");
+#else
+            asm_buffer_append(buf, "\n.section .rodata\n");
+#endif
+            for (int i = 0; i < module->string_count; i++) {
+                asm_buffer_append(buf, ".str%d:\n", i);
+                asm_buffer_append(buf, "    .asciz \"%s\"\n", module->string_literals[i]);
+            }
+
             break;
             
         default:
