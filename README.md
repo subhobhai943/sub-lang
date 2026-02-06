@@ -1,6 +1,6 @@
 # SUB Programming Language
 
-**The World's Easiest Programming Language with Blockchain-Inspired Syntax**
+**The World's Simplest and Easiest Working Programming Language with a Compiler + Transpiler**
 
 SUB is a modern programming language that compiles **directly to native machine code** ⚡ - no interpreter needed! It also supports transpilation to 10+ languages for maximum flexibility.
 
@@ -100,7 +100,7 @@ make transpiler
 - Perfect for beginners and experts
 
 ⚡ **Native Code Generation**
-- Direct x86-64 machine code compilation
+- Direct x86-64 and ARM64 machine code compilation
 - Standalone executables
 - No runtime dependencies
 - Near-C performance
@@ -353,8 +353,8 @@ cl /Isrc/include src/compilers/sub_multilang.c src/core/*.c src/codegen/*.c /Fe:
 | **Linux** | x86-64 | ✅ Ready |
 | **Windows** | x86-64 | ✅ Ready |
 | **macOS** | x86-64 | ✅ Ready |
-| **macOS** | ARM64 (M1/M2) | 🚧 Planned |
-| **Linux** | ARM64 | 🚧 Planned |
+| **macOS** | ARM64 (M1/M2) | ✅ Ready |
+| **Linux** | ARM64 | ✅ Ready |
 | **Linux** | RISC-V | 💭 Future |
 
 ### Transpilation Targets
