@@ -7,6 +7,7 @@
 #include "codegen_native.h"
 #include "ir.h"
 #include "windows_compat.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,7 +50,11 @@ static void asm_buffer_append(AsmBuffer *buf, const char *fmt, ...) {
 }
 
 static char* asm_buffer_to_string(AsmBuffer *buf) {
-    char *result = strdup(buf->code);
+    size_t len = strlen(buf->code);
+    char *result = malloc(len + 1);
+    if (result) {
+        memcpy(result, buf->code, len + 1);
+    }
     free(buf->code);
     free(buf);
     return result;
