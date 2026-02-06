@@ -11,6 +11,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 /* Read file */
 static char* read_file_native(const char *filename) {
@@ -206,14 +211,22 @@ int main(int argc, char *argv[]) {
         printf("📝 Output: %s\n\n", asm_file);
         printf("Assemble and link with:\n");
 #ifdef __APPLE__
-        printf("  as -arch x86_64 %s -o temp.o\n", asm_file);
+        if (options.target == NATIVE_TARGET_ARM64) {
+            printf("  as -arch arm64 %s -o temp.o\n", asm_file);
+        } else {
+            printf("  as -arch x86_64 %s -o temp.o\n", asm_file);
+        }
         printf("  ld temp.o -o %s -lSystem\n\n", output_file);
 #elif defined(_WIN32)
         printf("  ml64 /c %s\n", asm_file);
         printf("  link /SUBSYSTEM:CONSOLE temp.obj /OUT:%s\n\n", output_file);
 #else
         printf("  as %s -o temp.o\n", asm_file);
-        printf("  ld temp.o -o %s -lc -dynamic-linker /lib64/ld-linux-x86-64.so.2\n\n", output_file);
+        if (options.target == NATIVE_TARGET_ARM64) {
+            printf("  ld temp.o -o %s -lc -dynamic-linker /lib/ld-linux-aarch64.so.1\n\n", output_file);
+        } else {
+            printf("  ld temp.o -o %s -lc -dynamic-linker /lib64/ld-linux-x86-64.so.2\n\n", output_file);
+        }
 #endif
     } else {
         // Assemble and link
@@ -221,14 +234,24 @@ int main(int argc, char *argv[]) {
         
         char cmd[512];
 #ifdef __APPLE__
-        snprintf(cmd, sizeof(cmd), "as -arch x86_64 %s -o /tmp/sub_temp_%d.o && ld /tmp/sub_temp_%d.o -o %s -lSystem 2>/dev/null",
-                 asm_file, getpid(), getpid(), output_file);
+        if (options.target == NATIVE_TARGET_ARM64) {
+            snprintf(cmd, sizeof(cmd), "as -arch arm64 %s -o /tmp/sub_temp_%d.o && ld /tmp/sub_temp_%d.o -o %s -lSystem 2>/dev/null",
+                     asm_file, getpid(), getpid(), output_file);
+        } else {
+            snprintf(cmd, sizeof(cmd), "as -arch x86_64 %s -o /tmp/sub_temp_%d.o && ld /tmp/sub_temp_%d.o -o %s -lSystem 2>/dev/null",
+                     asm_file, getpid(), getpid(), output_file);
+        }
 #elif defined(_WIN32)
         snprintf(cmd, sizeof(cmd), "ml64 /c /Fo%s.obj %s >nul 2>&1 && link /SUBSYSTEM:CONSOLE %s.obj /OUT:%s >nul 2>&1",
                  output_file, asm_file, output_file, output_file);
 #else
-        snprintf(cmd, sizeof(cmd), "as %s -o /tmp/sub_temp_%d.o 2>/dev/null && ld /tmp/sub_temp_%d.o -o %s -lc -dynamic-linker /lib64/ld-linux-x86-64.so.2 2>/dev/null",
-                 asm_file, getpid(), getpid(), output_file);
+        if (options.target == NATIVE_TARGET_ARM64) {
+            snprintf(cmd, sizeof(cmd), "as %s -o /tmp/sub_temp_%d.o 2>/dev/null && ld /tmp/sub_temp_%d.o -o %s -lc -dynamic-linker /lib/ld-linux-aarch64.so.1 2>/dev/null",
+                     asm_file, getpid(), getpid(), output_file);
+        } else {
+            snprintf(cmd, sizeof(cmd), "as %s -o /tmp/sub_temp_%d.o 2>/dev/null && ld /tmp/sub_temp_%d.o -o %s -lc -dynamic-linker /lib64/ld-linux-x86-64.so.2 2>/dev/null",
+                     asm_file, getpid(), getpid(), output_file);
+        }
 #endif
         
         int result = system(cmd);
