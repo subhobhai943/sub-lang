@@ -1,0 +1,66 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-unix:
+    name: build (${{ matrix.os }} / ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04-arm64
+            arch: arm64
+          - os: macos-13
+            arch: x86_64
+          - os: macos-14
+            arch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build compiler + transpiler
+        run: make all
+      - name: Smoke test compiler + transpiler
+        run: |
+          ./sub tests/test_simple.sb linux
+          ./subc tests/test_simple.sb -S -o native_output.s
+          test -f output_linux.c
+          test -f native_output.s
+
+  build-windows:
+    name: build (windows / ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x86_64
+          - os: windows-11-arm64
+            arch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            make
+          msystem: MINGW64
+      - name: Build compiler + transpiler
+        shell: msys2 {0}
+        run: make all
+      - name: Smoke test compiler + transpiler
+        shell: msys2 {0}
+        run: |
+          ./sub.exe tests/test_simple.sb linux
+          ./subc.exe tests/test_simple.sb -S -o native_output.s
+          test -f output_linux.c
+          test -f native_output.s
