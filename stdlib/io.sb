@@ -55,7 +55,7 @@
 #func format(template, ...args) -> str {
     #var result = template
     #var arg_index = 0
-    
+
     # Replace {} with arguments
     #var i = 0
     #while i < len(result) {
@@ -67,7 +67,7 @@
         }
         i = i + 1
     }
-    
+
     #return result
 }
 
@@ -88,7 +88,7 @@
         "white": "\033[37m",
         "reset": "\033[0m"
     }
-    
+
     print(colors[color] + message + colors["reset"])
 }
 

@@ -50,7 +50,7 @@
     #if exp < 0 {
         #return 1.0 / pow(base, -exp)
     }
-    
+
     #var result = 1
     #for i in range(exp) {
         result = result * base
@@ -65,15 +65,15 @@
     #if x == 0 {
         #return 0
     }
-    
+
     # Newton's method
     #var guess = x / 2.0
     #var epsilon = 0.000001
-    
+
     #while abs(guess * guess - x) > epsilon {
         guess = (guess + x / guess) / 2.0
     }
-    
+
     #return guess
 }
 
@@ -82,14 +82,14 @@
     #if x == 0 {
         #return 0
     }
-    
+
     #var guess = x / 3.0
     #var epsilon = 0.000001
-    
+
     #while abs(guess * guess * guess - x) > epsilon {
         guess = (2 * guess + x / (guess * guess)) / 3.0
     }
-    
+
     #return guess
 }
 
@@ -124,13 +124,13 @@
     #var result = 0.0
     #var term = x
     #var i = 1
-    
+
     #while abs(term) > 0.000001 && i < 20 {
         result = result + term
         term = -term * x * x / ((2 * i) * (2 * i + 1))
         i = i + 1
     }
-    
+
     #return result
 }
 
@@ -156,20 +156,20 @@
     #if x <= 0 {
         #return NaN
     }
-    
+
     # Natural log using series
     #var result = 0.0
     #var y = (x - 1) / (x + 1)
     #var y_sq = y * y
     #var term = y
     #var i = 1
-    
+
     #while abs(term) > 0.000001 && i < 100 {
         result = result + term / i
         term = term * y_sq
         i = i + 2
     }
-    
+
     #return 2 * result
 }
 
@@ -187,13 +187,13 @@
     #var result = 1.0
     #var term = 1.0
     #var i = 1
-    
+
     #while abs(term) > 0.000001 && i < 100 {
         term = term * x / i
         result = result + term
         i = i + 1
     }
-    
+
     #return result
 }
 
@@ -216,7 +216,7 @@
 #func median(arr) -> num {
     #var sorted = sort(arr)
     #var n = len(sorted)
-    
+
     #if n % 2 == 0 {
         #return (sorted[n/2 - 1] + sorted[n/2]) / 2
     } #else {
@@ -227,12 +227,12 @@
 #func variance(arr) -> float {
     #var avg = mean(arr)
     #var sum_sq_diff = 0
-    
+
     #for val in arr {
         #var diff = val - avg
         sum_sq_diff = sum_sq_diff + diff * diff
     }
-    
+
     #return sum_sq_diff / len(arr)
 }
 
@@ -276,7 +276,7 @@
     #if n == 0 || n == 1 {
         #return 1
     }
-    
+
     #var result = 1
     #for i in range(2, n + 1) {
         result = result * i
@@ -289,15 +289,15 @@
     #if n <= 1 {
         #return n
     }
-    
+
     #var a = 0
     #var b = 1
-    
+
     #for i in range(2, n + 1) {
         #var temp = a + b
         a = b
         b = temp
     }
-    
+
     #return b
 }

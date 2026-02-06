@@ -17,7 +17,7 @@
     #if age >= 18
         #return "Adult"
     #elif age >= 13
-        #return "Teenager"  
+        #return "Teenager"
     #else
         #return "Child"
     #end
@@ -50,7 +50,7 @@
     result = json.dumps(data)
 #endembed
 
-# Embedded JavaScript for web features  
+# Embedded JavaScript for web features
 #embed javascript
     const config = {
         theme: "dark",
@@ -62,15 +62,15 @@
 # Main program entry
 #function main()
     #print("Starting SUB application...")
-    
+
     #var sum = calculateSum(10, 20)
     #print("Sum: " + sum)
-    
+
     #var status = checkAge(25)
     #print("Status: " + status)
-    
+
     countToTen()
-    
+
     #print("Application initialized!")
 #end
 

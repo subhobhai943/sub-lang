@@ -113,7 +113,7 @@
 #func array_reverse(arr) -> array {
     #var left = 0
     #var right = len(arr) - 1
-    
+
     #while left < right {
         #var temp = arr[left]
         arr[left] = arr[right]
@@ -129,7 +129,7 @@
     #if len(arr) == 0 {
         #return null
     }
-    
+
     #var min_val = arr[0]
     #for i in range(1, len(arr)) {
         #if arr[i] < min_val {
@@ -143,7 +143,7 @@
     #if len(arr) == 0 {
         #return null
     }
-    
+
     #var max_val = arr[0]
     #for i in range(1, len(arr)) {
         #if arr[i] > max_val {
@@ -156,43 +156,43 @@
 # Set operations (using arrays)
 #func set_union(set1, set2) -> array {
     #var result = []
-    
+
     #for item in set1 {
         #if !array_contains(result, item) {
             result.append(item)
         }
     }
-    
+
     #for item in set2 {
         #if !array_contains(result, item) {
             result.append(item)
         }
     }
-    
+
     #return result
 }
 
 #func set_intersection(set1, set2) -> array {
     #var result = []
-    
+
     #for item in set1 {
         #if array_contains(set2, item) && !array_contains(result, item) {
             result.append(item)
         }
     }
-    
+
     #return result
 }
 
 #func set_difference(set1, set2) -> array {
     #var result = []
-    
+
     #for item in set1 {
         #if !array_contains(set2, item) {
             result.append(item)
         }
     }
-    
+
     #return result
 }
 
