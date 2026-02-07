@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -56,7 +57,7 @@ def read_snippet(path, limit=2000):
 
 def gather_context():
     files = list_repo_files()
-    todo_notes = run(["rg", "-n", "TODO|FIXME|BUG", "-S", "."], check=False).stdout
+    todo_notes = scan_todo_notes()
     important_files = [
         "README.md",
         "CMakeLists.txt",
@@ -76,6 +77,26 @@ def gather_context():
         "todo_notes": todo_notes.strip(),
         "snippets": "\n\n".join(snippets),
     }
+
+
+def scan_todo_notes():
+    if shutil.which("rg"):
+        return run(["rg", "-n", "TODO|FIXME|BUG", "-S", "."], check=False).stdout
+    notes = []
+    patterns = re.compile(r"(TODO|FIXME|BUG)")
+    for path in REPO_ROOT.rglob("*"):
+        if path.is_dir() or ".git" in path.parts:
+            continue
+        if path.suffix in {".png", ".jpg", ".jpeg", ".gif", ".ico", ".zip"}:
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for idx, line in enumerate(content.splitlines(), start=1):
+            if patterns.search(line):
+                notes.append(f"{path.relative_to(REPO_ROOT)}:{idx}:{line}")
+    return "\n".join(notes)
 
 
 def build_prompt(responsibility, context):
