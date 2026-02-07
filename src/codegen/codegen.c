@@ -227,6 +227,14 @@ static void indent_code(StringBuilder *sb, int level) {
     }
 }
 
+static ASTNode* block_first(ASTNode *node) {
+    if (!node) return NULL;
+    if (node->body) return node->body;
+    if (node->children && node->child_count > 0) return node->children[0];
+    if (node->left) return node->left;
+    return NULL;
+}
+
 /* Generate expression code */
 static void generate_expression(StringBuilder *sb, ASTNode *node) {
     if (!node) return;
@@ -266,8 +274,8 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
             
         case AST_UNARY_EXPR:
             sb_append(sb, "(%s", node->value ? node->value : "-");
-            if (node->left) {
-                generate_expression(sb, node->left);
+            if (node->right) {
+                generate_expression(sb, node->right);
             }
             sb_append(sb, ")");
             break;
@@ -275,9 +283,9 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
         case AST_CALL_EXPR:
             if (node->value) {
                 sb_append(sb, "%s(", node->value);
-                for (ASTNode *arg = node->left; arg != NULL; arg = arg->next) {
-                    generate_expression(sb, arg);
-                    if (arg->next) {
+                for (int i = 0; i < node->child_count; i++) {
+                    generate_expression(sb, node->children[i]);
+                    if (i + 1 < node->child_count) {
                         sb_append(sb, ", ");
                     }
                 }
@@ -296,7 +304,8 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
     
     switch (node->type) {
         case AST_PROGRAM:
-            for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
+        case AST_BLOCK:
+            for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node(sb, stmt, indent);
             }
             break;
@@ -349,12 +358,14 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             break;
             
         case AST_FUNCTION_DECL:
-            sb_append(sb, "\nvoid %s(void) {\n", node->value ? node->value : "func");
+            sb_append(sb, "\nvoid %s(", node->value ? node->value : "func");
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                sb_append(sb, "long %s", node->children[i]->value ? node->children[i]->value : "arg");
+            }
+            sb_append(sb, ") {\n");
             if (node->body) {
                 generate_node(sb, node->body, indent + 1);
-            }
-            for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
-                generate_node(sb, stmt, indent + 1);
             }
             sb_append(sb, "}\n\n");
             break;
@@ -390,9 +401,9 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_RETURN_STMT:
             indent_code(sb, indent);
             sb_append(sb, "return");
-            if (node->left) {
+            if (node->right) {
                 sb_append(sb, " ");
-                generate_expression(sb, node->left);
+                generate_expression(sb, node->right);
             }
             sb_append(sb, ";\n");
             break;
@@ -405,7 +416,8 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_ASSIGN_STMT:
             indent_code(sb, indent);
-            sb_append(sb, "%s = ", node->value ? node->value : "var");
+            generate_expression(sb, node->left);
+            sb_append(sb, " = ");
             generate_expression(sb, node->right);
             sb_append(sb, ";\n");
             break;

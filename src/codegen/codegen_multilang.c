@@ -124,6 +124,14 @@ static void indent_code(StringBuilder *sb, int level) {
     }
 }
 
+static ASTNode* block_first(ASTNode *node) {
+    if (!node) return NULL;
+    if (node->body) return node->body;
+    if (node->children && node->child_count > 0) return node->children[0];
+    if (node->left) return node->left;
+    return NULL;
+}
+
 /* ========================================
    PYTHON CODE GENERATOR - REAL
    ======================================== */
@@ -133,7 +141,13 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
     
     switch (node->type) {
         case AST_LITERAL:
-            sb_append(sb, "%s", node->value ? node->value : "None");
+            if (node->data_type == TYPE_STRING) {
+                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+            } else if (node->value) {
+                sb_append(sb, "%s", node->value);
+            } else {
+                sb_append(sb, "None");
+            }
             break;
         case AST_IDENTIFIER:
             sb_append(sb, "%s", node->value ? node->value : "var");
@@ -145,10 +159,60 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
             generate_expr_python(sb, node->right);
             sb_append(sb, ")");
             break;
-        case AST_CALL_EXPR:
-            sb_append(sb, "%s(", node->value ? node->value : "func");
-            if (node->left) generate_expr_python(sb, node->left);
+        case AST_UNARY_EXPR:
+            sb_append(sb, "%s", node->value ? node->value : "");
+            generate_expr_python(sb, node->right);
+            break;
+        case AST_TERNARY_EXPR:
+            sb_append(sb, "(");
+            generate_expr_python(sb, node->left);
+            sb_append(sb, " if ");
+            generate_expr_python(sb, node->condition);
+            sb_append(sb, " else ");
+            generate_expr_python(sb, node->right);
             sb_append(sb, ")");
+            break;
+        case AST_CALL_EXPR:
+            if (node->value) {
+                sb_append(sb, "%s(", node->value);
+            } else {
+                generate_expr_python(sb, node->left);
+                sb_append(sb, "(");
+            }
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                generate_expr_python(sb, node->children[i]);
+            }
+            sb_append(sb, ")");
+            break;
+        case AST_ARRAY_LITERAL:
+            sb_append(sb, "[");
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                generate_expr_python(sb, node->children[i]);
+            }
+            sb_append(sb, "]");
+            break;
+        case AST_OBJECT_LITERAL:
+            sb_append(sb, "{");
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *pair = node->children[i];
+                if (!pair) continue;
+                if (i > 0) sb_append(sb, ", ");
+                sb_append(sb, "\"%s\": ", pair->value ? pair->value : "");
+                generate_expr_python(sb, pair->right);
+            }
+            sb_append(sb, "}");
+            break;
+        case AST_MEMBER_ACCESS:
+            generate_expr_python(sb, node->left);
+            sb_append(sb, ".%s", node->value ? node->value : "");
+            break;
+        case AST_ARRAY_ACCESS:
+            generate_expr_python(sb, node->left);
+            sb_append(sb, "[");
+            generate_expr_python(sb, node->right);
+            sb_append(sb, "]");
             break;
         default:
             break;
@@ -160,7 +224,7 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
     
     switch (node->type) {
         case AST_PROGRAM:
-            for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
+            for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node_python(sb, stmt, indent);
             }
             break;
@@ -176,15 +240,28 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "\n");
             break;
             
+        case AST_CONST_DECL:
+            indent_code(sb, indent);
+            sb_append(sb, "%s = ", node->value ? node->value : "CONST");
+            if (node->right) {
+                generate_expr_python(sb, node->right);
+            } else {
+                sb_append(sb, "None");
+            }
+            sb_append(sb, "\n");
+            break;
+            
         case AST_FUNCTION_DECL:
-            sb_append(sb, "\ndef %s():\n", node->value ? node->value : "func");
+            sb_append(sb, "\ndef %s(", node->value ? node->value : "func");
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                sb_append(sb, "%s", node->children[i]->value ? node->children[i]->value : "arg");
+            }
+            sb_append(sb, "):\n");
             if (node->body) {
                 generate_node_python(sb, node->body, indent + 1);
             }
-            for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
-                generate_node_python(sb, stmt, indent + 1);
-            }
-            if (!node->body && !node->left) {
+            if (!node->body) {
                 indent_code(sb, indent + 1);
                 sb_append(sb, "pass\n");
             }
@@ -198,16 +275,28 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, ":\n");
             generate_node_python(sb, node->body, indent + 1);
             if (node->right) {
-                indent_code(sb, indent);
-                sb_append(sb, "else:\n");
-                generate_node_python(sb, node->right, indent + 1);
+                if (node->right->type == AST_IF_STMT) {
+                    indent_code(sb, indent);
+                    sb_append(sb, "elif ");
+                    generate_expr_python(sb, node->right->condition);
+                    sb_append(sb, ":\n");
+                    generate_node_python(sb, node->right->body, indent + 1);
+                    if (node->right->right) {
+                        indent_code(sb, indent);
+                        sb_append(sb, "else:\n");
+                        generate_node_python(sb, node->right->right, indent + 1);
+                    }
+                } else {
+                    indent_code(sb, indent);
+                    sb_append(sb, "else:\n");
+                    generate_node_python(sb, node->right, indent + 1);
+                }
             }
             break;
             
         case AST_FOR_STMT:
             indent_code(sb, indent);
             sb_append(sb, "for %s in ", node->value ? node->value : "i");
-            // Generate range from AST children if available
             if (node->children && node->child_count > 0) {
                 ASTNode *range = node->children[0];
                 if (range && range->type == AST_RANGE_EXPR) {
@@ -222,10 +311,9 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
                     generate_expr_python(sb, range);
                 }
             } else if (node->condition) {
-                // Fallback: condition might hold the iterable
                 generate_expr_python(sb, node->condition);
             } else {
-                sb_append(sb, "range(10)");  // Legacy fallback
+                sb_append(sb, "range(10)");
             }
             sb_append(sb, ":\n");
             generate_node_python(sb, node->body, indent + 1);
@@ -246,9 +334,9 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_RETURN_STMT:
             indent_code(sb, indent);
             sb_append(sb, "return");
-            if (node->left) {
+            if (node->right) {
                 sb_append(sb, " ");
-                generate_expr_python(sb, node->left);
+                generate_expr_python(sb, node->right);
             }
             sb_append(sb, "\n");
             break;
@@ -259,8 +347,16 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "\n");
             break;
             
+        case AST_ASSIGN_STMT:
+            indent_code(sb, indent);
+            generate_expr_python(sb, node->left);
+            sb_append(sb, " = ");
+            generate_expr_python(sb, node->right);
+            sb_append(sb, "\n");
+            break;
+            
         case AST_BLOCK:
-            for (ASTNode *stmt = node->body; stmt != NULL; stmt = stmt->next) {
+            for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node_python(sb, stmt, indent);
             }
             break;
@@ -316,7 +412,13 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
     
     switch (node->type) {
         case AST_LITERAL:
-            sb_append(sb, "%s", node->value ? node->value : "null");
+            if (node->data_type == TYPE_STRING) {
+                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+            } else if (node->value) {
+                sb_append(sb, "%s", node->value);
+            } else {
+                sb_append(sb, "null");
+            }
             break;
         case AST_IDENTIFIER:
             sb_append(sb, "%s", node->value ? node->value : "var");
@@ -328,10 +430,60 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
             generate_expr_js(sb, node->right);
             sb_append(sb, ")");
             break;
-        case AST_CALL_EXPR:
-            sb_append(sb, "%s(", node->value ? node->value : "func");
-            if (node->left) generate_expr_js(sb, node->left);
+        case AST_UNARY_EXPR:
+            sb_append(sb, "%s", node->value ? node->value : "");
+            generate_expr_js(sb, node->right);
+            break;
+        case AST_TERNARY_EXPR:
+            sb_append(sb, "(");
+            generate_expr_js(sb, node->condition);
+            sb_append(sb, " ? ");
+            generate_expr_js(sb, node->left);
+            sb_append(sb, " : ");
+            generate_expr_js(sb, node->right);
             sb_append(sb, ")");
+            break;
+        case AST_CALL_EXPR:
+            if (node->value) {
+                sb_append(sb, "%s(", node->value);
+            } else {
+                generate_expr_js(sb, node->left);
+                sb_append(sb, "(");
+            }
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                generate_expr_js(sb, node->children[i]);
+            }
+            sb_append(sb, ")");
+            break;
+        case AST_ARRAY_LITERAL:
+            sb_append(sb, "[");
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                generate_expr_js(sb, node->children[i]);
+            }
+            sb_append(sb, "]");
+            break;
+        case AST_OBJECT_LITERAL:
+            sb_append(sb, "{");
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *pair = node->children[i];
+                if (!pair) continue;
+                if (i > 0) sb_append(sb, ", ");
+                sb_append(sb, "\"%s\": ", pair->value ? pair->value : "");
+                generate_expr_js(sb, pair->right);
+            }
+            sb_append(sb, "}");
+            break;
+        case AST_MEMBER_ACCESS:
+            generate_expr_js(sb, node->left);
+            sb_append(sb, ".%s", node->value ? node->value : "");
+            break;
+        case AST_ARRAY_ACCESS:
+            generate_expr_js(sb, node->left);
+            sb_append(sb, "[");
+            generate_expr_js(sb, node->right);
+            sb_append(sb, "]");
             break;
         default:
             break;
@@ -343,7 +495,7 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
     
     switch (node->type) {
         case AST_PROGRAM:
-            for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
+            for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node_js(sb, stmt, indent);
             }
             break;
@@ -351,6 +503,17 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_VAR_DECL:
             indent_code(sb, indent);
             sb_append(sb, "let %s = ", node->value ? node->value : "var");
+            if (node->right) {
+                generate_expr_js(sb, node->right);
+            } else {
+                sb_append(sb, "null");
+            }
+            sb_append(sb, ";\n");
+            break;
+            
+        case AST_CONST_DECL:
+            indent_code(sb, indent);
+            sb_append(sb, "const %s = ", node->value ? node->value : "CONST");
             if (node->right) {
                 generate_expr_js(sb, node->right);
             } else {
@@ -371,9 +534,6 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, ") {\n");
             
             if (node->body) generate_node_js(sb, node->body, indent + 1);
-            for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
-                generate_node_js(sb, stmt, indent + 1);
-            }
             indent_code(sb, indent);
             sb_append(sb, "}\n\n");
             break;
@@ -387,10 +547,25 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
             indent_code(sb, indent);
             sb_append(sb, "}");
             if (node->right) {
-                sb_append(sb, " else {\n");
-                generate_node_js(sb, node->right, indent + 1);
-                indent_code(sb, indent);
-                sb_append(sb, "}");
+                if (node->right->type == AST_IF_STMT) {
+                    sb_append(sb, " else if (");
+                    generate_expr_js(sb, node->right->condition);
+                    sb_append(sb, ") {\n");
+                    generate_node_js(sb, node->right->body, indent + 1);
+                    indent_code(sb, indent);
+                    sb_append(sb, "}");
+                    if (node->right->right) {
+                        sb_append(sb, " else {\n");
+                        generate_node_js(sb, node->right->right, indent + 1);
+                        indent_code(sb, indent);
+                        sb_append(sb, "}");
+                    }
+                } else {
+                    sb_append(sb, " else {\n");
+                    generate_node_js(sb, node->right, indent + 1);
+                    indent_code(sb, indent);
+                    sb_append(sb, "}");
+                }
             }
             sb_append(sb, "\n");
             break;
@@ -401,9 +576,19 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->children && node->child_count > 0 && node->children[0]->type == AST_RANGE_EXPR) {
                 ASTNode *range = node->children[0];
                 sb_append(sb, "for (let %s = ", node->value ? node->value : "i");
-                if (range->left) generate_expr_js(sb, range->left); else sb_append(sb, "0");
+                if (range->right) {
+                    if (range->left) generate_expr_js(sb, range->left); else sb_append(sb, "0");
+                } else {
+                    sb_append(sb, "0");
+                }
                 sb_append(sb, "; %s < ", node->value ? node->value : "i");
-                if (range->right) generate_expr_js(sb, range->right); else sb_append(sb, "10");
+                if (range->right) {
+                    generate_expr_js(sb, range->right);
+                } else if (range->left) {
+                    generate_expr_js(sb, range->left);
+                } else {
+                    sb_append(sb, "10");
+                }
                 sb_append(sb, "; %s++) {\n", node->value ? node->value : "i");
             } 
             // Check for collection iteration
@@ -438,9 +623,9 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_RETURN_STMT:
             indent_code(sb, indent);
             sb_append(sb, "return");
-            if (node->left) {
+            if (node->right) {
                 sb_append(sb, " ");
-                generate_expr_js(sb, node->left);
+                generate_expr_js(sb, node->right);
             }
             sb_append(sb, ";\n");
             break;
@@ -450,7 +635,7 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
             // Map print to console.log
             if (node->value && strcmp(node->value, "print") == 0) {
                 sb_append(sb, "console.log(");
-                if (node->left) generate_expr_js(sb, node->left);
+                if (node->child_count > 0) generate_expr_js(sb, node->children[0]);
                 sb_append(sb, ")");
             } else {
                 generate_expr_js(sb, node);
@@ -458,8 +643,16 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, ";\n");
             break;
             
+        case AST_ASSIGN_STMT:
+            indent_code(sb, indent);
+            generate_expr_js(sb, node->left);
+            sb_append(sb, " = ");
+            generate_expr_js(sb, node->right);
+            sb_append(sb, ";\n");
+            break;
+            
         case AST_BLOCK:
-            for (ASTNode *stmt = node->body; stmt != NULL; stmt = stmt->next) {
+            for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node_js(sb, stmt, indent);
             }
             break;
@@ -503,7 +696,13 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
     
     switch (node->type) {
         case AST_LITERAL:
-            sb_append(sb, "%s", node->value ? node->value : "null");
+            if (node->data_type == TYPE_STRING) {
+                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+            } else if (node->value) {
+                sb_append(sb, "%s", node->value);
+            } else {
+                sb_append(sb, "null");
+            }
             break;
         case AST_IDENTIFIER:
             sb_append(sb, "%s", node->value ? node->value : "var");
@@ -515,19 +714,69 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
             generate_expr_java(sb, node->right);
             sb_append(sb, ")");
             break;
+        case AST_UNARY_EXPR:
+            sb_append(sb, "%s", node->value ? node->value : "");
+            generate_expr_java(sb, node->right);
+            break;
+        case AST_TERNARY_EXPR:
+            sb_append(sb, "(");
+            generate_expr_java(sb, node->condition);
+            sb_append(sb, " ? ");
+            generate_expr_java(sb, node->left);
+            sb_append(sb, " : ");
+            generate_expr_java(sb, node->right);
+            sb_append(sb, ")");
+            break;
         case AST_CALL_EXPR: {
             const char *fn = node->value ? node->value : "func";
             if (strcmp(fn, "print") == 0) {
                 sb_append(sb, "System.out.println(");
-                if (node->left) generate_expr_java(sb, node->left);
+                if (node->child_count > 0) generate_expr_java(sb, node->children[0]);
                 sb_append(sb, ")");
             } else {
-                sb_append(sb, "%s(", fn);
-                if (node->left) generate_expr_java(sb, node->left);
+                if (node->value) {
+                    sb_append(sb, "%s(", fn);
+                } else {
+                    generate_expr_java(sb, node->left);
+                    sb_append(sb, "(");
+                }
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    generate_expr_java(sb, node->children[i]);
+                }
                 sb_append(sb, ")");
             }
             break;
         }
+        case AST_ARRAY_LITERAL:
+            sb_append(sb, "java.util.List.of(");
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                generate_expr_java(sb, node->children[i]);
+            }
+            sb_append(sb, ")");
+            break;
+        case AST_OBJECT_LITERAL:
+            sb_append(sb, "java.util.Map.of(");
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *pair = node->children[i];
+                if (!pair) continue;
+                if (i > 0) sb_append(sb, ", ");
+                sb_append(sb, "\"%s\", ", pair->value ? pair->value : "");
+                generate_expr_java(sb, pair->right);
+            }
+            sb_append(sb, ")");
+            break;
+        case AST_MEMBER_ACCESS:
+            generate_expr_java(sb, node->left);
+            sb_append(sb, ".%s", node->value ? node->value : "");
+            break;
+        case AST_ARRAY_ACCESS:
+            generate_expr_java(sb, node->left);
+            sb_append(sb, ".get(");
+            generate_expr_java(sb, node->right);
+            sb_append(sb, ")");
+            break;
         default:
             fprintf(stderr, "Warning: Unsupported expression node %d in Java generator\n", node->type);
             break;
@@ -539,7 +788,7 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
     
     switch (node->type) {
         case AST_PROGRAM:
-            for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
+            for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node_java(sb, stmt, indent);
             }
             break;
@@ -552,14 +801,19 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, ";\n");
             break;
             
+        case AST_CONST_DECL:
+            indent_code(sb, indent);
+            sb_append(sb, "final var %s = ", node->value ? node->value : "CONST");
+            if (node->right) generate_expr_java(sb, node->right);
+            else sb_append(sb, "null");
+            sb_append(sb, ";\n");
+            break;
+            
         case AST_FUNCTION_DECL:
             sb_append(sb, "\n");
             indent_code(sb, indent);
             sb_append(sb, "public static void %s() {\n", node->value ? node->value : "func");
             if (node->body) generate_node_java(sb, node->body, indent + 1);
-            for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
-                generate_node_java(sb, stmt, indent + 1);
-            }
             indent_code(sb, indent);
             sb_append(sb, "}\n");
             break;
@@ -573,10 +827,25 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             indent_code(sb, indent);
             sb_append(sb, "}");
             if (node->right) {
-                sb_append(sb, " else {\n");
-                generate_node_java(sb, node->right, indent + 1);
-                indent_code(sb, indent);
-                sb_append(sb, "}");
+                if (node->right->type == AST_IF_STMT) {
+                    sb_append(sb, " else if (");
+                    generate_expr_java(sb, node->right->condition);
+                    sb_append(sb, ") {\n");
+                    generate_node_java(sb, node->right->body, indent + 1);
+                    indent_code(sb, indent);
+                    sb_append(sb, "}");
+                    if (node->right->right) {
+                        sb_append(sb, " else {\n");
+                        generate_node_java(sb, node->right->right, indent + 1);
+                        indent_code(sb, indent);
+                        sb_append(sb, "}");
+                    }
+                } else {
+                    sb_append(sb, " else {\n");
+                    generate_node_java(sb, node->right, indent + 1);
+                    indent_code(sb, indent);
+                    sb_append(sb, "}");
+                }
             }
             sb_append(sb, "\n");
             break;
@@ -605,9 +874,9 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_RETURN_STMT:
             indent_code(sb, indent);
             sb_append(sb, "return");
-            if (node->left) {
+            if (node->right) {
                 sb_append(sb, " ");
-                generate_expr_java(sb, node->left);
+                generate_expr_java(sb, node->right);
             }
             sb_append(sb, ";\n");
             break;
@@ -618,8 +887,16 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, ";\n");
             break;
             
+        case AST_ASSIGN_STMT:
+            indent_code(sb, indent);
+            generate_expr_java(sb, node->left);
+            sb_append(sb, " = ");
+            generate_expr_java(sb, node->right);
+            sb_append(sb, ";\n");
+            break;
+            
         case AST_BLOCK:
-            for (ASTNode *stmt = node->body; stmt != NULL; stmt = stmt->next) {
+            for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node_java(sb, stmt, indent);
             }
             break;
@@ -663,16 +940,26 @@ char* codegen_java(ASTNode *ast, const char *source) {
 static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
     if (!node) return;
     switch (node->type) {
-        case AST_LITERAL: sb_append(sb, "%s", node->value ? node->value : "nil"); break;
+        case AST_LITERAL:
+            if (node->data_type == TYPE_STRING) {
+                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+            } else {
+                sb_append(sb, "%s", node->value ? node->value : "nil");
+            }
+            break;
         case AST_IDENTIFIER: sb_append(sb, "%s", node->value ? node->value : "var"); break;
         case AST_BINARY_EXPR:
             sb_append(sb, "("); generate_expr_swift(sb, node->left);
             sb_append(sb, " %s ", node->value ? node->value : "+");
             generate_expr_swift(sb, node->right); sb_append(sb, ")"); break;
         case AST_CALL_EXPR:
-            if (strcmp(node->value, "print") == 0) sb_append(sb, "print(");
-            else sb_append(sb, "%s(", node->value);
-            if (node->left) generate_expr_swift(sb, node->left);
+            if (node->value && strcmp(node->value, "print") == 0) sb_append(sb, "print(");
+            else if (node->value) sb_append(sb, "%s(", node->value);
+            else { generate_expr_swift(sb, node->left); sb_append(sb, "("); }
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                generate_expr_swift(sb, node->children[i]);
+            }
             sb_append(sb, ")"); break;
         default: break;
     }
@@ -682,7 +969,7 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     switch (node->type) {
         case AST_PROGRAM: 
-            for (ASTNode *s = node->left; s; s = s->next) {
+            for (ASTNode *s = block_first(node); s; s = s->next) {
                 generate_node_swift(sb, s, indent);
             }
             break;
@@ -706,7 +993,7 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             generate_node_swift(sb, node->body, indent + 1);
             indent_code(sb, indent); sb_append(sb, "}\n"); break;
         case AST_BLOCK:
-            for (ASTNode *s = node->body; s; s = s->next) {
+            for (ASTNode *s = block_first(node); s; s = s->next) {
                 generate_node_swift(sb, s, indent);
             }
             break;
@@ -732,16 +1019,26 @@ char* codegen_swift(ASTNode *ast, const char *source) {
 static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
     if (!node) return;
     switch (node->type) {
-        case AST_LITERAL: sb_append(sb, "%s", node->value ? node->value : "null"); break;
+        case AST_LITERAL:
+            if (node->data_type == TYPE_STRING) {
+                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+            } else {
+                sb_append(sb, "%s", node->value ? node->value : "null");
+            }
+            break;
         case AST_IDENTIFIER: sb_append(sb, "%s", node->value ? node->value : "var"); break;
         case AST_BINARY_EXPR:
             sb_append(sb, "("); generate_expr_kotlin(sb, node->left);
             sb_append(sb, " %s ", node->value ? node->value : "+");
             generate_expr_kotlin(sb, node->right); sb_append(sb, ")"); break;
         case AST_CALL_EXPR:
-            if (strcmp(node->value, "print") == 0) sb_append(sb, "println(");
-            else sb_append(sb, "%s(", node->value);
-            if (node->left) generate_expr_kotlin(sb, node->left);
+            if (node->value && strcmp(node->value, "print") == 0) sb_append(sb, "println(");
+            else if (node->value) sb_append(sb, "%s(", node->value);
+            else { generate_expr_kotlin(sb, node->left); sb_append(sb, "("); }
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                generate_expr_kotlin(sb, node->children[i]);
+            }
             sb_append(sb, ")"); break;
         default: break;
     }
@@ -751,7 +1048,7 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     switch (node->type) {
         case AST_PROGRAM: 
-            for (ASTNode *s = node->left; s; s = s->next) {
+            for (ASTNode *s = block_first(node); s; s = s->next) {
                 generate_node_kotlin(sb, s, indent);
             }
             break;
@@ -775,7 +1072,7 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
             generate_node_kotlin(sb, node->body, indent + 1);
             indent_code(sb, indent); sb_append(sb, "}\n"); break;
         case AST_BLOCK:
-            for (ASTNode *s = node->body; s; s = s->next) {
+            for (ASTNode *s = block_first(node); s; s = s->next) {
                 generate_node_kotlin(sb, s, indent);
             }
             break;
@@ -811,7 +1108,13 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
 
     switch (node->type) {
         case AST_LITERAL:
-            sb_append(sb, "%s", node->value ? node->value : "nil");
+            if (node->data_type == TYPE_STRING) {
+                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+            } else if (node->value) {
+                sb_append(sb, "%s", node->value);
+            } else {
+                sb_append(sb, "nil");
+            }
             break;
 
         case AST_IDENTIFIER:
@@ -830,19 +1133,54 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
             const char *func_name = node->value ? node->value : "func";
             if (strcmp(func_name, "print") == 0) {
                 sb_append(sb, "puts");
-                if (node->left) {
+                if (node->child_count > 0) {
                     sb_append(sb, " ");
-                    generate_expr_ruby(sb, node->left);
+                    generate_expr_ruby(sb, node->children[0]);
                 }
             } else {
-                sb_append(sb, "%s(", func_name);
-                if (node->left) {
+                if (node->value) {
+                    sb_append(sb, "%s(", func_name);
+                } else {
                     generate_expr_ruby(sb, node->left);
+                    sb_append(sb, "(");
+                }
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    generate_expr_ruby(sb, node->children[i]);
                 }
                 sb_append(sb, ")");
             }
             break;
         }
+        case AST_ARRAY_LITERAL:
+            sb_append(sb, "[");
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                generate_expr_ruby(sb, node->children[i]);
+            }
+            sb_append(sb, "]");
+            break;
+        case AST_OBJECT_LITERAL:
+            sb_append(sb, "{");
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *pair = node->children[i];
+                if (!pair) continue;
+                if (i > 0) sb_append(sb, ", ");
+                sb_append(sb, "\"%s\" => ", pair->value ? pair->value : "");
+                generate_expr_ruby(sb, pair->right);
+            }
+            sb_append(sb, "}");
+            break;
+        case AST_MEMBER_ACCESS:
+            generate_expr_ruby(sb, node->left);
+            sb_append(sb, ".%s", node->value ? node->value : "");
+            break;
+        case AST_ARRAY_ACCESS:
+            generate_expr_ruby(sb, node->left);
+            sb_append(sb, "[");
+            generate_expr_ruby(sb, node->right);
+            sb_append(sb, "]");
+            break;
 
         default:
             break;
@@ -854,7 +1192,7 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
 
     switch (node->type) {
         case AST_PROGRAM:
-            for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
+            for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node_ruby(sb, stmt, indent);
             }
             break;
@@ -900,11 +1238,7 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->body) {
                 generate_node_ruby(sb, node->body, indent + 1);
             }
-            for (ASTNode *stmt = node->left; stmt != NULL; stmt = stmt->next) {
-                generate_node_ruby(sb, stmt, indent + 1);
-            }
-
-            if (!node->body && !node->left) {
+            if (!node->body) {
                 indent_ruby(sb, indent + 1);
                 sb_append(sb, "# TODO: implement\n");
             }
@@ -959,11 +1293,17 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
                 ASTNode *range = node->children[0];
                 if (range && range->type == AST_RANGE_EXPR) {
                     sb_append(sb, "(");
-                    if (range->left) generate_expr_ruby(sb, range->left);
-                    else sb_append(sb, "0");
-                    sb_append(sb, "...");
-                    if (range->right) generate_expr_ruby(sb, range->right);
-                    else sb_append(sb, "10");
+                    if (range->right) {
+                        if (range->left) generate_expr_ruby(sb, range->left);
+                        else sb_append(sb, "0");
+                        sb_append(sb, "...");
+                        generate_expr_ruby(sb, range->right);
+                    } else if (range->left) {
+                        sb_append(sb, "0...");
+                        generate_expr_ruby(sb, range->left);
+                    } else {
+                        sb_append(sb, "0...10");
+                    }
                     sb_append(sb, ")");
                 } else {
                     generate_expr_ruby(sb, range);
@@ -996,9 +1336,9 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_RETURN_STMT:
             indent_ruby(sb, indent);
             sb_append(sb, "return");
-            if (node->left) {
+            if (node->right) {
                 sb_append(sb, " ");
-                generate_expr_ruby(sb, node->left);
+                generate_expr_ruby(sb, node->right);
             }
             sb_append(sb, "\n");
             break;
@@ -1008,9 +1348,17 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
             generate_expr_ruby(sb, node);
             sb_append(sb, "\n");
             break;
-
+            
+        case AST_ASSIGN_STMT:
+            indent_ruby(sb, indent);
+            generate_expr_ruby(sb, node->left);
+            sb_append(sb, " = ");
+            generate_expr_ruby(sb, node->right);
+            sb_append(sb, "\n");
+            break;
+            
         case AST_BLOCK:
-            for (ASTNode *stmt = node->body; stmt != NULL; stmt = stmt->next) {
+            for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node_ruby(sb, stmt, indent);
             }
             break;

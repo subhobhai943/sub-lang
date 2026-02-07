@@ -69,6 +69,7 @@ typedef struct {
     SubType sub_type;
     const char *python_type;
     const char *javascript_type;
+    const char *typescript_type;
     const char *java_type;
     const char *ruby_type;
     const char *cpp_type;
@@ -76,6 +77,7 @@ typedef struct {
     const char *rust_type;
     const char *swift_type;
     const char *kotlin_type;
+    const char *go_type;
 } TypeMapping;
 
 /* Global type mapping table */

@@ -16,6 +16,10 @@ static const char* arg_registers_64[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"}
 /* Create code generation context */
 X64Context* x64_context_create(FILE *output) {
     X64Context *ctx = calloc(1, sizeof(X64Context));
+    if (!ctx) {
+        fprintf(stderr, "Error: Failed to allocate x64 context\n");
+        return NULL;
+    }
     ctx->output = output;
     ctx->label_counter = 0;
     return ctx;
@@ -81,14 +85,18 @@ static void x64_generate_function_prologue(X64Context *ctx, IRFunction *func) {
     
     // Move arguments from registers to their stack slots
     for (int i = 0; i < func->param_count; i++) {
-        if (i < 6) { // Only handle up to 6 register arguments for now
-            // Find the symbol for the i-th parameter
-            Symbol *sym = func->sym_table->head;
-            for(int j = 0; j < i && sym != NULL; ++j) sym = sym->next;
+        // Find the symbol for the i-th parameter
+        IRSymbol *sym = func->sym_table->head;
+        for (int j = 0; j < i && sym != NULL; ++j) sym = sym->next;
 
-            if (sym) {
-                 x64_emit(ctx, "mov [rbp - %d], %s", -sym->stack_offset, arg_registers_64[i]);
-            }
+        if (!sym) continue;
+
+        if (i < 6) {
+            x64_emit(ctx, "mov [rbp - %d], %s", -sym->stack_offset, arg_registers_64[i]);
+        } else {
+            int stack_offset = 16 + (i - 6) * 8;
+            x64_emit(ctx, "mov rax, [rbp + %d]", stack_offset);
+            x64_emit(ctx, "mov [rbp - %d], rax", -sym->stack_offset);
         }
     }
 }
@@ -121,6 +129,9 @@ void x64_generate_instruction(X64Context *ctx, IRInstruction *instr) {
         case IR_PUSH:
              x64_emit(ctx, "push rax");
              break;
+        case IR_POP:
+             x64_emit(ctx, "pop rax");
+             break;
 
         case IR_ADD:
             x64_emit(ctx, "pop rbx");
@@ -143,6 +154,14 @@ void x64_generate_instruction(X64Context *ctx, IRInstruction *instr) {
             x64_emit(ctx, "pop rax");
             x64_emit(ctx, "cqo"); // Sign-extend RAX into RDX:RAX
             x64_emit(ctx, "idiv rbx");
+            break;
+
+        case IR_MOD:
+            x64_emit(ctx, "mov rbx, rax");
+            x64_emit(ctx, "pop rax");
+            x64_emit(ctx, "cqo");
+            x64_emit(ctx, "idiv rbx");
+            x64_emit(ctx, "mov rax, rdx");
             break;
             
         case IR_RETURN:
@@ -187,6 +206,11 @@ void x64_generate_instruction(X64Context *ctx, IRInstruction *instr) {
             x64_emit(ctx, "je %s", instr->dest->data.label);
             break;
 
+        case IR_JUMP_IF:
+            x64_emit(ctx, "cmp rax, 0");
+            x64_emit(ctx, "jne %s", instr->dest->data.label);
+            break;
+
         case IR_EQ: case IR_NE: case IR_LT: case IR_LE: case IR_GT: case IR_GE:
             x64_emit(ctx, "pop rbx");
             x64_emit(ctx, "cmp rbx, rax"); // Compare left (popped) vs right (in rax)
@@ -203,6 +227,32 @@ void x64_generate_instruction(X64Context *ctx, IRInstruction *instr) {
             }
             x64_emit(ctx, "%s al", set_instr);
             break;
+
+        case IR_AND:
+            x64_emit(ctx, "pop rbx");
+            x64_emit(ctx, "cmp rbx, 0");
+            x64_emit(ctx, "setne bl");
+            x64_emit(ctx, "cmp rax, 0");
+            x64_emit(ctx, "setne al");
+            x64_emit(ctx, "and al, bl");
+            x64_emit(ctx, "movzx rax, al");
+            break;
+
+        case IR_OR:
+            x64_emit(ctx, "pop rbx");
+            x64_emit(ctx, "cmp rbx, 0");
+            x64_emit(ctx, "setne bl");
+            x64_emit(ctx, "cmp rax, 0");
+            x64_emit(ctx, "setne al");
+            x64_emit(ctx, "or al, bl");
+            x64_emit(ctx, "movzx rax, al");
+            break;
+
+        case IR_NOT:
+            x64_emit(ctx, "cmp rax, 0");
+            x64_emit(ctx, "sete al");
+            x64_emit(ctx, "movzx rax, al");
+            break;
             
         case IR_LABEL:
             x64_emit_label(ctx, instr->dest->data.label);
@@ -215,22 +265,28 @@ void x64_generate_instruction(X64Context *ctx, IRInstruction *instr) {
         case IR_CALL: {
             x64_emit_comment(ctx, "Function call");
             int arg_count = instr->src1 ? (int)instr->src1->data.int_val : 0;
-            
-            // Arguments were pushed to stack. Pop them into registers per ABI.
-            for (int i = 0; i < arg_count && i < 6; i++) {
+            int reg_args = arg_count > 6 ? 6 : arg_count;
+            int stack_args = arg_count - reg_args;
+
+            for (int i = 0; i < reg_args; i++) {
                 x64_emit(ctx, "pop %s", arg_registers_64[i]);
             }
-            
-            // Align stack if needed (must be 16-byte aligned before call)
-            x64_emit(ctx, "sub rsp, 8"); // Align stack
-            x64_emit(ctx, "and rsp, -16");
-            x64_emit(ctx, "add rsp, 8");
+
+            int stack_bytes = stack_args * 8;
+            int padding = (stack_bytes % 16 == 0) ? 0 : 8;
+            if (padding) {
+                x64_emit(ctx, "sub rsp, %d", padding);
+            }
 
             x64_emit(ctx, "xor rax, rax");
             x64_emit(ctx, "call %s", instr->dest->data.label);
-            
-            // Cleanup stack space used for arguments if they were > 6 (not handled yet)
-            // The pops already cleaned the stack for the first 6 args.
+
+            if (padding) {
+                x64_emit(ctx, "add rsp, %d", padding);
+            }
+            if (stack_bytes > 0) {
+                x64_emit(ctx, "add rsp, %d", stack_bytes);
+            }
             break;
         }
             

@@ -1,0 +1,24 @@
+var total = 0
+
+function add(a: int, b: int): int {
+    return a + b
+}
+
+if total == 0 {
+    total = add(1, 2)
+} elif total < 0 {
+    total = 5
+} else {
+    total = 10
+}
+
+for i in range(0, 3) {
+    total = total + i
+}
+
+while total < 20 {
+    total = total + 1
+}
+
+var nums = [1, 2, 3]
+var obj = {"name": "sub", "count": total}
