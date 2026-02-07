@@ -1,0 +1,69 @@
+name: OpenCode Autonomy
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+jobs:
+  opencode:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run OpenCode automation
+        env:
+          OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          SOLAR_API_KEY: ${{ secrets.SOLAR_API_KEY }}
+          HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
+          TRINITY_API_KEY: ${{ secrets.TRINITY_API_KEY }}
+        run: |
+          python .github/scripts/opencode.py
+
+      - name: Build project
+        run: |
+          if [ -f CMakeLists.txt ]; then
+            cmake -S . -B build
+            cmake --build build
+          elif [ -f Makefile ]; then
+            make
+          else
+            echo "No build system detected."
+          fi
+
+      - name: Run tests if present
+        run: |
+          if [ -f Makefile ] && grep -qE '^test:' Makefile; then
+            make test
+          elif [ -f build/CTestTestfile.cmake ]; then
+            ctest --test-dir build
+          elif [ -d tests ]; then
+            echo "Tests directory found but no automated runner configured."
+          else
+            echo "No tests detected."
+          fi
+
+      - name: Commit and push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore(opencode): automated improvements"
+            git push
+          else
+            echo "No changes to commit."
+          fi
