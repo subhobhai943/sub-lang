@@ -209,7 +209,7 @@ static void skip_whitespace_and_comments(Lexer *L) {
             continue;
         }
 
-        /* Block comment: /* ... */  with nesting */
+        /* Block comment: supports nested slash-star ... star-slash blocks. */
         if (c == '/' && peek_next(L) == '*') {
             int start_line = L->line;
             advance(L);  /* '/' */
