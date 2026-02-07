@@ -20,6 +20,10 @@
 
 IRSymbolTable* ir_symbol_table_create(IRSymbolTable *parent) {
     IRSymbolTable *table = calloc(1, sizeof(IRSymbolTable));
+    if (!table) {
+        fprintf(stderr, "IR error: Failed to allocate symbol table\n");
+        return NULL;
+    }
     table->parent = parent;
     table->head = NULL;
     // Stack grows down. First local is at -8, next at -16, etc.
@@ -42,7 +46,16 @@ void ir_symbol_table_free(IRSymbolTable *table) {
 IRSymbol* ir_symbol_table_add(IRSymbolTable *table, const char *name, IRType type) {
     if (!table || !name) return NULL;
     IRSymbol *sym = calloc(1, sizeof(IRSymbol));
+    if (!sym) {
+        fprintf(stderr, "IR error: Failed to allocate symbol\n");
+        return NULL;
+    }
     sym->name = strdup(name);
+    if (!sym->name) {
+        fprintf(stderr, "IR error: Failed to allocate symbol name\n");
+        free(sym);
+        return NULL;
+    }
     sym->type = type;
     // Each local variable is 8 bytes (for simplicity)
     table->current_offset -= 8;
@@ -78,7 +91,16 @@ IRSymbol* ir_symbol_table_lookup(IRSymbolTable *table, const char *name) {
 
 IRModule* ir_module_create(void) {
     IRModule *module = calloc(1, sizeof(IRModule));
+    if (!module) {
+        fprintf(stderr, "IR error: Failed to allocate module\n");
+        return NULL;
+    }
     module->entry_point = strdup("main");
+    if (!module->entry_point) {
+        fprintf(stderr, "IR error: Failed to allocate entry point\n");
+        free(module);
+        return NULL;
+    }
     return module;
 }
 
@@ -113,7 +135,16 @@ void ir_module_free(IRModule *module) {
 
 IRFunction* ir_function_create(const char *name, IRType return_type, IRSymbolTable *parent_scope) {
     IRFunction *func = calloc(1, sizeof(IRFunction));
+    if (!func) {
+        fprintf(stderr, "IR error: Failed to allocate function\n");
+        return NULL;
+    }
     func->name = strdup(name);
+    if (!func->name) {
+        fprintf(stderr, "IR error: Failed to allocate function name\n");
+        free(func);
+        return NULL;
+    }
     func->return_type = return_type;
     func->sym_table = ir_symbol_table_create(parent_scope);
     return func;
@@ -131,12 +162,20 @@ void ir_function_add_instruction(IRFunction *func, IRInstruction *instr) {
 
 IRInstruction* ir_instruction_create(IROpcode opcode) {
     IRInstruction *instr = calloc(1, sizeof(IRInstruction));
+    if (!instr) {
+        fprintf(stderr, "IR error: Failed to allocate instruction\n");
+        return NULL;
+    }
     instr->opcode = opcode;
     return instr;
 }
 
 IRValue* ir_value_create_int(int64_t value) {
     IRValue *val = calloc(1, sizeof(IRValue));
+    if (!val) {
+        fprintf(stderr, "IR error: Failed to allocate value\n");
+        return NULL;
+    }
     val->type = IR_TYPE_INT;
     val->kind = IR_VAL_CONST;
     val->data.int_val = value;
@@ -145,14 +184,33 @@ IRValue* ir_value_create_int(int64_t value) {
 
 IRValue* ir_value_create_string_literal(IRModule *module, const char *value) {
     // Add string to module's literal pool
-    module->string_literals = realloc(module->string_literals, sizeof(char*) * (module->string_count + 1));
+    char **next_literals = realloc(module->string_literals, sizeof(char*) * (module->string_count + 1));
+    if (!next_literals) {
+        fprintf(stderr, "IR error: Failed to grow string literal pool\n");
+        return NULL;
+    }
+    module->string_literals = next_literals;
     char *str_label = malloc(32);
+    if (!str_label) {
+        fprintf(stderr, "IR error: Failed to allocate string label\n");
+        return NULL;
+    }
     sprintf(str_label, ".LC%d", module->string_count);
     module->string_literals[module->string_count] = strdup(value);
+    if (!module->string_literals[module->string_count]) {
+        fprintf(stderr, "IR error: Failed to allocate string literal\n");
+        free(str_label);
+        return NULL;
+    }
     module->string_count++;
     
     // Return a value representing the label
     IRValue *val = calloc(1, sizeof(IRValue));
+    if (!val) {
+        fprintf(stderr, "IR error: Failed to allocate value\n");
+        free(str_label);
+        return NULL;
+    }
     val->type = IR_TYPE_STRING;
     val->kind = IR_VAL_LABEL;
     val->data.label = str_label;
@@ -161,6 +219,10 @@ IRValue* ir_value_create_string_literal(IRModule *module, const char *value) {
 
 IRValue* ir_value_create_reg(int reg_num, IRType type) {
     IRValue *val = calloc(1, sizeof(IRValue));
+    if (!val) {
+        fprintf(stderr, "IR error: Failed to allocate value\n");
+        return NULL;
+    }
     val->type = type;
     val->kind = IR_VAL_REG;
     val->data.reg_num = reg_num;
@@ -169,9 +231,18 @@ IRValue* ir_value_create_reg(int reg_num, IRType type) {
 
 IRValue* ir_value_create_label(const char *label) {
     IRValue *val = calloc(1, sizeof(IRValue));
+    if (!val) {
+        fprintf(stderr, "IR error: Failed to allocate value\n");
+        return NULL;
+    }
     val->type = IR_TYPE_LABEL;
     val->kind = IR_VAL_LABEL;
     val->data.label = strdup(label);
+    if (!val->data.label) {
+        fprintf(stderr, "IR error: Failed to allocate label\n");
+        free(val);
+        return NULL;
+    }
     return val;
 }
 
@@ -187,10 +258,20 @@ IRModule* ir_generate_from_ast(void *ast_root) {
     
     ASTNode *root = (ASTNode*)ast_root;
     IRModule *module = ir_module_create();
+    if (!module) return NULL;
     IRSymbolTable *global_scope = ir_symbol_table_create(NULL);
+    if (!global_scope) {
+        ir_module_free(module);
+        return NULL;
+    }
     
     // Create main function
     IRFunction *main_func = ir_function_create("main", IR_TYPE_INT, global_scope);
+    if (!main_func) {
+        ir_symbol_table_free(global_scope);
+        ir_module_free(module);
+        return NULL;
+    }
     module->functions = main_func;
     
     // First pass: find all function declarations and create IRFunctions
@@ -199,6 +280,9 @@ IRModule* ir_generate_from_ast(void *ast_root) {
             if (stmt->type == AST_FUNCTION_DECL && stmt->value) {
                 if (strcmp(stmt->value, "main") != 0) {
                     IRFunction *func = ir_function_create(stmt->value, IR_TYPE_INT, global_scope); // TODO: return type
+                    if (!func) {
+                        continue;
+                    }
                     // Add to module
                     func->next = module->functions;
                     module->functions = func;
@@ -271,8 +355,8 @@ static void ir_generate_from_ast_node(IRModule *module, IRFunction *func, ASTNod
             break;
 
         case AST_RETURN_STMT: {
-            if (node->left) {
-                ir_generate_from_ast_node(module, func, node->left);
+            if (node->right) {
+                ir_generate_from_ast_node(module, func, node->right);
             } else {
                 IRInstruction *zero = ir_instruction_create(IR_CONST_INT);
                 zero->src1 = ir_value_create_int(0);
@@ -286,6 +370,10 @@ static void ir_generate_from_ast_node(IRModule *module, IRFunction *func, ASTNod
             
         case AST_VAR_DECL: {
             IRSymbol *sym = ir_symbol_table_add(func->sym_table, node->value, IR_TYPE_INT); // TODO: type
+            if (!sym) {
+                fprintf(stderr, "IR error: Failed to allocate symbol for variable\n");
+                break;
+            }
             func->local_count++;
             
             if (node->right) {
@@ -293,6 +381,23 @@ static void ir_generate_from_ast_node(IRModule *module, IRFunction *func, ASTNod
                 IRInstruction *store = ir_instruction_create(IR_STORE);
                 store->dest = ir_value_create_int(sym->stack_offset);
                 ir_function_add_instruction(func, store);
+            }
+            break;
+        }
+
+        case AST_ASSIGN_STMT: {
+            if (node->left && node->left->type == AST_IDENTIFIER) {
+                IRSymbol *sym = ir_symbol_table_lookup(func->sym_table, node->left->value);
+                if (sym) {
+                    ir_generate_from_ast_node(module, func, node->right);
+                    IRInstruction *store = ir_instruction_create(IR_STORE);
+                    store->dest = ir_value_create_int(sym->stack_offset);
+                    ir_function_add_instruction(func, store);
+                } else {
+                    fprintf(stderr, "Error: Assignment to undeclared variable '%s'\n", node->left->value);
+                }
+            } else {
+                fprintf(stderr, "Warning: Unsupported assignment target\n");
             }
             break;
         }
@@ -430,6 +535,97 @@ static void ir_generate_from_ast_node(IRModule *module, IRFunction *func, ASTNod
             IRInstruction *end_label_instr = ir_instruction_create(IR_LABEL);
             end_label_instr->dest = ir_value_create_label(end_label);
             ir_function_add_instruction(func, end_label_instr);
+            break;
+        }
+
+        case AST_FOR_STMT: {
+            static int loop_counter = 0;
+            int current_loop = loop_counter++;
+            char start_label[32], end_label[32];
+            sprintf(start_label, "L_FOR_START_%d", current_loop);
+            sprintf(end_label, "L_FOR_END_%d", current_loop);
+
+            if (!node->value) {
+                fprintf(stderr, "Warning: For loop missing iterator name\n");
+                break;
+            }
+
+            IRSymbol *iter_sym = ir_symbol_table_add(func->sym_table, node->value, IR_TYPE_INT);
+            if (!iter_sym) {
+                fprintf(stderr, "IR error: Failed to allocate loop variable\n");
+                break;
+            }
+            func->local_count++;
+
+            ASTNode *range = (node->children && node->child_count > 0) ? node->children[0] : NULL;
+            if (range && range->type == AST_RANGE_EXPR) {
+                if (range->left) {
+                    ir_generate_from_ast_node(module, func, range->left);
+                } else {
+                    IRInstruction *zero = ir_instruction_create(IR_CONST_INT);
+                    zero->src1 = ir_value_create_int(0);
+                    ir_function_add_instruction(func, zero);
+                }
+                IRInstruction *store_init = ir_instruction_create(IR_STORE);
+                store_init->dest = ir_value_create_int(iter_sym->stack_offset);
+                ir_function_add_instruction(func, store_init);
+
+                IRInstruction *start_label_instr = ir_instruction_create(IR_LABEL);
+                start_label_instr->dest = ir_value_create_label(start_label);
+                ir_function_add_instruction(func, start_label_instr);
+
+                IRInstruction *load_iter = ir_instruction_create(IR_LOAD);
+                load_iter->src1 = ir_value_create_int(iter_sym->stack_offset);
+                ir_function_add_instruction(func, load_iter);
+
+                IRInstruction *push_iter = ir_instruction_create(IR_PUSH);
+                ir_function_add_instruction(func, push_iter);
+
+                if (range->right) {
+                    ir_generate_from_ast_node(module, func, range->right);
+                } else {
+                    IRInstruction *zero = ir_instruction_create(IR_CONST_INT);
+                    zero->src1 = ir_value_create_int(0);
+                    ir_function_add_instruction(func, zero);
+                }
+
+                IRInstruction *cmp = ir_instruction_create(IR_LT);
+                ir_function_add_instruction(func, cmp);
+
+                IRInstruction *jump_if_false = ir_instruction_create(IR_JUMP_IF_NOT);
+                jump_if_false->dest = ir_value_create_label(end_label);
+                ir_function_add_instruction(func, jump_if_false);
+
+                ir_generate_from_ast_node(module, func, node->body);
+
+                IRInstruction *load_iter_inc = ir_instruction_create(IR_LOAD);
+                load_iter_inc->src1 = ir_value_create_int(iter_sym->stack_offset);
+                ir_function_add_instruction(func, load_iter_inc);
+
+                IRInstruction *push_iter_inc = ir_instruction_create(IR_PUSH);
+                ir_function_add_instruction(func, push_iter_inc);
+
+                IRInstruction *one = ir_instruction_create(IR_CONST_INT);
+                one->src1 = ir_value_create_int(1);
+                ir_function_add_instruction(func, one);
+
+                IRInstruction *add = ir_instruction_create(IR_ADD);
+                ir_function_add_instruction(func, add);
+
+                IRInstruction *store_inc = ir_instruction_create(IR_STORE);
+                store_inc->dest = ir_value_create_int(iter_sym->stack_offset);
+                ir_function_add_instruction(func, store_inc);
+
+                IRInstruction *jump_to_start = ir_instruction_create(IR_JUMP);
+                jump_to_start->dest = ir_value_create_label(start_label);
+                ir_function_add_instruction(func, jump_to_start);
+
+                IRInstruction *end_label_instr = ir_instruction_create(IR_LABEL);
+                end_label_instr->dest = ir_value_create_label(end_label);
+                ir_function_add_instruction(func, end_label_instr);
+            } else {
+                fprintf(stderr, "Warning: For loop iteration without range not supported in IR\n");
+            }
             break;
         }
             

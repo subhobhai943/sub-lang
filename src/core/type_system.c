@@ -17,16 +17,17 @@
    ======================================== */
 
 const TypeMapping TYPE_MAPPINGS[] = {
-    /* SUB Type      Python    JavaScript  Java        Ruby      C++           C             Rust        Swift       Kotlin */
-    {SUB_TYPE_VOID,   "None",   "void",     "void",     "nil",    "void",       "void",       "()",       "Void",     "Unit"},
-    {SUB_TYPE_INT,    "int",    "number",   "int",      "Integer","int",        "int",        "i64",      "Int",      "Int"},
-    {SUB_TYPE_FLOAT,  "float",  "number",   "double",   "Float",  "double",     "double",     "f64",      "Double",   "Double"},
-    {SUB_TYPE_STRING, "str",    "string",   "String",   "String", "std::string","char*",      "String",   "String",   "String"},
-    {SUB_TYPE_BOOL,   "bool",   "boolean",  "boolean",  "Boolean","bool",       "bool",       "bool",     "Bool",     "Boolean"},
-    {SUB_TYPE_ARRAY,  "list",   "Array",    "ArrayList","Array",  "std::vector","array",      "Vec",      "Array",    "List"},
-    {SUB_TYPE_OBJECT, "dict",   "object",   "Object",   "Hash",   "std::map",   "struct",     "HashMap",  "Dictionary","Map"},
-    {SUB_TYPE_NULL,   "None",   "null",     "null",     "nil",    "nullptr",    "NULL",       "None",     "nil",      "null"},
-    {SUB_TYPE_ANY,    "Any",    "any",      "Object",   "Object", "auto",       "void*",      "dyn Any",  "Any",      "Any"},
+    /* SUB Type        Python    JavaScript  TypeScript   Java        Ruby      C++            C             Rust        Swift         Kotlin       Go */
+    {SUB_TYPE_VOID,    "None",   "void",     "void",      "void",     "nil",    "void",        "void",       "()",       "Void",       "Unit",      "void"},
+    {SUB_TYPE_INT,     "int",    "number",   "number",    "int",      "Integer","int",         "int",        "i64",      "Int",        "Int",       "int"},
+    {SUB_TYPE_FLOAT,   "float",  "number",   "number",    "double",   "Float",  "double",      "double",     "f64",      "Double",     "Double",    "float64"},
+    {SUB_TYPE_STRING,  "str",    "string",   "string",    "String",   "String", "std::string", "char*",      "String",   "String",     "String",    "string"},
+    {SUB_TYPE_BOOL,    "bool",   "boolean",  "boolean",   "boolean",  "Boolean","bool",        "bool",       "bool",     "Bool",       "Boolean",   "bool"},
+    {SUB_TYPE_ARRAY,   "list",   "Array",    "any[]",     "ArrayList","Array",  "std::vector", "array",      "Vec",      "Array",      "List",      "[]interface{}"},
+    {SUB_TYPE_OBJECT,  "dict",   "object",   "Record<string, any>", "Object", "Hash", "std::map", "struct", "HashMap", "Dictionary", "Map", "map[string]interface{}"},
+    {SUB_TYPE_FUNCTION,"Callable","Function","(...args: any[]) => any","Object","Proc","std::function","void*", "fn()", "((Any) -> Any)", "(Any) -> Any", "func(...interface{}) interface{}"},
+    {SUB_TYPE_NULL,    "None",   "null",     "null",      "null",     "nil",    "nullptr",     "NULL",       "None",     "nil",        "null",      "nil"},
+    {SUB_TYPE_ANY,     "Any",    "any",      "any",       "Object",   "Object", "auto",        "void*",      "dyn Any",  "Any",        "Any",       "interface{}"},
 };
 
 const size_t TYPE_MAPPINGS_COUNT = sizeof(TYPE_MAPPINGS) / sizeof(TYPE_MAPPINGS[0]);
@@ -201,7 +202,7 @@ const char* type_map_to(SubType type, TargetLanguage target) {
             switch (target) {
                 case TARGET_PYTHON:     return TYPE_MAPPINGS[i].python_type;
                 case TARGET_JAVASCRIPT: return TYPE_MAPPINGS[i].javascript_type;
-                case TARGET_TYPESCRIPT: return TYPE_MAPPINGS[i].javascript_type; // Same as JS
+                case TARGET_TYPESCRIPT: return TYPE_MAPPINGS[i].typescript_type;
                 case TARGET_JAVA:       return TYPE_MAPPINGS[i].java_type;
                 case TARGET_RUBY:       return TYPE_MAPPINGS[i].ruby_type;
                 case TARGET_CPP:        return TYPE_MAPPINGS[i].cpp_type;
@@ -209,7 +210,7 @@ const char* type_map_to(SubType type, TargetLanguage target) {
                 case TARGET_RUST:       return TYPE_MAPPINGS[i].rust_type;
                 case TARGET_SWIFT:      return TYPE_MAPPINGS[i].swift_type;
                 case TARGET_KOTLIN:     return TYPE_MAPPINGS[i].kotlin_type;
-                case TARGET_GO:         return TYPE_MAPPINGS[i].java_type; // Fallback
+                case TARGET_GO:         return TYPE_MAPPINGS[i].go_type;
             }
         }
     }
