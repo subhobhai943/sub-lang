@@ -14,12 +14,36 @@ char* read_file(const char *filename) {
         return NULL;
     }
     
-    fseek(file, 0, SEEK_END);
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fprintf(stderr, "Error: Failed to seek file %s\n", filename);
+        fclose(file);
+        return NULL;
+    }
     long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
+    if (size < 0) {
+        fprintf(stderr, "Error: Failed to read file size for %s\n", filename);
+        fclose(file);
+        return NULL;
+    }
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        fprintf(stderr, "Error: Failed to rewind file %s\n", filename);
+        fclose(file);
+        return NULL;
+    }
     
     char *content = malloc(size + 1);
-    fread(content, 1, size, file);
+    if (!content) {
+        fprintf(stderr, "Error: Out of memory reading %s\n", filename);
+        fclose(file);
+        return NULL;
+    }
+    size_t read_size = fread(content, 1, (size_t)size, file);
+    if (read_size != (size_t)size) {
+        fprintf(stderr, "Error: Failed to read file %s\n", filename);
+        free(content);
+        fclose(file);
+        return NULL;
+    }
     content[size] = '\0';
     
     fclose(file);
