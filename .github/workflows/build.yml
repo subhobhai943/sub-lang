@@ -14,8 +14,6 @@ jobs:
         include:
           - os: ubuntu-latest
             arch: x86_64
-          - os: ubuntu-24.04-arm64
-            arch: arm64
           - os: macos-26
             arch: arm64
     steps:
@@ -39,8 +37,6 @@ jobs:
         include:
           - os: windows-latest
             arch: x86_64
-          - os: windows-11-arm64
-            arch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
