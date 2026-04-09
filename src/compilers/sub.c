@@ -8,7 +8,7 @@
 
 // Utility: Read file contents
 char* read_file(const char *filename) {
-    FILE *file = fopen(filename, "r");
+    FILE *file = fopen(filename, "rb");
     if (!file) {
         fprintf(stderr, "Error: Cannot open file %s\n", filename);
         return NULL;

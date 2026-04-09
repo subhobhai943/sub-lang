@@ -193,7 +193,8 @@ static void optimize_constant_folding(ASTNode *node) {
                     node->type = AST_LITERAL;
                     free(node->value);
                     node->value = strdup(folded_val);
-                    
+                    node->data_type = TYPE_INT;
+
                     parser_free_ast(node->left);
                     parser_free_ast(node->right);
                     node->left = NULL;

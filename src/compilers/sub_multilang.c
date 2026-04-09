@@ -27,7 +27,7 @@ extern char* codegen_generate_c(ASTNode *ast, Platform platform);
 
 /* Utility: Read file */
 char* read_file(const char *filename) {
-    FILE *file = fopen(filename, "r");
+    FILE *file = fopen(filename, "rb");
     if (!file) {
         fprintf(stderr, "Error: Cannot open file %s\n", filename);
         return NULL;
