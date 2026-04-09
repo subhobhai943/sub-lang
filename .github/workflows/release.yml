@@ -23,17 +23,7 @@ jobs:
             compiler_name: sub
             native_name: subc
             asset_name: sub-linux-x86_64
-          - os: ubuntu-24.04-arm64
-            arch: arm64
-            compiler_name: sub
-            native_name: subc
-            asset_name: sub-linux-arm64
-          - os: macos-13
-            arch: x86_64
-            compiler_name: sub
-            native_name: subc
-            asset_name: sub-macos-x86_64
-          - os: macos-14
+          - os: macos-26
             arch: arm64
             compiler_name: sub
             native_name: subc
@@ -43,11 +33,6 @@ jobs:
             compiler_name: sub.exe
             native_name: subc.exe
             asset_name: sub-windows-x86_64
-          - os: windows-11-arm64
-            arch: arm64
-            compiler_name: sub.exe
-            native_name: subc.exe
-            asset_name: sub-windows-arm64
 
     steps:
       - name: Checkout code
@@ -63,27 +48,30 @@ jobs:
             brew install gcc make
           fi
 
-      - name: Setup MSVC (Windows)
+      - name: Setup MSYS2 (Windows)
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            make
+          msystem: MINGW64
 
       - name: Build compiler + native compiler (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
           make clean
           make all
-          chmod +x sub subc
-          mv sub ${{ matrix.compiler_name }}
-          mv subc ${{ matrix.native_name }}
 
       - name: Build compiler + native compiler (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          cl /Isrc/include /Isrc/core /Isrc/codegen /Isrc/ir src/compilers/sub.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/targets.c src/core/utils.c /Fe:${{ matrix.compiler_name }}
-          cl /Isrc/include /Isrc/core /Isrc/codegen /Isrc/ir src/compilers/sub_native.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/ir/ir.c src/codegen/codegen_native.c src/core/utils.c /Fe:${{ matrix.native_name }}
+          make clean
+          make all
 
-      - name: Verify artifacts (Linux/macOS)
+      - name: Verify artifacts
         if: runner.os != 'Windows'
         run: |
           ls -lh ${{ matrix.compiler_name }}
@@ -91,10 +79,10 @@ jobs:
 
       - name: Verify artifacts (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          Get-ChildItem ${{ matrix.compiler_name }}
-          Get-ChildItem ${{ matrix.native_name }}
+          ls -lh ${{ matrix.compiler_name }}
+          ls -lh ${{ matrix.native_name }}
 
       - name: Upload compiler artifact
         uses: actions/upload-artifact@v4
@@ -170,22 +158,15 @@ jobs:
           files: |
             artifacts/sub-linux-x86_64-compiler/*
             artifacts/sub-linux-x86_64-native/*
-            artifacts/sub-linux-arm64-compiler/*
-            artifacts/sub-linux-arm64-native/*
-            artifacts/sub-macos-x86_64-compiler/*
-            artifacts/sub-macos-x86_64-native/*
             artifacts/sub-macos-arm64-compiler/*
             artifacts/sub-macos-arm64-native/*
             artifacts/sub-windows-x86_64-compiler/*
             artifacts/sub-windows-x86_64-native/*
-            artifacts/sub-windows-arm64-compiler/*
-            artifacts/sub-windows-arm64-native/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Release Summary
         run: |
           echo "✅ Release ${{ steps.version.outputs.VERSION }} created successfully!"
-          echo "📦 Artifacts uploaded for Linux, macOS, and Windows (x86_64 + arm64)"
-          echo "🧪 v1.0.7-beta release pipeline ready"
+          echo "📦 Artifacts uploaded for Linux (x86_64), macOS (ARM64), Windows (x86_64)"
           echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.VERSION }}"
