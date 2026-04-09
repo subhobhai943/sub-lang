@@ -63,6 +63,8 @@ jobs:
         run: |
           make clean
           make all
+          cp ${{ matrix.compiler_name }} ${{ matrix.asset_name }}
+          cp ${{ matrix.native_name }} ${{ matrix.asset_name }}-native
 
       - name: Build compiler + native compiler (Windows)
         if: runner.os == 'Windows'
@@ -70,32 +72,21 @@ jobs:
         run: |
           make clean
           make all
-
-      - name: Verify artifacts
-        if: runner.os != 'Windows'
-        run: |
-          ls -lh ${{ matrix.compiler_name }}
-          ls -lh ${{ matrix.native_name }}
-
-      - name: Verify artifacts (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          ls -lh ${{ matrix.compiler_name }}
-          ls -lh ${{ matrix.native_name }}
+          cp ${{ matrix.compiler_name }} ${{ matrix.asset_name }}.exe
+          cp ${{ matrix.native_name }} ${{ matrix.asset_name }}-native.exe
 
       - name: Upload compiler artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}-compiler
-          path: ${{ matrix.compiler_name }}
+          path: ${{ matrix.asset_name }}${{ runner.os == 'Windows' && '.exe' || '' }}
           retention-days: 5
 
       - name: Upload native compiler artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}-native
-          path: ${{ matrix.native_name }}
+          path: ${{ matrix.asset_name }}-native${{ runner.os == 'Windows' && '.exe' || '' }}
           retention-days: 5
 
   create-release:
