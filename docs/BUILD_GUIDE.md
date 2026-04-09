@@ -76,7 +76,7 @@ javac output_android.java
 - `typescript` / `ts` - TypeScript
 - `assembly` / `asm` - x86-64 Assembly
 - `css` - CSS stylesheets
-- `go` - Go (coming soon)
+- `go` / `golang` - Go
 - `llvm` - LLVM IR (coming soon)
 - `wasm` - WebAssembly (coming soon)
 

@@ -1,0 +1,44 @@
+// Test SUB program for Go code generation
+// Tests pure AST-to-Go translation
+
+// Variable declarations
+var name = "World"
+var count = 5
+var pi = 3.14
+var active = true
+
+// Simple function
+function greet() {
+    print("Hello!")
+}
+
+// Function with conditional
+function checkValue(x) {
+    if (x > 10) {
+        return "big"
+    } elif (x > 5) {
+        return "medium"
+    } else {
+        return "small"
+    }
+}
+
+// Function with loop
+function countUp() {
+    for i in range(5) {
+        print(i)
+    }
+}
+
+// While loop
+var counter = 0
+while (counter < 3) {
+    print(counter)
+    counter = counter + 1
+}
+
+// Main calls
+var result = checkValue(7)
+print(result)
+greet()
+countUp()

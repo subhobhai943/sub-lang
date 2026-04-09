@@ -7,21 +7,23 @@
 #endif
 
 static LanguageInfo language_info_table[] = {
-    {"c",          ".c",     "gcc",        "gcc output.c -o program && ./program"},
-    
-    {"python",     ".py",    "python3",    "python3 output.py"},
-    {"java",       ".java",  "javac",      "javac SubProgram.java && java SubProgram"},
-    {"swift",      ".swift", "swiftc",     "swiftc output.swift -o program && ./program"},
-    {"kotlin",     ".kt",    "kotlinc",    "kotlinc output.kt -include-runtime -d output.jar && java -jar output.jar"},
-    {"rust",       ".rs",    "rustc",      "rustc output.rs && ./output"},
-    {"javascript", ".js",    "node",       "node output.js"},
-    {"typescript", ".ts",    "tsc",        "tsc output.ts && node output.js"},
-    {"go",         ".go",    "go",         "go run output.go"},
-    {"assembly",   ".asm",   "nasm",       "nasm -f elf64 output.asm && ld output.o -o program && ./program"},
-    {"css",        ".css",   "(browser)",  "(open in browser)"},
-    {"ruby",       ".rb",    "ruby",       "ruby output.rb"},
-    {"llvm",       ".ll",    "llc",        "llc output.ll && gcc output.s -o program"},
-    {"wasm",       ".wasm",  "(browser)",  "(load in WebAssembly)"},
+    [LANG_C]          = {"c",          ".c",     "gcc",        "gcc output.c -o program && ./program"},
+    [LANG_CPP]        = {"c++",        ".cpp",   "g++",        "g++ output.cpp -o program && ./program"},
+    [LANG_CPP17]      = {"c++17",      ".cpp",   "g++",        "g++ -std=c++17 output.cpp -o program && ./program"},
+    [LANG_CPP20]      = {"c++20",      ".cpp",   "g++",        "g++ -std=c++20 output.cpp -o program && ./program"},
+    [LANG_PYTHON]     = {"python",     ".py",    "python3",    "python3 output.py"},
+    [LANG_JAVA]       = {"java",       ".java",  "javac",      "javac SubProgram.java && java SubProgram"},
+    [LANG_SWIFT]      = {"swift",      ".swift", "swiftc",     "swiftc output.swift -o program && ./program"},
+    [LANG_KOTLIN]     = {"kotlin",     ".kt",    "kotlinc",    "kotlinc output.kt -include-runtime -d output.jar && java -jar output.jar"},
+    [LANG_RUST]       = {"rust",       ".rs",    "rustc",      "rustc output.rs && ./output"},
+    [LANG_JAVASCRIPT] = {"javascript", ".js",    "node",       "node output.js"},
+    [LANG_TYPESCRIPT] = {"typescript", ".ts",    "tsc",        "tsc output.ts && node output.js"},
+    [LANG_GO]         = {"go",         ".go",    "go",         "go run output.go"},
+    [LANG_ASSEMBLY]   = {"assembly",   ".asm",   "nasm",       "nasm -f elf64 output.asm && ld output.o -o program && ./program"},
+    [LANG_CSS]        = {"css",        ".css",   "(browser)",  "(open in browser)"},
+    [LANG_RUBY]       = {"ruby",       ".rb",    "ruby",       "ruby output.rb"},
+    [LANG_LLVM_IR]    = {"llvm",       ".ll",    "llc",        "llc output.ll && gcc output.s -o program"},
+    [LANG_WASM]       = {"wasm",       ".wasm",  "(browser)",  "(load in WebAssembly)"},
 };
 
 extern char* codegen_generate_c(ASTNode *ast, Platform platform);
@@ -33,6 +35,7 @@ extern char* codegen_kotlin(ASTNode *ast, const char *source);
 extern char* codegen_javascript(ASTNode *ast, const char *source);
 extern char* codegen_css(ASTNode *ast, const char *source);
 extern char* codegen_ruby(ASTNode *ast, const char *source);
+extern char* codegen_go(ASTNode *ast, const char *source);
 extern char* codegen_assembly(ASTNode *ast, const char *source);
 
 static char* codegen_typescript(ASTNode *ast, const char *source) {
@@ -48,22 +51,23 @@ static char* codegen_unimplemented(ASTNode *ast, const char *source) {
 
 
 static TargetRegistry target_registry[] = {
-    {LANG_C,          "c",          NULL,                  true},
-    
-    {LANG_PYTHON,     "python",     codegen_python,        true},
-    {LANG_JAVA,       "java",       codegen_java,          true},
-    {LANG_SWIFT,      "swift",      codegen_swift,         true},
-    {LANG_KOTLIN,     "kotlin",     codegen_kotlin,        true},
-    {LANG_RUST,       "rust",       codegen_rust,          true},
-    {LANG_JAVASCRIPT, "javascript", codegen_javascript,    true},
-    {LANG_TYPESCRIPT, "typescript", codegen_typescript,    true},
-    {LANG_GO,         "go",         codegen_unimplemented,  false},
-    {LANG_ASSEMBLY,   "assembly",   codegen_assembly,      true},
-    {LANG_CSS,        "css",        codegen_css,           true},
-    {LANG_RUBY,       "ruby",       codegen_ruby,          true},
-    {LANG_LLVM_IR,    "llvm",       codegen_unimplemented,  false},
-    {LANG_WASM,       "wasm",       codegen_unimplemented,  false},
-    {LANG_COUNT,      NULL,         NULL,                  false}
+    [LANG_C]          = {LANG_C,          "c",          NULL,                  true},
+    [LANG_CPP]        = {LANG_CPP,        "c++",        codegen_unimplemented, false},
+    [LANG_CPP17]      = {LANG_CPP17,      "c++17",      codegen_unimplemented, false},
+    [LANG_CPP20]      = {LANG_CPP20,      "c++20",      codegen_unimplemented, false},
+    [LANG_PYTHON]     = {LANG_PYTHON,     "python",     codegen_python,        true},
+    [LANG_JAVA]       = {LANG_JAVA,       "java",       codegen_java,          true},
+    [LANG_SWIFT]      = {LANG_SWIFT,      "swift",      codegen_swift,         true},
+    [LANG_KOTLIN]     = {LANG_KOTLIN,     "kotlin",     codegen_kotlin,        true},
+    [LANG_RUST]       = {LANG_RUST,       "rust",       codegen_rust,          true},
+    [LANG_JAVASCRIPT] = {LANG_JAVASCRIPT, "javascript", codegen_javascript,    true},
+    [LANG_TYPESCRIPT] = {LANG_TYPESCRIPT, "typescript", codegen_typescript,    true},
+    [LANG_GO]         = {LANG_GO,         "go",         codegen_go,            true},
+    [LANG_ASSEMBLY]   = {LANG_ASSEMBLY,   "assembly",   codegen_assembly,      true},
+    [LANG_CSS]        = {LANG_CSS,        "css",        codegen_css,           true},
+    [LANG_RUBY]       = {LANG_RUBY,       "ruby",       codegen_ruby,          true},
+    [LANG_LLVM_IR]    = {LANG_LLVM_IR,    "llvm",       codegen_unimplemented, false},
+    [LANG_WASM]       = {LANG_WASM,       "wasm",       codegen_unimplemented, false}
 };
 
 LanguageInfo* language_info_get(TargetLanguage lang) {

@@ -215,6 +215,21 @@ Variables are declared using the `#var` keyword with optional type hints:
 #endembed
 ```
 
+**Go Embedding:**
+```sub
+#embed go
+    package main
+    import "fmt"
+    func fibonacci(n int) int {
+        if n <= 1 { return n }
+        return fibonacci(n-1) + fibonacci(n-2)
+    }
+    func main() {
+        fmt.Println(fibonacci(10))
+    }
+#endembed
+```
+
 ## 3. Blockchain Method
 
 The hash symbol (#) serves as a "blockchain" operator that:

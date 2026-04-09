@@ -5,6 +5,7 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include "codegen_cpp.h"
 #include "windows_compat.h"
 #include <stdarg.h>
 
@@ -74,6 +75,16 @@ void print_ast(ASTNode *node, int depth) {
 /* ========================================
    Symbol Table Implementation
    ======================================== */
+
+// Simple hash function
+static int hash(const char *str) {
+    int h = 5381;
+    int c;
+    while ((c = *str++)) {
+        h = ((h << 5) + h) + c;
+    }
+    return h < 0 ? -h : h;
+}
 
 // Create a new symbol table
 SymbolTable* symbol_table_create(int size) {
@@ -198,16 +209,6 @@ void symbol_table_exit_scope(SymbolTable *table) {
     }
     
     table->scope_level--;
-}
-
-// Simple hash function
-static int hash(const char *str) {
-    int hash = 5381;
-    int c;
-    while ((c = *str++)) {
-        hash = ((hash << 5) + hash) + c;
-    }
-    return hash;
 }
 
 /* ========================================
@@ -431,6 +432,69 @@ char* compiler_get_output(CompilerContext *ctx) {
 }
 
 /* ========================================
+   StringBuilder Helpers
+   ======================================== */
+
+typedef struct {
+    char *buffer;
+    size_t size;
+    size_t capacity;
+} StringBuilder;
+
+static StringBuilder* sb_create(void) {
+    StringBuilder *sb = malloc(sizeof(StringBuilder));
+    if (!sb) return NULL;
+    sb->capacity = 4096;
+    sb->size = 0;
+    sb->buffer = malloc(sb->capacity);
+    if (!sb->buffer) {
+        free(sb);
+        return NULL;
+    }
+    sb->buffer[0] = '\0';
+    return sb;
+}
+
+static void sb_append(StringBuilder *sb, const char *fmt, ...) {
+    if (!sb || !fmt) return;
+
+    va_list args;
+    va_start(args, fmt);
+
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int needed = vsnprintf(NULL, 0, fmt, args_copy);
+    va_end(args_copy);
+
+    if (needed < 0) {
+        va_end(args);
+        return;
+    }
+
+    while (sb->size + needed + 1 > sb->capacity) {
+        sb->capacity *= 2;
+        char *new_buffer = realloc(sb->buffer, sb->capacity);
+        if (!new_buffer) {
+            va_end(args);
+            return;
+        }
+        sb->buffer = new_buffer;
+    }
+
+    vsnprintf(sb->buffer + sb->size, needed + 1, fmt, args);
+    sb->size += needed;
+    va_end(args);
+}
+
+static char* sb_to_string(StringBuilder *sb) {
+    if (!sb) return NULL;
+    char *result = strdup(sb->buffer);
+    free(sb->buffer);
+    free(sb);
+    return result;
+}
+
+/* ========================================
    Embedded Code Generation Implementation
    ======================================== */
 
@@ -468,60 +532,6 @@ char* codegen_embed_c(const char *c_code) {
     sb_append(sb, "#endif\n");
     
     return sb_to_string(sb);
-}
-
-// StringBuilder helpers
-static StringBuilder* sb_create(void) {
-    StringBuilder *sb = malloc(sizeof(StringBuilder));
-    if (!sb) return NULL;
-    sb->capacity = 4096;
-    sb->size = 0;
-    sb->buffer = malloc(sb->capacity);
-    if (!sb->buffer) {
-        free(sb);
-        return NULL;
-    }
-    sb->buffer[0] = '\0';
-    return sb;
-}
-
-static void sb_append(StringBuilder *sb, const char *fmt, ...) {
-    if (!sb || !fmt) return;
-    
-    va_list args;
-    va_start(args, fmt);
-    
-    va_list args_copy;
-    va_copy(args_copy, args);
-    int needed = vsnprintf(NULL, 0, fmt, args_copy);
-    va_end(args_copy);
-    
-    if (needed < 0) {
-        va_end(args);
-        return;
-    }
-    
-    while (sb->size + needed + 1 > sb->capacity) {
-        sb->capacity *= 2;
-        char *new_buffer = realloc(sb->buffer, sb->capacity);
-        if (!new_buffer) {
-            va_end(args);
-            return;
-        }
-        sb->buffer = new_buffer;
-    }
-    
-    vsnprintf(sb->buffer + sb->size, needed + 1, fmt, args);
-    sb->size += needed;
-    va_end(args);
-}
-
-static char* sb_to_string(StringBuilder *sb) {
-    if (!sb) return NULL;
-    char *result = strdup(sb->buffer);
-    free(sb->buffer);
-    free(sb);
-    return result;
 }
 
 /* ========================================

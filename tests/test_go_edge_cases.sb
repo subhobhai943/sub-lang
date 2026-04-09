@@ -1,0 +1,33 @@
+// Edge case tests for Go code generation
+
+// Empty function
+function emptyFunc() {
+}
+
+// Nested if/else chains
+var x = 15
+if (x > 20) {
+    print("over 20")
+} elif (x > 10) {
+    print("over 10")
+} elif (x > 5) {
+    print("over 5")
+} else {
+    print("5 or less")
+}
+
+// Nested loops
+for i in range(3) {
+    for j in range(3) {
+        print(i)
+    }
+}
+
+// Numeric edge cases
+var neg = -42
+var small = 0
+var big = 999999
+
+// Array and object literals
+var nums = [1, 2, 3]
+var obj = {"key": "value", "count": 42}

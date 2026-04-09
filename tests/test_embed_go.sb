@@ -1,0 +1,16 @@
+// Test file for embedded Go code extraction
+// This file tests the Go code generator's embedded code handling
+
+#embed go
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello from embedded Go!")
+
+    for i := 0; i < 5; i++ {
+        fmt.Printf("Count: %d\n", i)
+    }
+}
+#endembed

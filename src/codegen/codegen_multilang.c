@@ -1401,3 +1401,448 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
 
     return sb_to_string(sb);
 }
+
+/* ========================================
+   GO CODE GENERATOR
+   ======================================== */
+
+static void indent_go(StringBuilder *sb, int level) {
+    for (int i = 0; i < level; i++) {
+        sb_append(sb, "\t");
+    }
+}
+
+static bool ast_needs_fmt(ASTNode *node) {
+    if (!node) return false;
+    if (node->type == AST_CALL_EXPR && node->value &&
+        strcmp(node->value, "print") == 0)
+        return true;
+    if (ast_needs_fmt(node->left)) return true;
+    if (ast_needs_fmt(node->right)) return true;
+    if (ast_needs_fmt(node->condition)) return true;
+    if (ast_needs_fmt(node->body)) return true;
+    if (ast_needs_fmt(node->next)) return true;
+    for (int i = 0; i < node->child_count; i++) {
+        if (node->children && ast_needs_fmt(node->children[i]))
+            return true;
+    }
+    return false;
+}
+
+static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent);
+
+static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
+    if (!node) return;
+
+    switch (node->type) {
+        case AST_LITERAL:
+            if (node->data_type == TYPE_STRING) {
+                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+            } else if (node->value) {
+                sb_append(sb, "%s", node->value);
+            } else {
+                sb_append(sb, "nil");
+            }
+            break;
+
+        case AST_IDENTIFIER:
+            sb_append(sb, "%s", node->value ? node->value : "v");
+            break;
+
+        case AST_BINARY_EXPR:
+            sb_append(sb, "(");
+            generate_expr_go(sb, node->left);
+            sb_append(sb, " %s ", node->value ? node->value : "+");
+            generate_expr_go(sb, node->right);
+            sb_append(sb, ")");
+            break;
+
+        case AST_UNARY_EXPR:
+            sb_append(sb, "%s", node->value ? node->value : "!");
+            generate_expr_go(sb, node->right);
+            break;
+
+        case AST_TERNARY_EXPR:
+            sb_append(sb, "func() interface{} { if ");
+            generate_expr_go(sb, node->condition);
+            sb_append(sb, " { return ");
+            generate_expr_go(sb, node->left);
+            sb_append(sb, " }; return ");
+            generate_expr_go(sb, node->right);
+            sb_append(sb, " }()");
+            break;
+
+        case AST_CALL_EXPR: {
+            const char *func_name = node->value ? node->value : "fn";
+            if (strcmp(func_name, "print") == 0) {
+                sb_append(sb, "fmt.Println(");
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    if (node->children)
+                        generate_expr_go(sb, node->children[i]);
+                }
+                sb_append(sb, ")");
+            } else {
+                if (node->value) {
+                    sb_append(sb, "%s(", func_name);
+                } else {
+                    generate_expr_go(sb, node->left);
+                    sb_append(sb, "(");
+                }
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    if (node->children)
+                        generate_expr_go(sb, node->children[i]);
+                }
+                sb_append(sb, ")");
+            }
+            break;
+        }
+
+        case AST_ARRAY_LITERAL:
+            sb_append(sb, "[]interface{}{");
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                if (node->children)
+                    generate_expr_go(sb, node->children[i]);
+            }
+            sb_append(sb, "}");
+            break;
+
+        case AST_OBJECT_LITERAL:
+            sb_append(sb, "map[string]interface{}{");
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *pair = node->children ? node->children[i] : NULL;
+                if (!pair) continue;
+                if (i > 0) sb_append(sb, ", ");
+                sb_append(sb, "\"%s\": ", pair->value ? pair->value : "");
+                generate_expr_go(sb, pair->right);
+            }
+            sb_append(sb, "}");
+            break;
+
+        case AST_MEMBER_ACCESS:
+            generate_expr_go(sb, node->left);
+            sb_append(sb, ".%s", node->value ? node->value : "");
+            break;
+
+        case AST_ARRAY_ACCESS:
+            generate_expr_go(sb, node->left);
+            sb_append(sb, "[");
+            generate_expr_go(sb, node->right);
+            sb_append(sb, "]");
+            break;
+
+        default:
+            break;
+    }
+}
+
+static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
+    if (!node) return;
+
+    switch (node->type) {
+        case AST_PROGRAM:
+            for (ASTNode *stmt = block_first(node); stmt; stmt = stmt->next) {
+                generate_node_go(sb, stmt, indent);
+            }
+            break;
+
+        case AST_VAR_DECL:
+            indent_go(sb, indent);
+            sb_append(sb, "var %s = ", node->value ? node->value : "v");
+            if (node->right) {
+                generate_expr_go(sb, node->right);
+            } else {
+                sb_append(sb, "nil");
+            }
+            sb_append(sb, "\n");
+            break;
+
+        case AST_CONST_DECL:
+            indent_go(sb, indent);
+            if (node->right && node->right->type == AST_LITERAL) {
+                sb_append(sb, "const %s = ", node->value ? node->value : "C");
+            } else {
+                sb_append(sb, "var %s = ", node->value ? node->value : "C");
+            }
+            if (node->right) {
+                generate_expr_go(sb, node->right);
+            } else {
+                sb_append(sb, "nil");
+            }
+            sb_append(sb, "\n");
+            break;
+
+        case AST_FUNCTION_DECL:
+            sb_append(sb, "\n");
+            indent_go(sb, indent);
+            sb_append(sb, "func %s(", node->value ? node->value : "fn");
+            if (node->children && node->child_count > 0) {
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    if (node->children[i] && node->children[i]->value) {
+                        sb_append(sb, "%s", node->children[i]->value);
+                    }
+                }
+                sb_append(sb, " interface{}");
+            }
+            sb_append(sb, ") {\n");
+            if (node->body) {
+                generate_node_go(sb, node->body, indent + 1);
+            }
+            indent_go(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+
+        case AST_IF_STMT:
+            indent_go(sb, indent);
+            sb_append(sb, "if ");
+            generate_expr_go(sb, node->condition);
+            sb_append(sb, " {\n");
+            generate_node_go(sb, node->body, indent + 1);
+            if (node->right) {
+                if (node->right->type == AST_IF_STMT) {
+                    indent_go(sb, indent);
+                    sb_append(sb, "} else if ");
+                    generate_expr_go(sb, node->right->condition);
+                    sb_append(sb, " {\n");
+                    generate_node_go(sb, node->right->body, indent + 1);
+                    if (node->right->right) {
+                        ASTNode *branch = node->right->right;
+                        while (branch && branch->type == AST_IF_STMT) {
+                            indent_go(sb, indent);
+                            sb_append(sb, "} else if ");
+                            generate_expr_go(sb, branch->condition);
+                            sb_append(sb, " {\n");
+                            generate_node_go(sb, branch->body, indent + 1);
+                            branch = branch->right;
+                        }
+                        if (branch) {
+                            indent_go(sb, indent);
+                            sb_append(sb, "} else {\n");
+                            generate_node_go(sb, branch, indent + 1);
+                        }
+                    }
+                } else {
+                    indent_go(sb, indent);
+                    sb_append(sb, "} else {\n");
+                    generate_node_go(sb, node->right, indent + 1);
+                }
+            }
+            indent_go(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+
+        case AST_FOR_STMT:
+            indent_go(sb, indent);
+            if (node->children && node->child_count > 0) {
+                ASTNode *range = node->children[0];
+                if (range && range->type == AST_RANGE_EXPR) {
+                    const char *var = node->value ? node->value : "i";
+                    sb_append(sb, "for %s := ", var);
+                    if (range->right) {
+                        /* range(start, end) */
+                        generate_expr_go(sb, range->left);
+                        sb_append(sb, "; %s < ", var);
+                        generate_expr_go(sb, range->right);
+                    } else if (range->left) {
+                        /* range(n) → 0..n */
+                        sb_append(sb, "0; %s < ", var);
+                        generate_expr_go(sb, range->left);
+                    } else {
+                        sb_append(sb, "0; %s < 10", var);
+                    }
+                    sb_append(sb, "; %s++ {\n", var);
+                } else {
+                    sb_append(sb, "for _, %s := range ",
+                              node->value ? node->value : "item");
+                    generate_expr_go(sb, range);
+                    sb_append(sb, " {\n");
+                }
+            } else if (node->condition) {
+                sb_append(sb, "for _, %s := range ",
+                          node->value ? node->value : "item");
+                generate_expr_go(sb, node->condition);
+                sb_append(sb, " {\n");
+            } else {
+                sb_append(sb, "for %s := 0; %s < 10; %s++ {\n",
+                          node->value ? node->value : "i",
+                          node->value ? node->value : "i",
+                          node->value ? node->value : "i");
+            }
+            generate_node_go(sb, node->body, indent + 1);
+            indent_go(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+
+        case AST_WHILE_STMT:
+            indent_go(sb, indent);
+            sb_append(sb, "for ");
+            generate_expr_go(sb, node->condition);
+            sb_append(sb, " {\n");
+            generate_node_go(sb, node->body, indent + 1);
+            indent_go(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+
+        case AST_DO_WHILE_STMT:
+            indent_go(sb, indent);
+            sb_append(sb, "for {\n");
+            generate_node_go(sb, node->body, indent + 1);
+            indent_go(sb, indent + 1);
+            sb_append(sb, "if !(");
+            generate_expr_go(sb, node->condition);
+            sb_append(sb, ") {\n");
+            indent_go(sb, indent + 2);
+            sb_append(sb, "break\n");
+            indent_go(sb, indent + 1);
+            sb_append(sb, "}\n");
+            indent_go(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+
+        case AST_RETURN_STMT:
+            indent_go(sb, indent);
+            sb_append(sb, "return");
+            if (node->right) {
+                sb_append(sb, " ");
+                generate_expr_go(sb, node->right);
+            }
+            sb_append(sb, "\n");
+            break;
+
+        case AST_BREAK_STMT:
+            indent_go(sb, indent);
+            sb_append(sb, "break\n");
+            break;
+
+        case AST_CONTINUE_STMT:
+            indent_go(sb, indent);
+            sb_append(sb, "continue\n");
+            break;
+
+        case AST_CALL_EXPR:
+            indent_go(sb, indent);
+            generate_expr_go(sb, node);
+            sb_append(sb, "\n");
+            break;
+
+        case AST_ASSIGN_STMT:
+            indent_go(sb, indent);
+            generate_expr_go(sb, node->left);
+            sb_append(sb, " = ");
+            generate_expr_go(sb, node->right);
+            sb_append(sb, "\n");
+            break;
+
+        case AST_BLOCK:
+            for (ASTNode *stmt = block_first(node); stmt; stmt = stmt->next) {
+                generate_node_go(sb, stmt, indent);
+            }
+            break;
+
+        case AST_CLASS_DECL:
+            indent_go(sb, indent);
+            sb_append(sb, "type %s struct {}\n",
+                      node->value ? node->value : "Object");
+            break;
+
+        case AST_TRY_STMT:
+            indent_go(sb, indent);
+            sb_append(sb, "func() {\n");
+            if (node->right) {
+                indent_go(sb, indent + 1);
+                sb_append(sb, "defer func() {\n");
+                indent_go(sb, indent + 2);
+                sb_append(sb, "if r := recover(); r != nil {\n");
+                generate_node_go(sb, node->right, indent + 3);
+                indent_go(sb, indent + 2);
+                sb_append(sb, "}\n");
+                indent_go(sb, indent + 1);
+                sb_append(sb, "}()\n");
+            }
+            generate_node_go(sb, node->body, indent + 1);
+            indent_go(sb, indent);
+            sb_append(sb, "}()\n");
+            break;
+
+        case AST_THROW_STMT:
+            indent_go(sb, indent);
+            sb_append(sb, "panic(");
+            if (node->right) {
+                generate_expr_go(sb, node->right);
+            } else {
+                sb_append(sb, "\"error\"");
+            }
+            sb_append(sb, ")\n");
+            break;
+
+        case AST_EMBED_CODE:
+        case AST_EMBED_CPP:
+        case AST_EMBED_C:
+            if (node->value) {
+                indent_go(sb, indent);
+                sb_append(sb, "// Embedded code\n");
+                sb_append(sb, "%s\n", node->value);
+            }
+            break;
+
+        case AST_UI_COMPONENT:
+            indent_go(sb, indent);
+            sb_append(sb, "// UI: %s\n", node->value ? node->value : "component");
+            break;
+
+        default:
+            break;
+    }
+}
+
+char* codegen_go(ASTNode *ast, const char *source) {
+    StringBuilder *sb = sb_create();
+    if (!sb) return NULL;
+
+    sb_append(sb, "// Generated by SUB Language Compiler\n\n");
+
+    char *embedded = extract_embedded_code(source, "go");
+    if (embedded) {
+        sb_append(sb, "%s\n", embedded);
+        free(embedded);
+        return sb_to_string(sb);
+    }
+
+    sb_append(sb, "package main\n\n");
+
+    bool needs_fmt = ast_needs_fmt(ast);
+    if (needs_fmt) {
+        sb_append(sb, "import \"fmt\"\n\n");
+    }
+
+    /* Pass 1: emit top-level function declarations at package level */
+    for (ASTNode *stmt = block_first(ast); stmt; stmt = stmt->next) {
+        if (stmt->type == AST_FUNCTION_DECL) {
+            generate_node_go(sb, stmt, 0);
+        }
+    }
+
+    /* Pass 2: wrap non-function top-level statements in func main() */
+    bool has_main_stmts = false;
+    for (ASTNode *stmt = block_first(ast); stmt; stmt = stmt->next) {
+        if (stmt->type != AST_FUNCTION_DECL) {
+            has_main_stmts = true;
+            break;
+        }
+    }
+
+    sb_append(sb, "\nfunc main() {\n");
+    if (has_main_stmts) {
+        for (ASTNode *stmt = block_first(ast); stmt; stmt = stmt->next) {
+            if (stmt->type != AST_FUNCTION_DECL) {
+                generate_node_go(sb, stmt, 1);
+            }
+        }
+    }
+    sb_append(sb, "}\n");
+
+    return sb_to_string(sb);
+}

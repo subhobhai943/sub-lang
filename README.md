@@ -371,7 +371,7 @@ cl /Isrc/include src/compilers/sub_multilang.c src/core/*.c src/codegen/*.c /Fe:
 | **Rust** | ✅ Ready | `sublang file.sb rust` |
 | **Swift** | ✅ Ready | `sublang file.sb swift` |
 | **Kotlin** | ✅ Ready | `sublang file.sb kotlin` |
-| **Go** | 🚧 Coming | `sublang file.sb go` |
+| **Go** | ✅ Ready | `sublang file.sb go` |
 
 ---
 

@@ -19,6 +19,7 @@ extern char* codegen_rust(ASTNode *ast, const char *source);
 extern char* codegen_javascript(ASTNode *ast, const char *source);
 extern char* codegen_css(ASTNode *ast, const char *source);
 extern char* codegen_ruby(ASTNode *ast, const char *source);
+extern char* codegen_go(ASTNode *ast, const char *source);
 extern char* codegen_assembly(ASTNode *ast, const char *source);
 
 /* From codegen.c */
@@ -98,7 +99,7 @@ void print_usage(const char *prog_name) {
     printf("  rust/rs        - Rust\n");
     printf("  javascript/js  - JavaScript\n");
     printf("  typescript/ts  - TypeScript\n");
-    printf("  go/golang      - Go (coming soon)\n");
+    printf("  go/golang      - Go\n");
     printf("  assembly/asm   - x86-64 Assembly\n");
     printf("  css            - CSS Stylesheet\n");
     printf("  ruby/rb        - Ruby\n");
