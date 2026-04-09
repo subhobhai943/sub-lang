@@ -195,9 +195,8 @@ static void optimize_constant_folding(ASTNode *node) {
                     node->value = strdup(folded_val);
                     node->data_type = TYPE_INT;
 
-                    /* Don't free sub-trees here — other AST nodes may
-                       still reference them. Let parser_free_ast handle
-                       cleanup at the end with its visited-node tracking. */
+                    parser_free_ast(node->left);
+                    parser_free_ast(node->right);
                     node->left = NULL;
                     node->right = NULL;
                 }
@@ -488,7 +487,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "#define SUB_ERROR_H\n");
     sb_append(sb, "#define SUB_CHECK_NULL(ptr, msg) do { \\\n");
     sb_append(sb, "    if (!(ptr)) { \\\n");
-    sb_append(sb, "        fprintf(stderr, \"Error: %s at %s:%d\\n\", (msg), __FILE__, __LINE__); \\\n");
+    sb_append(sb, "        fprintf(stderr, \"Error: %%s at %%s:%%d\\n\", (msg), __FILE__, __LINE__); \\\n");
     sb_append(sb, "        exit(EXIT_FAILURE); \\\n");
     sb_append(sb, "    } \\\n");
     sb_append(sb, "} while(0)\n");
