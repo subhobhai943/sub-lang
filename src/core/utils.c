@@ -369,18 +369,29 @@ void compiler_free(CompilerContext *ctx) {
 }
 
 // Compile a source file
+//
+// This function depends on read_file, write_file, and codegen_generate which
+// are provided by the transpiler driver (sub.c / sub_multilang.c). The native
+// compiler (subc) links utils.c but never calls compiler_compile(). Weak stubs
+// allow the linker to resolve these symbols when the real definitions are absent.
+// GCC, Clang, and MinGW all support __attribute__((weak)). When the transpiler
+// links the real implementations from sub.c, they override these stubs.
+__attribute__((weak)) char* read_file(const char *f) { (void)f; return NULL; }
+__attribute__((weak)) void write_file(const char *f, const char *c) { (void)f; (void)c; }
+__attribute__((weak)) char* codegen_generate(ASTNode *a, Platform p) { (void)a; (void)p; return NULL; }
+
 bool compiler_compile(CompilerContext *ctx) {
     if (!ctx || !ctx->source_file) {
         return false;
     }
-    
+
     // Read source file
     char *source = read_file(ctx->source_file);
     if (!source) {
         ctx->error_count++;
         return false;
     }
-    
+
     // Lexical analysis
     ctx->tokens = lexer_tokenize(source, &ctx->token_count);
     if (!ctx->tokens) {
@@ -388,7 +399,7 @@ bool compiler_compile(CompilerContext *ctx) {
         free(source);
         return false;
     }
-    
+
     // Parsing
     ctx->ast = parser_parse(ctx->tokens, ctx->token_count);
     if (!ctx->ast) {
@@ -396,14 +407,14 @@ bool compiler_compile(CompilerContext *ctx) {
         free(source);
         return false;
     }
-    
+
     // Semantic analysis
     if (!semantic_analyze(ctx->ast)) {
         ctx->error_count++;
         free(source);
         return false;
     }
-    
+
     // Code generation
     char *output = codegen_generate(ctx->ast, ctx->target_platform);
     if (!output) {
@@ -411,23 +422,21 @@ bool compiler_compile(CompilerContext *ctx) {
         free(source);
         return false;
     }
-    
+
     // Write output
     if (ctx->output_path) {
         write_file(ctx->output_path, output);
     }
-    
+
     free(output);
     free(source);
-    
+
     return ctx->error_count == 0;
 }
 
 // Get compiler output
 char* compiler_get_output(CompilerContext *ctx) {
     (void)ctx;
-    // This would return the generated code
-    // For now, return NULL as the output is written to file
     return NULL;
 }
 
