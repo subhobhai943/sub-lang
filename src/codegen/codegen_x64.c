@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "codegen_x64.h"
 #include "windows_compat.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
