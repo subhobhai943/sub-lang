@@ -676,11 +676,30 @@ static ASTNode* parse_block_until(ParserState *state, bool stop_on_else) {
 
     skip_separators(state);
     while (!match(state, TOKEN_EOF)) {
+        /* Check for bare end/elif/else (without #) */
         if (match(state, TOKEN_END) || match(state, TOKEN_RBRACE)) {
             break;
         }
         if (stop_on_else && (match(state, TOKEN_ELIF) || match(state, TOKEN_ELSE))) {
             break;
+        }
+
+        /* Check for #end, #elif, #else (with # prefix) */
+        if (match(state, TOKEN_HASH)) {
+            Token *next = peek_token(state, 1);
+            if (next && next->type == TOKEN_END) {
+                /* Consume the # but leave END for the caller */
+                advance(state);
+                break;
+            }
+            if (stop_on_else && next &&
+                (next->type == TOKEN_ELIF || next->type == TOKEN_ELSE)) {
+                /* Consume the # but leave elif/else for the caller */
+                advance(state);
+                break;
+            }
+            /* Not a block terminator — rewind so parse_statement sees the # */
+            /* (don't advance, let parse_statement handle the #) */
         }
 
         ASTNode *stmt = parse_statement(state);
@@ -1012,8 +1031,19 @@ static ASTNode* parse_statement(ParserState *state) {
     Token *tok = current_token(state);
     if (!tok) return NULL;
 
-    if (match(state, TOKEN_HASH) && peek_token(state, 1)->type == TOKEN_EMBED) {
-        return parse_embed_block(state);
+    /* SUB language uses '#' before keywords: #var, #print, #if, etc.
+       Consume the '#' prefix so subsequent keyword checks work. */
+    if (match(state, TOKEN_HASH)) {
+        /* Special case: #embed ... #endembed blocks */
+        if (match(state, TOKEN_EMBED) || (peek_token(state, 0)->type == TOKEN_EMBED)) {
+            /* Rewind: parse_embed_block expects to see TOKEN_HASH first */
+            state->current--;
+            return parse_embed_block(state);
+        }
+        /* For all other # keywords, just consume the hash and fall through */
+        advance(state);
+        tok = current_token(state);
+        if (!tok) return NULL;
     }
 
     if (match(state, TOKEN_VAR)) {

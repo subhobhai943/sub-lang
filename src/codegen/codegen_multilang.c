@@ -812,7 +812,14 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_FUNCTION_DECL:
             sb_append(sb, "\n");
             indent_code(sb, indent);
-            sb_append(sb, "public static void %s() {\n", node->value ? node->value : "func");
+            sb_append(sb, "public static void %s(", node->value ? node->value : "func");
+            if (node->children && node->child_count > 0) {
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    sb_append(sb, "Object %s", node->children[i]->value ? node->children[i]->value : "arg");
+                }
+            }
+            sb_append(sb, ") {\n");
             if (node->body) generate_node_java(sb, node->body, indent + 1);
             indent_code(sb, indent);
             sb_append(sb, "}\n");
@@ -852,10 +859,28 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_FOR_STMT:
             indent_code(sb, indent);
-            sb_append(sb, "for (int %s = 0; %s < 10; %s++) {\n", 
-                     node->value ? node->value : "i",
-                     node->value ? node->value : "i",
-                     node->value ? node->value : "i");
+            {
+                const char *var = node->value ? node->value : "i";
+                if (node->children && node->child_count > 0 &&
+                    node->children[0]->type == AST_RANGE_EXPR) {
+                    ASTNode *range = node->children[0];
+                    sb_append(sb, "for (int %s = ", var);
+                    if (range->right) {
+                        if (range->left) generate_expr_java(sb, range->left);
+                        else sb_append(sb, "0");
+                        sb_append(sb, "; %s < ", var);
+                        generate_expr_java(sb, range->right);
+                    } else if (range->left) {
+                        sb_append(sb, "0; %s < ", var);
+                        generate_expr_java(sb, range->left);
+                    } else {
+                        sb_append(sb, "0; %s < 10", var);
+                    }
+                    sb_append(sb, "; %s++) {\n", var);
+                } else {
+                    sb_append(sb, "for (int %s = 0; %s < 10; %s++) {\n", var, var, var);
+                }
+            }
             generate_node_java(sb, node->body, indent + 1);
             indent_code(sb, indent);
             sb_append(sb, "}\n");
@@ -979,12 +1004,37 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->right) generate_expr_swift(sb, node->right); else sb_append(sb, "nil");
             sb_append(sb, "\n"); break;
         case AST_FUNCTION_DECL:
-            sb_append(sb, "\nfunc %s() {\n", node->value ? node->value : "func");
+            sb_append(sb, "\nfunc %s(", node->value ? node->value : "func");
+            if (node->children && node->child_count > 0) {
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    sb_append(sb, "_ %s: Any", node->children[i]->value ? node->children[i]->value : "arg");
+                }
+            }
+            sb_append(sb, ") {\n");
             if (node->body) generate_node_swift(sb, node->body, indent + 1);
             sb_append(sb, "}\n"); break;
         case AST_FOR_STMT:
             indent_code(sb, indent);
-            sb_append(sb, "for %s in 0..<10 {\n", node->value ? node->value : "i");
+            if (node->children && node->child_count > 0 &&
+                node->children[0]->type == AST_RANGE_EXPR) {
+                ASTNode *range = node->children[0];
+                sb_append(sb, "for %s in ", node->value ? node->value : "i");
+                if (range->right) {
+                    if (range->left) generate_expr_swift(sb, range->left);
+                    else sb_append(sb, "0");
+                    sb_append(sb, "..<");
+                    generate_expr_swift(sb, range->right);
+                } else if (range->left) {
+                    sb_append(sb, "0..<");
+                    generate_expr_swift(sb, range->left);
+                } else {
+                    sb_append(sb, "0..<10");
+                }
+                sb_append(sb, " {\n");
+            } else {
+                sb_append(sb, "for %s in 0..<10 {\n", node->value ? node->value : "i");
+            }
             generate_node_swift(sb, node->body, indent + 1);
             indent_code(sb, indent);
             sb_append(sb, "}\n"); break;
@@ -1058,12 +1108,37 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->right) generate_expr_kotlin(sb, node->right); else sb_append(sb, "null");
             sb_append(sb, "\n"); break;
         case AST_FUNCTION_DECL:
-            sb_append(sb, "\nfun %s() {\n", node->value ? node->value : "func");
+            sb_append(sb, "\nfun %s(", node->value ? node->value : "func");
+            if (node->children && node->child_count > 0) {
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    sb_append(sb, "%s: Any", node->children[i]->value ? node->children[i]->value : "arg");
+                }
+            }
+            sb_append(sb, ") {\n");
             if (node->body) generate_node_kotlin(sb, node->body, indent + 1);
             sb_append(sb, "}\n"); break;
         case AST_FOR_STMT:
             indent_code(sb, indent);
-            sb_append(sb, "for (%s in 0..9) {\n", node->value ? node->value : "i");
+            if (node->children && node->child_count > 0 &&
+                node->children[0]->type == AST_RANGE_EXPR) {
+                ASTNode *range = node->children[0];
+                sb_append(sb, "for (%s in ", node->value ? node->value : "i");
+                if (range->right) {
+                    if (range->left) generate_expr_kotlin(sb, range->left);
+                    else sb_append(sb, "0");
+                    sb_append(sb, " until ");
+                    generate_expr_kotlin(sb, range->right);
+                } else if (range->left) {
+                    sb_append(sb, "0 until ");
+                    generate_expr_kotlin(sb, range->left);
+                } else {
+                    sb_append(sb, "0 until 10");
+                }
+                sb_append(sb, ") {\n");
+            } else {
+                sb_append(sb, "for (%s in 0 until 10) {\n", node->value ? node->value : "i");
+            }
             generate_node_kotlin(sb, node->body, indent + 1);
             indent_code(sb, indent);
             sb_append(sb, "}\n"); break;

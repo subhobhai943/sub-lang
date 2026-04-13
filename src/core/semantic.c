@@ -8,6 +8,12 @@
 #include "type_system.h"
 #include "windows_compat.h"
 
+// Error tracking for semantic_analyze return value
+static int g_semantic_error_count = 0;
+
+#define compile_error(msg, line) do { g_semantic_error_count++; compile_error(msg, line); } while(0)
+#define compile_error_with_col(msg, line, col) do { g_semantic_error_count++; compile_error_with_col(msg, line, col); } while(0)
+
 // Symbol table entry (local) - enhanced with DataType
 typedef struct LocalSymbolEntry {
     char *name;
@@ -867,12 +873,14 @@ int semantic_analyze(ASTNode *ast) {
         return 0;
     }
     
+    g_semantic_error_count = 0;
+    
     LocalSymbolTable *table = create_symbol_table();
     if (!table) return 0;
     check_statement_type(ast, table, NULL);
     free_symbol_table(table);
     
-    return 1;
+    return g_semantic_error_count == 0 ? 1 : 0;
 }
 
 // Strict type checking pass - validates all types before IR generation

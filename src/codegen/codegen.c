@@ -283,14 +283,25 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
             
         case AST_CALL_EXPR:
             if (node->value) {
-                sb_append(sb, "%s(", node->value);
-                for (int i = 0; i < node->child_count; i++) {
-                    generate_expression(sb, node->children[i]);
-                    if (i + 1 < node->child_count) {
-                        sb_append(sb, ", ");
+                /* Map SUB print() to C printf() */
+                if (strcmp(node->value, "print") == 0) {
+                    sb_append(sb, "printf(\"%%s\\n\", ");
+                    if (node->child_count > 0) {
+                        generate_expression(sb, node->children[0]);
+                    } else {
+                        sb_append(sb, "\"\"");
                     }
+                    sb_append(sb, ")");
+                } else {
+                    sb_append(sb, "%s(", node->value);
+                    for (int i = 0; i < node->child_count; i++) {
+                        generate_expression(sb, node->children[i]);
+                        if (i + 1 < node->child_count) {
+                            sb_append(sb, ", ");
+                        }
+                    }
+                    sb_append(sb, ")");
                 }
-                sb_append(sb, ")");
             }
             break;
             
@@ -358,8 +369,14 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, ";\n");
             break;
             
-        case AST_FUNCTION_DECL:
-            sb_append(sb, "\nvoid %s(", node->value ? node->value : "func");
+        case AST_FUNCTION_DECL: {
+            /* Determine return type from AST */
+            const char *ret_type = "void";
+            if (node->data_type == TYPE_INT) ret_type = "long";
+            else if (node->data_type == TYPE_FLOAT) ret_type = "double";
+            else if (node->data_type == TYPE_STRING) ret_type = "char*";
+            else if (node->data_type == TYPE_BOOL) ret_type = "bool";
+            sb_append(sb, "\n%s %s(", ret_type, node->value ? node->value : "func");
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
                 sb_append(sb, "long %s", node->children[i]->value ? node->children[i]->value : "arg");
@@ -370,6 +387,7 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             }
             sb_append(sb, "}\n\n");
             break;
+        }
             
         case AST_IF_STMT:
             indent_code(sb, indent);
@@ -378,12 +396,53 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, ") {\n");
             generate_node(sb, node->body, indent + 1);
             indent_code(sb, indent);
-            sb_append(sb, "}\n");
+            sb_append(sb, "}");
+            if (node->right) {
+                if (node->right->type == AST_IF_STMT) {
+                    sb_append(sb, " else ");
+                    generate_node(sb, node->right, indent);
+                } else {
+                    sb_append(sb, " else {\n");
+                    generate_node(sb, node->right, indent + 1);
+                    indent_code(sb, indent);
+                    sb_append(sb, "}\n");
+                }
+            } else {
+                sb_append(sb, "\n");
+            }
             break;
             
         case AST_FOR_STMT:
             indent_code(sb, indent);
-            sb_append(sb, "for (long i = 0; i < 10; i++) {\n");
+            {
+                const char *var = node->value ? node->value : "i";
+                if (node->children && node->child_count > 0 &&
+                    node->children[0]->type == AST_RANGE_EXPR) {
+                    ASTNode *range = node->children[0];
+                    sb_append(sb, "for (long %s = ", var);
+                    if (range->right) {
+                        /* range(start, end) */
+                        if (range->left) generate_expression(sb, range->left);
+                        else sb_append(sb, "0");
+                        sb_append(sb, "; %s < ", var);
+                        generate_expression(sb, range->right);
+                    } else if (range->left) {
+                        /* range(n) → 0..n */
+                        sb_append(sb, "0; %s < ", var);
+                        generate_expression(sb, range->left);
+                    } else {
+                        sb_append(sb, "0; %s < 10", var);
+                    }
+                    sb_append(sb, "; %s++) {\n", var);
+                } else if (node->condition) {
+                    /* for item in collection — fallback to indexed loop */
+                    sb_append(sb, "/* for %s in collection */\n", var);
+                    indent_code(sb, indent);
+                    sb_append(sb, "for (long %s = 0; %s < 10; %s++) {\n", var, var, var);
+                } else {
+                    sb_append(sb, "for (long %s = 0; %s < 10; %s++) {\n", var, var, var);
+                }
+            }
             generate_node(sb, node->body, indent + 1);
             indent_code(sb, indent);
             sb_append(sb, "}\n");
@@ -646,7 +705,7 @@ char* codegen_generate(ASTNode *ast, Platform platform) {
 }
 
 /* Generate C++ code from AST */
-char* codegen_generate_cpp(ASTNode *ast UNUSED, Platform platform UNUSED) {
+char* codegen_generate_cpp(ASTNode *ast, Platform platform) {
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     
@@ -668,6 +727,6 @@ char* codegen_generate_cpp(ASTNode *ast UNUSED, Platform platform UNUSED) {
 }
 
 /* Generate regular C code */
-char* codegen_generate_c(ASTNode *ast UNUSED, Platform platform UNUSED) {
+char* codegen_generate_c(ASTNode *ast, Platform platform) {
     return generate_c_code(ast);
 }

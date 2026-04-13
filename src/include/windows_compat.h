@@ -31,10 +31,7 @@
         // GCC/Clang-style attributes work in MinGW
         #define UNUSED __attribute__((unused))
 
-        // MinGW has __builtin_expect
-        #ifndef __builtin_expect
-            #define __builtin_expect(expr, c) (expr)
-        #endif
+        // MinGW has __builtin_expect as a compiler built-in — do not redefine.
     #endif
 
     // All Windows compilers (MSVC and MinGW) use these mappings
@@ -72,10 +69,9 @@
 
     #define UNUSED __attribute__((unused))
 
-    // GCC/Clang have __builtin_expect built-in
-    #ifndef __builtin_expect
-        #define __builtin_expect(expr, c) (expr)
-    #endif
+    // GCC/Clang have __builtin_expect as a compiler built-in.
+    // Do NOT redefine it here — the #ifndef check would succeed
+    // (because it's a built-in, not a macro) and clobber it.
 #endif
 
 #endif /* WINDOWS_COMPAT_H */

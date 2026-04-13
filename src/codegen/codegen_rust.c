@@ -5,7 +5,7 @@
    ======================================== */
 
 #define _GNU_SOURCE
-#include "codegen_rust.hh"
+#include "codegen_rust.h"
 #include "windows_compat.h"
 #include <stdlib.h>
 #include <string.h>

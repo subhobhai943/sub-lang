@@ -26,7 +26,7 @@ typedef enum {
     TARGET_SWIFT,
     TARGET_KOTLIN,
     TARGET_GO
-} TargetLanguage;
+} SubTargetLanguage;
 
 /* ========================================
    SUB Type Enumeration
