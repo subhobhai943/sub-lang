@@ -132,6 +132,48 @@ static ASTNode* block_first(ASTNode *node) {
     return NULL;
 }
 
+static char* escape_string_for_codegen(const char *raw) {
+    if (!raw) {
+        return strdup("");
+    }
+
+    size_t len = strlen(raw);
+    char *escaped = malloc((len * 2) + 1);
+    if (!escaped) return NULL;
+
+    size_t out = 0;
+    for (size_t i = 0; i < len; i++) {
+        switch ((unsigned char)raw[i]) {
+            case '\n':
+                escaped[out++] = '\\';
+                escaped[out++] = 'n';
+                break;
+            case '\t':
+                escaped[out++] = '\\';
+                escaped[out++] = 't';
+                break;
+            case '\r':
+                escaped[out++] = '\\';
+                escaped[out++] = 'r';
+                break;
+            case '\\':
+                escaped[out++] = '\\';
+                escaped[out++] = '\\';
+                break;
+            case '"':
+                escaped[out++] = '\\';
+                escaped[out++] = '"';
+                break;
+            default:
+                escaped[out++] = raw[i];
+                break;
+        }
+    }
+
+    escaped[out] = '\0';
+    return escaped;
+}
+
 /* ========================================
    PYTHON CODE GENERATOR - REAL
    ======================================== */
@@ -142,7 +184,9 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
     switch (node->type) {
         case AST_LITERAL:
             if (node->data_type == TYPE_STRING) {
-                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+                char *escaped = escape_string_for_codegen(node->value ? node->value : "");
+                sb_append(sb, "\"%s\"", escaped ? escaped : "");
+                free(escaped);
             } else if (node->value) {
                 sb_append(sb, "%s", node->value);
             } else {
@@ -261,7 +305,7 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->body) {
                 generate_node_python(sb, node->body, indent + 1);
             }
-            if (!node->body) {
+            if (!node->body || block_first(node->body) == NULL) {
                 indent_code(sb, indent + 1);
                 sb_append(sb, "pass\n");
             }
@@ -274,6 +318,10 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             generate_expr_python(sb, node->condition);
             sb_append(sb, ":\n");
             generate_node_python(sb, node->body, indent + 1);
+            if (!node->body || block_first(node->body) == NULL) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "pass\n");
+            }
             if (node->right) {
                 if (node->right->type == AST_IF_STMT) {
                     indent_code(sb, indent);
@@ -281,15 +329,27 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
                     generate_expr_python(sb, node->right->condition);
                     sb_append(sb, ":\n");
                     generate_node_python(sb, node->right->body, indent + 1);
+                    if (!node->right->body || block_first(node->right->body) == NULL) {
+                        indent_code(sb, indent + 1);
+                        sb_append(sb, "pass\n");
+                    }
                     if (node->right->right) {
                         indent_code(sb, indent);
                         sb_append(sb, "else:\n");
                         generate_node_python(sb, node->right->right, indent + 1);
+                        if (!node->right->right || block_first(node->right->right) == NULL) {
+                            indent_code(sb, indent + 1);
+                            sb_append(sb, "pass\n");
+                        }
                     }
                 } else {
                     indent_code(sb, indent);
                     sb_append(sb, "else:\n");
                     generate_node_python(sb, node->right, indent + 1);
+                    if (!node->right || block_first(node->right) == NULL) {
+                        indent_code(sb, indent + 1);
+                        sb_append(sb, "pass\n");
+                    }
                 }
             }
             break;
@@ -317,7 +377,7 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             }
             sb_append(sb, ":\n");
             generate_node_python(sb, node->body, indent + 1);
-            if (!node->body) {
+            if (!node->body || block_first(node->body) == NULL) {
                 indent_code(sb, indent + 1);
                 sb_append(sb, "pass\n");
             }
@@ -329,6 +389,10 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             generate_expr_python(sb, node->condition);
             sb_append(sb, ":\n");
             generate_node_python(sb, node->body, indent + 1);
+            if (!node->body || block_first(node->body) == NULL) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "pass\n");
+            }
             break;
             
         case AST_RETURN_STMT:
@@ -385,19 +449,20 @@ char* codegen_python(ASTNode *ast, const char *source) {
     
     // Check for embedded Python code first
     char *embedded = extract_embedded_code(source, "python");
+    bool has_embedded = embedded != NULL;
     if (embedded) {
         sb_append(sb, "# Embedded Python code from SUB\n");
         sb_append(sb, "%s\n", embedded);
         free(embedded);
-    } else {
-        // Generate from AST
-        generate_node_python(sb, ast, 0);
-        
-        // Add main guard if no embedded code
-        if (!embedded) {
-            sb_append(sb, "\nif __name__ == '__main__':\n");
-            sb_append(sb, "    pass\n");
-        }
+    }
+
+    // Generate from AST
+    generate_node_python(sb, ast, 0);
+    
+    // Add main guard if no embedded code
+    if (!has_embedded) {
+        sb_append(sb, "\nif __name__ == '__main__':\n");
+        sb_append(sb, "    pass\n");
     }
     
     return sb_to_string(sb);
@@ -413,7 +478,9 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
     switch (node->type) {
         case AST_LITERAL:
             if (node->data_type == TYPE_STRING) {
-                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+                char *escaped = escape_string_for_codegen(node->value ? node->value : "");
+                sb_append(sb, "\"%s\"", escaped ? escaped : "");
+                free(escaped);
             } else if (node->value) {
                 sb_append(sb, "%s", node->value);
             } else {
@@ -680,9 +747,8 @@ char* codegen_javascript(ASTNode *ast, const char *source) {
     if (embedded) {
         sb_append(sb, "%s\n", embedded);
         free(embedded);
-    } else {
-        generate_node_js(sb, ast, 0);
     }
+    generate_node_js(sb, ast, 0);
     
     return sb_to_string(sb);
 }
@@ -697,7 +763,9 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
     switch (node->type) {
         case AST_LITERAL:
             if (node->data_type == TYPE_STRING) {
-                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+                char *escaped = escape_string_for_codegen(node->value ? node->value : "");
+                sb_append(sb, "\"%s\"", escaped ? escaped : "");
+                free(escaped);
             } else if (node->value) {
                 sb_append(sb, "%s", node->value);
             } else {
@@ -933,19 +1001,17 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
 }
 
 char* codegen_java(ASTNode *ast, const char *source) {
-    char *embedded = extract_embedded_code(source, "java");
-    if (embedded) {
-        StringBuilder *sb = sb_create();
-        sb_append(sb, "// Generated by SUB Language Compiler\n\n");
-        sb_append(sb, "%s\n", embedded);
-        free(embedded);
-        return sb_to_string(sb);
-    }
-    
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     
     sb_append(sb, "// Generated by SUB Language Compiler\n\n");
+
+    char *embedded = extract_embedded_code(source, "java");
+    if (embedded) {
+        sb_append(sb, "%s\n", embedded);
+        free(embedded);
+    }
+
     sb_append(sb, "public class SubProgram {\n");
     generate_node_java(sb, ast, 1);
     
@@ -967,7 +1033,9 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
     switch (node->type) {
         case AST_LITERAL:
             if (node->data_type == TYPE_STRING) {
-                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+                char *escaped = escape_string_for_codegen(node->value ? node->value : "");
+                sb_append(sb, "\"%s\"", escaped ? escaped : "");
+                free(escaped);
             } else {
                 sb_append(sb, "%s", node->value ? node->value : "nil");
             }
@@ -1054,10 +1122,14 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
 }
 
 char* codegen_swift(ASTNode *ast, const char *source) {
-    char *e = extract_embedded_code(source, "swift");
-    if (e) { StringBuilder *sb = sb_create(); sb_append(sb, "%s", e); free(e); return sb_to_string(sb); }
     StringBuilder *sb = sb_create();
+    if (!sb) return NULL;
     sb_append(sb, "// Generated by SUB\n\n");
+    char *e = extract_embedded_code(source, "swift");
+    if (e) {
+        sb_append(sb, "%s\n", e);
+        free(e);
+    }
     generate_node_swift(sb, ast, 0);
     return sb_to_string(sb);
 }
@@ -1071,7 +1143,9 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
     switch (node->type) {
         case AST_LITERAL:
             if (node->data_type == TYPE_STRING) {
-                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+                char *escaped = escape_string_for_codegen(node->value ? node->value : "");
+                sb_append(sb, "\"%s\"", escaped ? escaped : "");
+                free(escaped);
             } else {
                 sb_append(sb, "%s", node->value ? node->value : "null");
             }
@@ -1158,10 +1232,14 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
 }
 
 char* codegen_kotlin(ASTNode *ast, const char *source) {
-    char *e = extract_embedded_code(source, "kotlin");
-    if (e) { StringBuilder *sb = sb_create(); sb_append(sb, "%s", e); free(e); return sb_to_string(sb); }
     StringBuilder *sb = sb_create();
+    if (!sb) return NULL;
     sb_append(sb, "// Generated by SUB\n\n");
+    char *e = extract_embedded_code(source, "kotlin");
+    if (e) {
+        sb_append(sb, "%s\n", e);
+        free(e);
+    }
     generate_node_kotlin(sb, ast, 0);
     sb_append(sb, "\nfun main() {\n}\n");
     return sb_to_string(sb);
@@ -1184,7 +1262,9 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
     switch (node->type) {
         case AST_LITERAL:
             if (node->data_type == TYPE_STRING) {
-                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+                char *escaped = escape_string_for_codegen(node->value ? node->value : "");
+                sb_append(sb, "\"%s\"", escaped ? escaped : "");
+                free(escaped);
             } else if (node->value) {
                 sb_append(sb, "%s", node->value);
             } else {
@@ -1470,9 +1550,8 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
         sb_append(sb, "# Embedded Ruby code from SUB\n");
         sb_append(sb, "%s\n", embedded);
         free(embedded);
-    } else {
-        generate_node_ruby(sb, ast, 0);
     }
+    generate_node_ruby(sb, ast, 0);
 
     return sb_to_string(sb);
 }
@@ -1504,6 +1583,24 @@ static bool ast_needs_fmt(ASTNode *node) {
     return false;
 }
 
+static bool is_go_package_level_node(ASTNode *node) {
+    if (!node) return false;
+
+    switch (node->type) {
+        case AST_FUNCTION_DECL:
+        case AST_VAR_DECL:
+        case AST_CONST_DECL:
+        case AST_CLASS_DECL:
+        case AST_EMBED_CODE:
+        case AST_EMBED_CPP:
+        case AST_EMBED_C:
+        case AST_UI_COMPONENT:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent);
 
 static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
@@ -1512,7 +1609,9 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
     switch (node->type) {
         case AST_LITERAL:
             if (node->data_type == TYPE_STRING) {
-                sb_append(sb, "\"%s\"", node->value ? node->value : "");
+                char *escaped = escape_string_for_codegen(node->value ? node->value : "");
+                sb_append(sb, "\"%s\"", escaped ? escaped : "");
+                free(escaped);
             } else if (node->value) {
                 sb_append(sb, "%s", node->value);
             } else {
@@ -1625,11 +1724,12 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
 
         case AST_VAR_DECL:
             indent_go(sb, indent);
-            sb_append(sb, "var %s = ", node->value ? node->value : "v");
+            sb_append(sb, "var %s", node->value ? node->value : "v");
             if (node->right) {
+                sb_append(sb, " = ");
                 generate_expr_go(sb, node->right);
             } else {
-                sb_append(sb, "nil");
+                sb_append(sb, " interface{} = nil");
             }
             sb_append(sb, "\n");
             break;
@@ -1638,13 +1738,15 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
             indent_go(sb, indent);
             if (node->right && node->right->type == AST_LITERAL) {
                 sb_append(sb, "const %s = ", node->value ? node->value : "C");
-            } else {
-                sb_append(sb, "var %s = ", node->value ? node->value : "C");
-            }
-            if (node->right) {
                 generate_expr_go(sb, node->right);
             } else {
-                sb_append(sb, "nil");
+                sb_append(sb, "var %s", node->value ? node->value : "C");
+                if (node->right) {
+                    sb_append(sb, " = ");
+                    generate_expr_go(sb, node->right);
+                } else {
+                    sb_append(sb, " interface{} = nil");
+                }
             }
             sb_append(sb, "\n");
             break;
@@ -1879,13 +1981,6 @@ char* codegen_go(ASTNode *ast, const char *source) {
 
     sb_append(sb, "// Generated by SUB Language Compiler\n\n");
 
-    char *embedded = extract_embedded_code(source, "go");
-    if (embedded) {
-        sb_append(sb, "%s\n", embedded);
-        free(embedded);
-        return sb_to_string(sb);
-    }
-
     sb_append(sb, "package main\n\n");
 
     bool needs_fmt = ast_needs_fmt(ast);
@@ -1893,30 +1988,42 @@ char* codegen_go(ASTNode *ast, const char *source) {
         sb_append(sb, "import \"fmt\"\n\n");
     }
 
-    /* Pass 1: emit functions at package level, track main and other stmts */
+    char *embedded = extract_embedded_code(source, "go");
+    if (embedded) {
+        sb_append(sb, "%s\n", embedded);
+        free(embedded);
+    }
+
+    /* Pass 1: emit package-level declarations, track main and executable stmts */
     bool has_user_main = false;
-    bool has_other_stmts = false;
+    bool has_exec_stmts = false;
+    bool emitted_package_level = false;
     for (ASTNode *stmt = block_first(ast); stmt; stmt = stmt->next) {
         if (stmt->type == AST_FUNCTION_DECL) {
             if (stmt->value && strcmp(stmt->value, "main") == 0)
                 has_user_main = true;
+        }
+
+        if (is_go_package_level_node(stmt)) {
             generate_node_go(sb, stmt, 0);
+            emitted_package_level = true;
         } else {
-            has_other_stmts = true;
+            has_exec_stmts = true;
         }
     }
 
-    /* Pass 2: wrap non-function stmts in func main() only if needed */
-    if (has_other_stmts && !has_user_main) {
-        sb_append(sb, "\nfunc main() {\n");
+    /* Pass 2: wrap executable top-level stmts in init() or main() */
+    if (has_exec_stmts || !has_user_main) {
+        if (emitted_package_level) {
+            sb_append(sb, "\n");
+        }
+        sb_append(sb, has_user_main ? "func init() {\n" : "func main() {\n");
         for (ASTNode *stmt = block_first(ast); stmt; stmt = stmt->next) {
-            if (stmt->type != AST_FUNCTION_DECL) {
+            if (!is_go_package_level_node(stmt)) {
                 generate_node_go(sb, stmt, 1);
             }
         }
         sb_append(sb, "}\n");
-    } else if (!has_other_stmts && !has_user_main) {
-        sb_append(sb, "\nfunc main() {}\n");
     }
 
     return sb_to_string(sb);

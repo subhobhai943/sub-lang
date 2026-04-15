@@ -267,6 +267,9 @@ static char* process_escapes(const char *raw, int len, Lexer *L) {
                     } else {
                         lex_error(L, "Invalid hex escape");
                         buf[o++] = 'x';
+                        if (i + 1 < len) {
+                            i++;
+                        }
                     }
                     break;
                 }

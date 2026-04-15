@@ -730,13 +730,12 @@ static ASTNode* parse_block(ParserState *state, bool stop_on_else) {
 }
 
 static ASTNode* parse_embed_block(ParserState *state) {
-    Token *hash = expect(state, TOKEN_HASH, "Expected '#'");
-    if (!hash) return NULL;
-    if (!match(state, TOKEN_EMBED)) {
-        parser_error(state, "Expected 'embed' after '#'");
-        return NULL;
+    Token *hash = peek_token(state, -1);
+    Token *embed = expect(state, TOKEN_EMBED, "Expected 'embed' after '#'");
+    if (!embed) return NULL;
+    if (!hash || hash->type != TOKEN_HASH) {
+        hash = embed;
     }
-    advance(state);
 
     Token *lang = current_token(state);
     if (!lang) return NULL;
@@ -1035,9 +1034,8 @@ static ASTNode* parse_statement(ParserState *state) {
        Consume the '#' prefix so subsequent keyword checks work. */
     if (match(state, TOKEN_HASH)) {
         /* Special case: #embed ... #endembed blocks */
-        if (match(state, TOKEN_EMBED) || (peek_token(state, 0)->type == TOKEN_EMBED)) {
-            /* Rewind: parse_embed_block expects to see TOKEN_HASH first */
-            state->current--;
+        if (peek_token(state, 1)->type == TOKEN_EMBED) {
+            advance(state);
             return parse_embed_block(state);
         }
         /* For all other # keywords, just consume the hash and fall through */
