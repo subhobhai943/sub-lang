@@ -34,21 +34,24 @@
         // MinGW has __builtin_expect as a compiler built-in — do not redefine.
     #endif
 
-    // All Windows compilers (MSVC and MinGW) use these mappings
-    #define strdup _strdup
-    #define strcasecmp _stricmp
-    #define strncasecmp _strnicmp
+    // Only MSVC needs the POSIX name shims below.
+    #ifdef _MSC_VER
+        #define strdup _strdup
+        #define strcasecmp _stricmp
+        #define strncasecmp _strnicmp
+    #else
+        static inline char* sub_strdup_compat(const char* s) {
+            if (!s) return NULL;
 
-    // Windows doesn't have <strings.h>, functions are in <string.h>
-    #ifndef _STRINGS_H_INCLUDED
-        #define _STRINGS_H_INCLUDED
-    #endif
+            size_t len = strlen(s);
+            char* result = (char*)malloc(len + 1);
+            if (!result) return NULL;
 
-    // Windows doesn't have strndup - provide implementation
-    #ifndef HAVE_STRNDUP
-        #define HAVE_STRNDUP
+            memcpy(result, s, len + 1);
+            return result;
+        }
 
-        static inline char* strndup(const char* s, size_t n) {
+        static inline char* sub_strndup_compat(const char* s, size_t n) {
             if (!s) return NULL;
 
             size_t len = strlen(s);
@@ -61,6 +64,35 @@
             result[len] = '\0';
             return result;
         }
+
+        #define strdup sub_strdup_compat
+        #define strndup sub_strndup_compat
+    #endif
+
+    // Windows doesn't have <strings.h>, functions are in <string.h>
+    #ifndef _STRINGS_H_INCLUDED
+        #define _STRINGS_H_INCLUDED
+    #endif
+
+    // MSVC still lacks strndup - provide a local implementation there only.
+    #if defined(_WIN32) && defined(_MSC_VER)
+        #ifndef HAVE_STRNDUP
+            #define HAVE_STRNDUP
+
+            static inline char* strndup(const char* s, size_t n) {
+                if (!s) return NULL;
+
+                size_t len = strlen(s);
+                if (n < len) len = n;
+
+                char* result = (char*)malloc(len + 1);
+                if (!result) return NULL;
+
+                memcpy(result, s, len);
+                result[len] = '\0';
+                return result;
+            }
+        #endif
     #endif
 #else
     // On Unix-like systems, strings.h is available

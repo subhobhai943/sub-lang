@@ -196,7 +196,7 @@ TypeInfo* type_infer_expression(ASTNode *expr) {
    Type Mapping
    ======================================== */
 
-const char* type_map_to(SubType type, TargetLanguage target) {
+const char* type_map_to(SubType type, SubTargetLanguage target) {
     for (size_t i = 0; i < TYPE_MAPPINGS_COUNT; i++) {
         if (TYPE_MAPPINGS[i].sub_type == type) {
             switch (target) {
@@ -232,7 +232,7 @@ const char* type_map_to(SubType type, TargetLanguage target) {
     return "unknown";
 }
 
-const char* type_info_map_to(TypeInfo *info, TargetLanguage target) {
+const char* type_info_map_to(TypeInfo *info, SubTargetLanguage target) {
     if (!info) return type_map_to(SUB_TYPE_UNKNOWN, target);
     
     // For simple types, use the base mapping
@@ -377,7 +377,7 @@ bool type_can_coerce(SubType from, SubType to) {
     return false;
 }
 
-const char* type_get_coercion(SubType from, SubType to, TargetLanguage target) {
+const char* type_get_coercion(SubType from, SubType to, SubTargetLanguage target) {
     if (from == to) return "";
     
     // Int to float coercion
@@ -417,7 +417,7 @@ const char* type_get_coercion(SubType from, SubType to, TargetLanguage target) {
    Default Values
    ======================================== */
 
-const char* type_get_default_value(SubType type, TargetLanguage target) {
+const char* type_get_default_value(SubType type, SubTargetLanguage target) {
     switch (type) {
         case SUB_TYPE_INT:
             return "0";
@@ -536,7 +536,7 @@ bool type_requires_gc(SubType type) {
    Memory Model Helpers
    ======================================== */
 
-MemoryModel target_memory_model(TargetLanguage target) {
+MemoryModel target_memory_model(SubTargetLanguage target) {
     switch (target) {
         case TARGET_PYTHON:
         case TARGET_JAVASCRIPT:
@@ -560,7 +560,7 @@ MemoryModel target_memory_model(TargetLanguage target) {
     }
 }
 
-bool target_is_statically_typed(TargetLanguage target) {
+bool target_is_statically_typed(SubTargetLanguage target) {
     switch (target) {
         case TARGET_JAVA:
         case TARGET_CPP:
@@ -582,7 +582,7 @@ bool target_is_statically_typed(TargetLanguage target) {
     }
 }
 
-bool target_requires_type_annotations(TargetLanguage target) {
+bool target_requires_type_annotations(SubTargetLanguage target) {
     switch (target) {
         case TARGET_JAVA:
         case TARGET_C:

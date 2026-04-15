@@ -92,11 +92,6 @@ static char advance(Lexer *L) {
     return c;
 }
 
-static int match(Lexer *L, char expected) {
-    if (*L->ptr == expected) { advance(L); return 1; }
-    return 0;
-}
-
 static void lex_error(Lexer *L, const char *fmt, ...) {
     L->error_count++;
     fprintf(stderr, "[line %d, col %d] Lexer error: ", L->line, L->column);

@@ -102,8 +102,8 @@ TypeInfo* type_infer_from_node(struct ASTNode *node);
 TypeInfo* type_infer_expression(struct ASTNode *expr);
 
 /* Type mapping to target languages */
-const char* type_map_to(SubType type, TargetLanguage target);
-const char* type_info_map_to(TypeInfo *info, TargetLanguage target);
+const char* type_map_to(SubType type, SubTargetLanguage target);
+const char* type_info_map_to(TypeInfo *info, SubTargetLanguage target);
 
 /* Type validation */
 bool types_are_equal(TypeInfo *a, TypeInfo *b);
@@ -114,10 +114,10 @@ bool type_validate_function_call(TypeInfo *func, TypeInfo **args, int arg_count)
 
 /* Type coercion */
 bool type_can_coerce(SubType from, SubType to);
-const char* type_get_coercion(SubType from, SubType to, TargetLanguage target);
+const char* type_get_coercion(SubType from, SubType to, SubTargetLanguage target);
 
 /* Default values for types in each language */
-const char* type_get_default_value(SubType type, TargetLanguage target);
+const char* type_get_default_value(SubType type, SubTargetLanguage target);
 
 /* Utility functions */
 const char* type_to_string(SubType type);
@@ -133,8 +133,8 @@ typedef enum {
     MEM_MODEL_MANUAL     // Manual memory management (C)
 } MemoryModel;
 
-MemoryModel target_memory_model(TargetLanguage target);
-bool target_is_statically_typed(TargetLanguage target);
-bool target_requires_type_annotations(TargetLanguage target);
+MemoryModel target_memory_model(SubTargetLanguage target);
+bool target_is_statically_typed(SubTargetLanguage target);
+bool target_requires_type_annotations(SubTargetLanguage target);
 
 #endif /* TYPE_SYSTEM_H */
