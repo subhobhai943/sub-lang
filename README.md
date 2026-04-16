@@ -2,30 +2,20 @@
 
 **The World's Simplest and Easiest Working Programming Language with a Compiler + Transpiler**
 
-SUB is a modern programming language that compiles **directly to native machine code** ⚡ - no interpreter needed! It also supports transpilation to 10+ languages for maximum flexibility.
+SUB is a modern programming language that compiles **directly to native machine code** ⚡ — no interpreter needed! It also supports transpilation to 11+ languages for maximum flexibility.
+
+> 🎉 **v1.0.7-beta is out!** First-ever passing CI build, Go transpilation, macOS ARM64 fix, and 7 bug fixes. [Download now →](https://github.com/subhobhai943/sub-lang/releases/tag/v1.0.7-beta)
 
 ---
 
-## 🚀 **NEW: Native Machine Code Compilation!**
-
-```
-SUB Code → Native Binary → No Runtime! ⚡
-```
-
-Write once, compile to:
-- **Native x86-64** binaries (standalone executables)
-- Python, JavaScript, Java, Rust, and 10+ other languages
-
----
-
-## ⚡ Quick Start (Native Compilation)
+## 🚀 Quick Start (Native Compilation)
 
 ### Install
 
 ```bash
 git clone https://github.com/subhobhai943/sub-lang.git
 cd sub-lang
-make native
+make all
 ```
 
 ### Hello World
@@ -39,87 +29,93 @@ make native
 ### Compile & Run
 
 ```bash
-./subc-native hello.sb hello
+# Native binary (no runtime needed)
+./subc hello.sb hello
 ./hello
 # Output: Hello, World
+
+# Or transpile to another language
+./sub hello.sb python
 ```
 
 **That's it! No Python, Java, or any runtime needed!** 🎉
+
+> 📦 **Want pre-built binaries?** See the [Installation Guide](docs/INSTALLATION_GUIDE.md) to download and use the latest release directly — no build tools required.
 
 ---
 
 ## 🎯 Two Compilation Modes
 
-### 1. Native Compiler (NEW! ⭐)
+### 1. Native Compiler (`subc`) ⭐
 
-Compiles **directly to machine code** - runs at native C speed!
+Compiles **directly to machine code** — runs at native C speed!
 
 ```bash
-# Build native compiler
-make native
+# Build
+make all
 
-# Compile your program
-./subc-native program.sb myapp
+# Compile your program to a native binary
+./subc program.sb myapp
 
-# Run standalone binary
+# Run standalone
 ./myapp
 ```
 
 **Benefits:**
-- ⚡ **Fast**: Native CPU instructions
-- 📦 **Standalone**: No runtime dependencies
+- ⚡ **Fast**: Native CPU instructions, 94% of C speed
+- 📦 **Standalone**: Zero runtime dependencies
 - 🚀 **Production-ready**: Single binary deployment
-- 🎯 **94% of C speed** in benchmarks
+- 🎯 **Supported**: x86-64 (Linux, Windows, macOS) + ARM64 (macOS M1/M2)
 
-### 2. Transpiler (Multi-Language)
+### 2. Transpiler (`sub`) — Multi-Language
 
-Transpiles to any target language for flexibility
+Transpiles to any of 11 target languages for maximum flexibility.
 
 ```bash
-# Build transpiler
-make transpiler
+# Build
+make all
 
 # Transpile to different languages
-./sublang program.sb python      # Generate Python
-./sublang program.sb javascript  # Generate JavaScript
-./sublang program.sb rust        # Generate Rust
+./sub program.sb python      # Generate Python
+./sub program.sb javascript  # Generate JavaScript
+./sub program.sb rust        # Generate Rust
+./sub program.sb go          # Generate Go (NEW in v1.0.7)
 ```
 
 **Benefits:**
-- 🌍 **Cross-platform**: Leverage existing runtimes
-- 🔄 **Interop**: Use existing libraries
-- 🛠️ **Flexible**: Choose best target for your needs
+- 🌍 **Cross-platform**: Leverage existing runtimes and ecosystems
+- 🔄 **Interop**: Use existing libraries from target languages
+- 🛠️ **Flexible**: Choose the best target for your use case
 
 ---
 
 ## ✨ Key Features
 
 🔗 **Blockchain-Inspired Syntax**
-- Uses `#` symbols for intuitive method chaining
-- Clean, readable code structure
-- Perfect for beginners and experts
+- Uses `#` symbols for intuitive, readable code structure
+- Beginner-friendly with a minimal learning curve
 
 ⚡ **Native Code Generation**
 - Direct x86-64 and ARM64 machine code compilation
-- Standalone executables
-- No runtime dependencies
-- Near-C performance
+- Standalone executables, no runtime dependencies
+- Near-C performance (94% of C speed in benchmarks)
 
-🌍 **Multi-Language Support**
-- Transpile to Python, JavaScript, Java, Rust, C++, etc.
-- Best-of-both-worlds approach
-- Choose speed or flexibility
+🌍 **Multi-Language Transpilation**
+- 11 supported targets: Python, JavaScript, TypeScript, Java, C, C++, Rust, Go, Swift, Kotlin, Ruby
+- Idiomatic output per language (e.g. Go gets `gofmt` formatting, `defer/recover`, proper imports)
 
 🛡️ **Cross-Platform**
-- Windows (MSVC)
-- Linux (GCC)
-- macOS (Clang)
-- One codebase, all platforms
+- Windows (MinGW/MSYS2 or MSVC)
+- Linux (GCC, x86-64 and ARM64)
+- macOS (Clang, x86-64 and Apple Silicon)
 
 📁 **Professional Code Organization**
-- Clean src/ directory structure
-- Logically organized modules
-- Easy to navigate and maintain
+- Clean `src/` directory structure with logical module separation
+- Core compiler, codegen backends, IR, and drivers are all isolated
+
+🔄 **Active CI/CD**
+- First passing CI build achieved in v1.0.7-beta
+- GitHub Actions builds and releases for all 3 platforms automatically
 
 ---
 
@@ -128,7 +124,7 @@ make transpiler
 ### Variables
 ```sub
 #var name = "John"        // String
-#var age = 25             // Integer  
+#var age = 25             // Integer
 #var price = 19.99        // Float
 #var isActive = true      // Boolean
 ```
@@ -166,21 +162,28 @@ make transpiler
 #end
 ```
 
+### Embedded Native Code
+```sub
+#embed go
+fmt.Println("This is native Go code!")
+#endembed
+```
+
 ---
 
-## 📊 Performance Comparison
+## 📊 Performance Benchmark
 
-**Fibonacci(35) Benchmark:**
+**Fibonacci(35):**
 
 | Language | Time | vs SUB |
 |----------|------|--------|
 | **SUB Native** | **850ms** | **Baseline** ⭐ |
-| C (gcc -O2) | 800ms | 1.06x faster |
-| Rust | 820ms | 1.04x faster |
-| Python | 2100ms | 2.5x slower 🐌 |
-| JavaScript | 1200ms | 1.4x slower 🐌 |
+| C (gcc -O2) | 800ms | 1.06× faster |
+| Rust | 820ms | 1.04× faster |
+| JavaScript | 1200ms | 1.4× slower |
+| Python | 2100ms | 2.5× slower |
 
-**SUB runs at 94% of C speed!** ⚡
+**SUB runs at 94% of C speed — with far simpler syntax.**
 
 ---
 
@@ -191,15 +194,15 @@ make transpiler
 ```
 SUB Source (.sb)
       ↓
-   Lexer (Tokenize)
+   Lexer (Tokenize)         — src/core/lexer.c
       ↓
-   Parser (AST)
+   Parser (AST)             — src/core/parser_enhanced.c
       ↓
-   Semantic Analysis
+   Semantic Analysis        — src/core/semantic.c
       ↓
-   IR Generation
+   IR Generation            — src/ir/ir.c
       ↓
-   x86-64 Codegen
+   x86-64 / ARM64 Codegen  — src/codegen/codegen_native.c
       ↓
    Assembly (.s)
       ↓
@@ -213,134 +216,89 @@ Native Binary ✨
 ```
 sub-lang/
 ├── src/
-│   ├── core/                  # Core compiler components
-│   │   ├── lexer.c           # Tokenization
-│   │   ├── parser.c          # Basic parser
-│   │   ├── parser_enhanced.c # Enhanced parser
-│   │   ├── semantic.c        # Type checking & analysis
-│   │   ├── type_system.c/h   # Type system implementation
-│   │   ├── error_handler.c/h # Error handling
-│   │   └── utils.c           # Utility functions
+│   ├── core/                  # Core compiler pipeline
+│   │   ├── lexer.c            # Tokenizer / lexer
+│   │   ├── parser.c           # Basic parser (legacy)
+│   │   ├── parser_enhanced.c  # Active enhanced parser
+│   │   ├── semantic.c         # Semantic analysis & type checking
+│   │   ├── type_system.c/h    # Type system implementation
+│   │   └── utils.c            # Shared utility functions
 │   │
-│   ├── codegen/              # Code generation backends
-│   │   ├── codegen.c         # Main codegen
-│   │   ├── codegen_x64.c/h   # x86-64 native code
-│   │   ├── codegen_cpp.c/h   # C++ transpiler
-│   │   ├── codegen_rust.c/h  # Rust transpiler
-│   │   ├── codegen_native.c/h # Native compilation
-│   │   ├── codegen_multilang.c # Multi-language support
-│   │   └── targets.c/h       # Target management
+│   ├── codegen/               # Code generation backends
+│   │   ├── codegen.c          # Main dispatcher
+│   │   ├── codegen_x64.c/h    # x86-64 native codegen
+│   │   ├── codegen_native.c/h # Native compilation driver
+│   │   ├── codegen_multilang.c# Multi-language transpiler (11 targets)
+│   │   ├── codegen_cpp.c/h    # C++ backend
+│   │   ├── codegen_rust.c/h   # Rust backend
+│   │   └── targets.c/h        # Target registry & routing
 │   │
-│   ├── ir/                   # Intermediate representation
-│   │   ├── ir.c              # IR generation
-│   │   └── ir.h              # IR definitions
+│   ├── ir/                    # Intermediate representation
+│   │   ├── ir.c               # IR generation
+│   │   └── ir.h               # IR definitions
 │   │
-│   ├── compilers/            # Main compiler drivers
-│   │   ├── sub.c             # Standard compiler
-│   │   ├── sub_multilang.c   # Multi-language transpiler
-│   │   ├── sub_native.c      # Native compiler (v1)
-│   │   └── sub_native_compiler.c # Native compiler (v2)
+│   ├── compilers/             # Compiler entry points
+│   │   ├── sub.c              # Transpiler driver
+│   │   ├── sub_multilang.c    # Multi-language driver
+│   │   ├── sub_native.c       # Native compiler driver (active)
+│   │   └── sub_native_compiler.c # Native compiler v2
 │   │
-│   └── include/              # Public headers
-│       ├── sub_compiler.h    # Main compiler header
-│       └── windows_compat.h  # Cross-platform support
+│   └── include/               # Public headers
+│       ├── sub_compiler.h     # Main compiler interface
+│       └── windows_compat.h   # Cross-platform compatibility
 │
-├── tests/                    # Test files (.sb)
-├── examples/                 # Example programs
-├── docs/                     # Documentation
-├── stdlib/                   # Standard library
-├── .github/workflows/        # CI/CD workflows
-├── Makefile                  # Build configuration
-├── CMakeLists.txt           # CMake configuration
-└── README.md                # This file
-```
-
-**Recent Updates:**
-- ✅ Reorganized all source files into logical `src/` structure
-- ✅ Separated core, codegen, IR, and compiler modules
-- ✅ Moved test files to dedicated `tests/` directory
-- ✅ Professional, maintainable codebase organization
-
----
-
-## 🚀 Complete Example
-
-### fibonacci.sb
-
-```sub
-#var a = 0
-#var b = 1
-#var n = 10
-
-#print("Fibonacci sequence:")
-
-#for i in range(n)
-    #print(a)
-    #var temp = a + b
-    a = b
-    b = temp
-#end
-```
-
-### Native Compilation
-
-```bash
-# Compile to native binary
-./subc-native fibonacci.sb fib
-
-# Run standalone executable
-./fib
-```
-
-### Output
-
-```
-Fibonacci sequence:
-0
-1
-1
-2
-3
-5
-8
-13
-21
-34
+├── tests/                     # Test .sb files
+├── examples/                  # Example programs
+├── docs/                      # Documentation
+│   ├── INSTALLATION_GUIDE.md  # Platform install guide
+│   ├── BUILD_GUIDE.md         # Build from source
+│   ├── LANGUAGE_SPEC.md       # Full syntax reference
+│   └── RELEASE_NOTES.md       # Changelog
+├── stdlib/                    # Standard library (in progress)
+├── .github/workflows/         # CI/CD (build + release)
+├── Makefile                   # Build system
+└── README.md
 ```
 
 ---
 
-## 💻 Installation & Build
+## 💻 Build from Source
 
-### Linux/macOS
+### Linux / macOS
 
 ```bash
-# Clone
 git clone https://github.com/subhobhai943/sub-lang.git
 cd sub-lang
 
-# Build both compilers
+make all          # Build both compilers
+# or
+make compiler     # Transpiler only (./sub)
+make native_compiler  # Native compiler only (./subc)
+
+make clean        # Remove build artifacts
+make help         # Show all targets
+```
+
+### Windows (MinGW / MSYS2 — Recommended)
+
+```bash
+# In MSYS2 MinGW64 terminal
+pacman -S mingw-w64-x86_64-gcc make
+git clone https://github.com/subhobhai943/sub-lang.git
+cd sub-lang
 make all
-
-# Or build separately
-make native      # Native compiler only
-make transpiler  # Transpiler only
-
-# Run tests
-make test
+# Produces: sub.exe and subc.exe
 ```
 
 ### Windows (MSVC)
 
 ```batch
-REM Open Visual Studio Developer Command Prompt
-
-REM Build native compiler
-cl /Isrc/include src/compilers/sub_native_compiler.c src/core/*.c src/codegen/*.c src/ir/*.c /Fe:subc-native.exe
-
-REM Build transpiler
-cl /Isrc/include src/compilers/sub_multilang.c src/core/*.c src/codegen/*.c /Fe:sublang.exe
+REM In Visual Studio Developer Command Prompt
+cl /Isrc/include src/compilers/sub_native.c src/core/*.c src/codegen/*.c src/ir/*.c /Fe:subc.exe
+cl /Isrc/include src/compilers/sub.c src/core/*.c src/codegen/*.c /Fe:sub.exe
 ```
+
+> 💡 Want pre-built binaries? See the **[Installation Guide](docs/INSTALLATION_GUIDE.md)**.
 
 ---
 
@@ -350,39 +308,28 @@ cl /Isrc/include src/compilers/sub_multilang.c src/core/*.c src/codegen/*.c /Fe:
 
 | Platform | Architecture | Status |
 |----------|-------------|--------|
-| **Linux** | x86-64 | ✅ Ready |
-| **Windows** | x86-64 | ✅ Ready |
-| **macOS** | x86-64 | ✅ Ready |
-| **macOS** | ARM64 (M1/M2) | ✅ Ready |
-| **Linux** | ARM64 | ✅ Ready |
-| **Linux** | RISC-V | 💭 Future |
+| Linux | x86-64 | ✅ Ready |
+| Windows | x86-64 | ✅ Ready |
+| macOS | x86-64 | ✅ Ready |
+| macOS | ARM64 (M1/M2/M3) | ✅ Ready |
+| Linux | ARM64 | ✅ Ready |
+| Linux | RISC-V | 💭 Planned |
 
 ### Transpilation Targets
 
 | Language | Status | Command |
 |----------|--------|----------|
-| **Python** | ✅ Ready | `sublang file.sb python` |
-| **JavaScript** | ✅ Ready | `sublang file.sb javascript` |
-| **TypeScript** | ✅ Ready | `sublang file.sb typescript` |
-| **Java** | ✅ Ready | `sublang file.sb java` |
-| **Ruby** | ✅ Ready | `sublang file.sb ruby` |
-| **C** | ✅ Ready | `sublang file.sb c` |
-| **C++** | ✅ Ready | `sublang file.sb cpp` |
-| **Rust** | ✅ Ready | `sublang file.sb rust` |
-| **Swift** | ✅ Ready | `sublang file.sb swift` |
-| **Kotlin** | ✅ Ready | `sublang file.sb kotlin` |
-| **Go** | ✅ Ready | `sublang file.sb go` |
-
----
-
-## 📚 Documentation
-
-- **[Native Compiler Guide](docs/NATIVE_COMPILER_GUIDE.md)** - Complete native compilation docs
-- **[Language Specification](docs/LANGUAGE_SPEC.md)** - Full syntax reference
-- **[Multi-Language Guide](docs/MULTILANG_GUIDE.md)** - Transpilation details
-- **[Build Guide](docs/BUILD_GUIDE.md)** - Build from source
-- **[Source Reorganization Plan](docs/implementation/SRC_REORGANIZATION_PLAN.md)** - Code structure details
-- **[Contributing](CONTRIBUTING.md)** - Join development
+| Python | ✅ Ready | `./sub file.sb python` |
+| JavaScript | ✅ Ready | `./sub file.sb javascript` |
+| TypeScript | ✅ Ready | `./sub file.sb typescript` |
+| Java | ✅ Ready | `./sub file.sb java` |
+| C | ✅ Ready | `./sub file.sb c` |
+| C++ | ✅ Ready | `./sub file.sb cpp` |
+| Rust | ✅ Ready | `./sub file.sb rust` |
+| **Go** | ✅ **NEW** | `./sub file.sb go` |
+| Swift | ✅ Ready | `./sub file.sb swift` |
+| Kotlin | ✅ Ready | `./sub file.sb kotlin` |
+| Ruby | ✅ Ready | `./sub file.sb ruby` |
 
 ---
 
@@ -390,123 +337,88 @@ cl /Isrc/include src/compilers/sub_multilang.c src/core/*.c src/codegen/*.c /Fe:
 
 ### ✅ Completed
 - [x] Lexer with full token support
-- [x] Parser with AST generation
-- [x] Semantic analysis
-- [x] **Native x86-64 code generation** ⭐
-- [x] Multi-language transpilation (10+ languages)
-- [x] Windows/Linux/macOS support
-- [x] Cross-platform build system
-- [x] **Professional source code organization** 🆕
-- [x] Automated reorganization workflow
+- [x] Enhanced parser with AST generation
+- [x] Semantic analysis & type checking
+- [x] Native x86-64 code generation ⭐
+- [x] ARM64 (Apple Silicon) code generation
+- [x] Multi-language transpilation (11 targets)
+- [x] **Go (Golang) transpilation** 🆕
+- [x] Windows / Linux / macOS support
+- [x] Cross-platform CI/CD (first passing build!) 🆕
+- [x] Professional source code organization
+- [x] Pre-built release binaries
 
 ### 🚧 In Progress
 - [ ] Control flow (if/else/while) in native compiler
 - [ ] Function definitions in native compiler
-- [ ] Standard library
+- [ ] Standard library foundation
 - [ ] Optimization passes
-- [ ] Updating build system for new structure
 
 ### 💭 Planned
-- [ ] ARM64 support
 - [ ] LLVM backend (alternative)
 - [ ] Garbage collection
 - [ ] Async/await
 - [ ] Package manager
-- [ ] Debugger integration
+- [ ] Debugger support
+- [ ] RISC-V target
+
+---
+
+## 📚 Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Installation Guide](docs/INSTALLATION_GUIDE.md) | Download & use pre-built binaries on any platform |
+| [Build Guide](docs/BUILD_GUIDE.md) | Build the compiler from source |
+| [Language Specification](docs/LANGUAGE_SPEC.md) | Full SUB syntax reference |
+| [Release Notes](docs/RELEASE_NOTES.md) | Changelog and version history |
+| [Syntax Highlighting](docs/SYNTAX_HIGHLIGHTING.md) | VS Code extension setup |
+| [Contributing](docs/CONTRIBUTING.md) | How to contribute to SUB |
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are welcome! See [CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ```bash
-# Development workflow
 git clone https://github.com/subhobhai943/sub-lang.git
 cd sub-lang
 make all
-
-# Make changes in src/ directory
-# Test
-make test
-
-# Submit PR
+# Make your changes in src/
+make all  # rebuild
+# Submit a PR!
 ```
-
----
-
-## ⚖️ License
-
-MIT License - See [LICENSE](LICENSE)
-
----
-
-## 📧 Contact
-
-- **GitHub**: https://github.com/subhobhai943/sub-lang
-- **Issues**: https://github.com/subhobhai943/sub-lang/issues
-- **Discussions**: https://github.com/subhobhai943/sub-lang/discussions
 
 ---
 
 ## ⭐ Why SUB?
 
-### For Beginners
-- **Easy Syntax**: Blockchain `#` style is intuitive
-- **Fast Learning**: Write code in minutes
-- **Instant Results**: Compile and run immediately
-
-### For Professionals
-- **Native Performance**: 94% of C speed
-- **Production Ready**: Standalone binaries
-- **No Dependencies**: Zero runtime requirements
-- **Cross-Platform**: One binary everywhere
-- **Clean Codebase**: Professional structure, easy to maintain
-
-### For Everyone
-- **Flexible**: Native OR transpile to any language
-- **Modern**: Clean syntax, powerful features
-- **Growing**: Active development, helpful community
-
----
-
-## 📈 Comparison
-
 | Feature | SUB Native | Python | JavaScript | Rust |
 |---------|-----------|---------|------------|------|
-| Speed | ⚡⚡⚡⚡ 94% of C | 🐌 Slow | 🐌 Slow | ⚡⚡⚡⚡⚡ 100% |
+| Speed | ⚡⚡⚡⚡ 94% of C | 🐌 Slow | 🐌 Slow | ⚡⚡⚡⚡⚡ C speed |
 | Easy to Learn | ✅ Very Easy | ✅ Easy | ✅ Easy | ❌ Hard |
-| Runtime | ✅ None | ❌ Python | ❌ Node.js | ✅ None |
+| Runtime Needed | ✅ None | ❌ Python | ❌ Node.js | ✅ None |
+| Transpiles To | 11 languages | ❌ | ❌ | ❌ |
 | Compile Time | ⚡ Fast | N/A | N/A | 🐌 Slow |
 | Binary Size | 📦 Small | N/A | N/A | 📦 Small |
-| Syntax | 🤩 Beautiful | 😊 Good | 😐 OK | 🤔 Complex |
-| Code Organization | ✅ Professional | ✅ Good | ✅ Good | ✅ Excellent |
 
 ---
 
-## 🎉 Get Started Now!
+## ⚖️ License
 
-```bash
-# Install
-git clone https://github.com/subhobhai943/sub-lang.git
-cd sub-lang
-make native
+MIT License — See [LICENSE](LICENSE)
 
-# Create your first program
-echo '#var name = "World"' > hello.sb
-echo '#print("Hello, " + name)' >> hello.sb
+---
 
-# Compile to native
-./subc-native hello.sb hello
+## 📧 Contact
 
-# Run!
-./hello
-```
+- **GitHub**: [subhobhai943/sub-lang](https://github.com/subhobhai943/sub-lang)
+- **Issues**: [github.com/subhobhai943/sub-lang/issues](https://github.com/subhobhai943/sub-lang/issues)
+- **Discussions**: [github.com/subhobhai943/sub-lang/discussions](https://github.com/subhobhai943/sub-lang/discussions)
 
 ---
 
 Built with ❤️ by the SUB community
 
-**Now with Native Compilation!** ⚡🚀
-
-**Powered by Pure C** 🔧 | **No Runtime Needed** 🎉 | **True Compiler** ✨ | **Professionally Organized** 📁
+**Powered by Pure C** 🔧 | **Native Compilation** ⚡ | **11 Transpilation Targets** 🌍 | **v1.0.7-beta** 🚀
