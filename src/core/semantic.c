@@ -322,8 +322,8 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 if (left_type == TYPE_UNKNOWN || left_type == TYPE_AUTO ||
                     right_type == TYPE_UNKNOWN || right_type == TYPE_AUTO) {
                     /* Cannot determine types at compile time, allow at runtime */
-                    node->data_type = TYPE_UNKNOWN;
-                    return TYPE_UNKNOWN;
+                    node->data_type = TYPE_INT;
+                    return TYPE_INT;
                 }
                 
                 // Type mismatch for arithmetic
@@ -680,12 +680,21 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
             if (node->left->type == AST_IDENTIFIER) {
                 entry = lookup_symbol(table, node->left->value);
                 if (!entry) {
-                    char error_msg[256];
-                    snprintf(error_msg, sizeof(error_msg),
-                             "Undefined variable '%s' in assignment",
-                             node->left->value);
-                    compile_error(error_msg, node->line);
-                    return;
+                    entry = add_symbol(table, node->left->value, NULL, TYPE_AUTO);
+                    if (entry) {
+                        entry->is_initialized = true;
+                    }
+                    node->type = AST_VAR_DECL;
+                    node->value = strdup(node->left->value);
+                    node->left = NULL;
+                    if (node->right) {
+                        expr_type = check_expression_type(node->right, table);
+                        if (entry) {
+                            entry->data_type = expr_type;
+                            node->data_type = expr_type;
+                        }
+                    }
+                    break;
                 }
             } else if (node->left->type == AST_MEMBER_ACCESS || node->left->type == AST_ARRAY_ACCESS) {
                 entry = NULL;
@@ -770,7 +779,7 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
             enter_scope(table);
 
             if (node->value) {
-                LocalSymbolEntry *loop_var = add_symbol(table, node->value, NULL, TYPE_AUTO);
+                LocalSymbolEntry *loop_var = add_symbol(table, node->value, NULL, TYPE_INT);
                 if (loop_var) {
                     loop_var->is_initialized = true;
                 }

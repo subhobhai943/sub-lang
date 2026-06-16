@@ -264,10 +264,10 @@ SubVal eval(ASTNode *node, Env *env) {
         ASTNode *fn_decl = fv.fn;
         Env *fn_env = env_new(env);
         /* Bind parameters */
-        if (fn_decl->params) {
-            for (int i = 0; i < fn_decl->param_count && i < node->child_count; i++) {
+        if (fn_decl->children) {
+            for (int i = 0; i < fn_decl->child_count && i < node->child_count; i++) {
                 SubVal arg = eval(node->children[i], env);
-                env_define(fn_env, fn_decl->params[i], arg);
+                env_define(fn_env, fn_decl->children[i]->value, arg);
             }
         }
         eval(fn_decl->body, fn_env);

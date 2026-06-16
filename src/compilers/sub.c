@@ -111,6 +111,8 @@ typedef struct {
 static const TargetDescriptor* lookup_target(const char *name) {
     static const TargetDescriptor targets[] = {
         /* ---- Platform targets ---- */
+        {"interpret",  TARGET_KIND_PLATFORM, PLATFORM_LINUX,   "",       "Interpret directly"},
+        {"run",        TARGET_KIND_PLATFORM, PLATFORM_LINUX,   "",       "Interpret directly"},
         {"android",    TARGET_KIND_PLATFORM, PLATFORM_ANDROID, ".java",  "javac SubProgram.java"},
         {"ios",        TARGET_KIND_PLATFORM, PLATFORM_IOS,     ".swift", "swiftc output.swift -o program && ./program"},
         {"web",        TARGET_KIND_PLATFORM, PLATFORM_WEB,     ".html",  "Open output.html in a web browser"},
@@ -240,6 +242,13 @@ int main(int argc, char *argv[]) {
     
     const char *input_file = argv[1];
     const char *target_str = argc > 2 ? argv[2] : "linux";
+
+    // Direct interpreter run
+    if (strcasecmp(target_str, "interpret") == 0 || strcasecmp(target_str, "run") == 0) {
+        printf("Interpreting %s...\n\n", input_file);
+        extern int interpret_file(const char *path);
+        return interpret_file(input_file);
+    }
     
     // Look up the target
     const TargetDescriptor *target = lookup_target(target_str);
@@ -299,11 +308,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // Build output filename from input basename
+    // Build output filename from input basename or override
     char output_file[256];
     char base_name[256];
     get_output_basename(input_file, base_name, sizeof(base_name));
-    if (target->kind == TARGET_KIND_LANGUAGE &&
+    if (argc > 3) {
+        snprintf(output_file, sizeof(output_file), "%s", argv[3]);
+    } else if (target->kind == TARGET_KIND_LANGUAGE &&
         strcasecmp(target_str, "java") == 0) {
         snprintf(output_file, sizeof(output_file), "SubProgram%s", target->extension);
     } else {
@@ -314,9 +325,24 @@ int main(int argc, char *argv[]) {
     printf("\n\u2713 Compilation successful!\n");
     printf("\u2713 Output written to: %s\n", output_file);
     
-    // Print next steps
-    printf("\nNext steps:\n");
-    printf("  %s\n", target->run_hint);
+    // If it is a platform target that compiles to C under the hood, compile to machine code directly
+    if (target->kind == TARGET_KIND_PLATFORM && 
+        (target->platform == PLATFORM_LINUX || target->platform == PLATFORM_WINDOWS || target->platform == PLATFORM_MACOS)) {
+        char compile_cmd[1024];
+        const char *bin_ext = (target->platform == PLATFORM_WINDOWS) ? ".exe" : "";
+        snprintf(compile_cmd, sizeof(compile_cmd), "gcc -O2 -o %s%s %s", base_name, bin_ext, output_file);
+        printf("\nCompiling intermediate C code to native machine code...\n");
+        int ret = system(compile_cmd);
+        if (ret == 0) {
+            printf("\u2705 Machine code compiled successfully: ./%s%s\n", base_name, bin_ext);
+        } else {
+            fprintf(stderr, "Warning: gcc compilation failed. Make sure gcc is installed.\n");
+        }
+    } else {
+        // Print next steps for other targets
+        printf("\nNext steps:\n");
+        printf("  %s\n", target->run_hint);
+    }
     
     // Cleanup
     free(source);

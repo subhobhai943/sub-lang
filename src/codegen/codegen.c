@@ -309,28 +309,36 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                 /* Map SUB print() to C printf() */
                 if (strcmp(node->value, "print") == 0) {
                     if (node->child_count > 0) {
-                        ASTNode *arg = node->children[0];
-                        const char *fmt = "%s";
-                        if (arg->data_type == TYPE_INT) fmt = "%ld";
-                        else if (arg->data_type == TYPE_FLOAT) fmt = "%f";
-                        else if (arg->data_type == TYPE_BOOL) fmt = "%d";
-                        else if (arg->data_type == TYPE_STRING) fmt = "%s";
-                        else if (arg->type == AST_LITERAL && arg->value) {
-                            /* Infer from literal value if data_type not set */
-                            char *end;
-                            (void)strtol(arg->value, &end, 10);
-                            if (*end == '\0') fmt = "%ld";
-                            else {
-                                (void)strtod(arg->value, &end);
-                                if (*end == '\0') fmt = "%f";
-                            }
-                        } else if (arg->type == AST_BINARY_EXPR) {
-                            /* Binary expressions: check if arithmetic or string concat */
+                        sb_append(sb, "printf(\"");
+                        for (int i = 0; i < node->child_count; i++) {
+                            ASTNode *arg = node->children[i];
+                            const char *fmt = "%ld";
                             if (arg->data_type == TYPE_INT) fmt = "%ld";
                             else if (arg->data_type == TYPE_FLOAT) fmt = "%f";
+                            else if (arg->data_type == TYPE_BOOL) fmt = "%d";
+                            else if (arg->data_type == TYPE_STRING) fmt = "%s";
+                            else if (arg->type == AST_LITERAL && arg->value) {
+                                char *end;
+                                (void)strtol(arg->value, &end, 10);
+                                if (*end == '\0') fmt = "%ld";
+                                else {
+                                    (void)strtod(arg->value, &end);
+                                    if (*end == '\0') fmt = "%f";
+                                }
+                            } else if (arg->type == AST_BINARY_EXPR) {
+                                if (arg->data_type == TYPE_INT) fmt = "%ld";
+                                else if (arg->data_type == TYPE_FLOAT) fmt = "%f";
+                                else if (arg->data_type == TYPE_STRING) fmt = "%s";
+                            }
+                            sb_append(sb, "%s%s", fmt, i + 1 < node->child_count ? " " : "\\n");
                         }
-                        sb_append(sb, "printf(\"%s\\n\", ", fmt);
-                        generate_expression(sb, arg);
+                        sb_append(sb, "\", ");
+                        for (int i = 0; i < node->child_count; i++) {
+                            generate_expression(sb, node->children[i]);
+                            if (i + 1 < node->child_count) {
+                                sb_append(sb, ", ");
+                            }
+                        }
                     } else {
                         sb_append(sb, "printf(\"\\n\"");
                     }
