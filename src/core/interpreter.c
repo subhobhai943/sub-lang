@@ -216,8 +216,8 @@ SubVal eval(ASTNode *node, Env *env) {
 
     case AST_CALL_EXPR: {
         const char *fn = node->value;
-        /* Built-ins */
-        if (fn && strcmp(fn, "print") == 0) {
+        /* Built-ins: print() and show() are identical */
+        if (fn && (strcmp(fn, "print") == 0 || strcmp(fn, "show") == 0)) {
             for (int i = 0; i < node->child_count; i++)
                 print_val(eval(node->children[i], env));
             return NULL_VAL;
@@ -225,48 +225,68 @@ SubVal eval(ASTNode *node, Env *env) {
         if (fn && strcmp(fn, "str") == 0 && node->child_count > 0) {
             SubVal v = eval(node->children[0], env);
             char buf[64];
-            if (v.type==VAL_INT)   snprintf(buf, sizeof(buf), "%lld", v.iv);
-            else if (v.type==VAL_FLOAT) snprintf(buf, sizeof(buf), "%g", v.fv);
+            if (v.type==VAL_INT)         snprintf(buf, sizeof(buf), "%lld", v.iv);
+            else if (v.type==VAL_FLOAT)  snprintf(buf, sizeof(buf), "%g", v.fv);
             else if (v.type==VAL_STRING) return v;
-            else snprintf(buf, sizeof(buf), "%s", v.bv ? "true" : "false");
+            else snprintf(buf, sizeof(buf), "null");
             return make_str(buf);
+        }
+        if (fn && strcmp(fn, "int") == 0 && node->child_count > 0) {
+            SubVal v = eval(node->children[0], env);
+            if (v.type==VAL_STRING) return make_int(atoll(v.sv ? v.sv : "0"));
+            if (v.type==VAL_FLOAT)  return make_int((long long)v.fv);
+            return v;
+        }
+        if (fn && strcmp(fn, "float") == 0 && node->child_count > 0) {
+            SubVal v = eval(node->children[0], env);
+            if (v.type==VAL_STRING) return make_float(atof(v.sv ? v.sv : "0"));
+            if (v.type==VAL_INT)    return make_float((double)v.iv);
+            return v;
         }
         if (fn && strcmp(fn, "len") == 0 && node->child_count > 0) {
             SubVal v = eval(node->children[0], env);
-            return make_int(v.type == VAL_STRING ? (long long)strlen(v.sv) : 0);
+            return make_int(v.type==VAL_STRING ? (long long)strlen(v.sv ? v.sv : "") : 0);
         }
-        /* User-defined */
-        SubVal fv = fn ? env_get(env, fn) : NULL_VAL;
+        if (fn && strcmp(fn, "input") == 0) {
+            if (node->child_count > 0) print_val(eval(node->children[0], env));
+            char buf[1024];
+            if (!fgets(buf, sizeof(buf), stdin)) return make_str("");
+            size_t l = strlen(buf);
+            if (l > 0 && buf[l-1] == '\n') buf[l-1] = '\0';
+            return make_str(buf);
+        }
+        /* User-defined function call */
+        SubVal fv = env_get(env, fn ? fn : "");
         if (fv.type != VAL_FUNC || !fv.fn) {
-            fprintf(stderr, "Not a function: %s\n", fn ? fn : "(anonymous)");
+            fprintf(stderr, "Not a function: %s\n", fn ? fn : "(null)");
             return NULL_VAL;
         }
-        ASTNode *decl = fv.fn;
-        Env *fenv = env_new(env);
-        for (int i = 0; i < decl->child_count && i < node->child_count; i++) {
-            if (decl->children[i] && decl->children[i]->value)
-                env_define(fenv, decl->children[i]->value, eval(node->children[i], env));
+        ASTNode *fn_decl = fv.fn;
+        Env *fn_env = env_new(env);
+        /* Bind parameters */
+        if (fn_decl->params) {
+            for (int i = 0; i < fn_decl->param_count && i < node->child_count; i++) {
+                SubVal arg = eval(node->children[i], env);
+                env_define(fn_env, fn_decl->params[i], arg);
+            }
         }
-        eval(decl->body, fenv);
-        SubVal result = fenv->ret_val;
-        env_free(fenv);
-        return result;
+        eval(fn_decl->body, fn_env);
+        SubVal ret = fn_env->returning ? fn_env->ret_val : NULL_VAL;
+        env_free(fn_env);
+        return ret;
     }
 
     default:
-        if (node->left)  eval(node->left, env);
-        if (node->right) eval(node->right, env);
-        for (int i = 0; i < node->child_count; i++) eval(node->children[i], env);
         return NULL_VAL;
     }
 }
 
 static SubVal eval_block(ASTNode *node, Env *env) {
-    SubVal r = NULL_VAL;
-    ASTNode *s = node->body ? node->body : (node->children && node->child_count > 0 ? node->children[0] : NULL);
-    for (; s && !env->returning; s = s->next)
-        r = eval(s, env);
-    return r;
+    if (!node) return NULL_VAL;
+    SubVal last = NULL_VAL;
+    for (int i = 0; i < node->child_count && !env->returning; i++)
+        last = eval(node->children[i], env);
+    return last;
 }
 
 int interpret_file(const char *path) {
@@ -279,7 +299,12 @@ int interpret_file(const char *path) {
     int ntok;
     Token *toks = lexer_tokenize(src, &ntok);
     ASTNode *ast = parser_parse(toks, ntok);
-    if (!ast) { free(src); return 1; }
+    if (!ast) { free(src); lexer_free_tokens(toks, ntok); return 1; }
+    if (!semantic_analyze(ast)) {
+        fprintf(stderr, "Semantic error\n");
+        parser_free_ast(ast); lexer_free_tokens(toks, ntok); free(src);
+        return 1;
+    }
     Env *global = env_new(NULL);
     eval(ast, global);
     env_free(global);
