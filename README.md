@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="https://github.com/subhobhai943/sub-lang/actions/workflows/ci.yml">
-    <img src="https://github.com/subhobhai943/sub-lang/actions/workflows/ci.yml/badge.svg" alt="Build" />
+    <img src="https://github.com/subhobhai943/sub-lang/actions/workflows/build.yml/badge.svg" alt="Build" />
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" />
