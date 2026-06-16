@@ -1,14 +1,8 @@
 # SUB Programming Language
 
-```
- ____  _   _ ____    _
-/ ___|| | | | __ )  | |    __ _ _ __   __ _
-\___ \| | | |  _ \  | |   / _` | '_ \ / _` |
- ___) | |_| | |_) | | |__| (_| | | | | (_| |
-|____/ \___/|____/  |_____\__,_|_| |_|\__, |
-                                       |___/
-  A simple, compiled programming language.
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/subhobhai943/sub-lang/main/logo.svg" alt="SUB Language Logo" width="480" />
+</p>
 
 > **v2.0.0** — Native compiler via C-backend, working interpreter, fixed transpiler naming, simplified syntax
 
