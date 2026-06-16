@@ -1,7 +1,7 @@
 # SUB Programming Language
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/subhobhai943/sub-lang/main/logo.svg" alt="SUB Language Logo" width="480" />
+  <img src="docs/logo.png" alt="SUB Language Logo" width="480" />
 </p>
 
 > **v2.0.0** — Native compiler via C-backend, working interpreter, fixed transpiler naming, simplified syntax
