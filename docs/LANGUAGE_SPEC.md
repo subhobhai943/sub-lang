@@ -1,427 +1,161 @@
-# SUB Language Specification v2.0
+# SUB Language Specification
+
+This document describes the SUB grammar as it is actually implemented by
+the lexer (`src/core/lexer.c`), parser (`src/core/parser_enhanced.c`), and
+code generators (`src/codegen/`). If a `.sb` file uses something not listed
+here, it will fail to parse or fail semantic analysis.
+
+For features that are planned but not yet implemented, see
+[`ROADMAP.md`](ROADMAP.md).
 
 ## 1. Introduction
 
-SUB (Simple Universal Builder) is a cross-platform programming language designed for ease of learning and maximum portability. It uses a clean, modern syntax to create highly readable code.
-
-### What's New in v2.0
-- **C++ Embedding**: Native C++ code support alongside C
-- **Enhanced Error Handling**: Try-catch-finally blocks with stack traces
-- **Improved Type System**: Stronger type inference and checking
-- **Modern Features**: Async/await foundations, better memory management
+SUB (Simple Universal Builder) is a small, easy-to-learn language that is
+interpreted directly (`subi`), compiled to a native binary via a C backend
+(`subc`), or transpiled to one of several target languages (`sub`).
 
 ## 2. Syntax
 
 ### 2.1 Comments
-```sub
-// Single-line comment
 
-/* Multi-line
-   comment */
+```sub
+# Single-line comment
 ```
+
+Comments start with `#` and run to the end of the line. There is no
+block-comment syntax.
 
 ### 2.2 Variables
-Variables are declared using the `var` keyword with optional type hints:
+
 ```sub
-var name = "John"              // String (inferred)
-var age = 25                   // Number (inferred)
-var price:float = 19.99        // Explicit type
-var isActive:bool = true       // Boolean with type
-var data:auto = getData()      // Auto type inference
+var name = "John"
+var age = 25
+const MAX = 100
 ```
 
+`var` declares a mutable variable, `const` declares one that cannot be
+reassigned. Types are always inferred from the initializer — there is no
+type-annotation syntax (`name:type`).
+
 ### 2.3 Data Types
-- **String**: Text enclosed in quotes ("" or '')
-- **Integer**: Whole numbers (int8, int16, int32, int64)
-- **Float**: Floating-point (float32, float64)
-- **Boolean**: true or false
-- **Array**: Ordered collection [1, 2, 3]
-- **Object**: Key-value pairs {key: value}
-- **Null**: null value
-- **Auto**: Automatic type inference
+
+- **String** — text in double or single quotes, with escape sequences
+- **Integer** — whole numbers, including hex (`0x..`), binary (`0b..`), and octal (`0o..`) literals
+- **Float** — floating-point numbers
+- **Boolean** — `true` / `false`
+- **Null** — `null`
 
 ### 2.4 Functions
+
 ```sub
-function functionName(param1:int, param2:string):string
-    // function body
-    return result
-end
+function add(a, b) {
+    return a + b
+}
 
-// Arrow functions (inline)
-var square = (x:int) => x * x
+# fn and def are accepted as synonyms for function
+fn multiply(a, b) {
+    return a * b
+}
 
-// Generic functions
-function identity<T>(value:T):T
-    return value
-end
+def subtract(a, b) {
+    return a - b
+}
 ```
 
 ### 2.5 Conditionals
-```sub
-if condition
-    // code
-elif otherCondition
-    // code
-else
-    // code
-end
 
-// Ternary operator
-var result = condition ? value1 : value2
+```sub
+if x > 5 {
+    print("big")
+} elif x > 0 {
+    print("small positive")
+} else {
+    print("non-positive")
+}
+```
+
+Both brace-block (`{ }`) and `end`-block styles are accepted for any
+control-flow construct:
+
+```sub
+if x > 5
+    print("big")
+else
+    print("small")
+end
 ```
 
 ### 2.6 Loops
 
-**For Loop:**
 ```sub
-for i in range(10)
+for i in range(5) {
     print(i)
-end
+}
 
-// For-each loop
-for item in collection
-    print(item)
-end
-
-// C-style for loop
-for (i = 0; i < 10; i++)
+for i in range(1, 10) {
     print(i)
-end
+}
+
+var i = 0
+while i < 5 {
+    print(i)
+    i = i + 1
+}
 ```
 
-**While Loop:**
-```sub
-while condition
-    // code
-end
+### 2.7 Built-in Functions
 
-// Do-while loop
-do
-    // code
-while condition
-```
+| Function        | Description                    |
+|-----------------|---------------------------------|
+| `print(x)`      | Print value with newline        |
+| `show(x)`       | Alias for `print()`             |
+| `input(prompt)` | Read a line from stdin          |
+| `str(x)`        | Convert to string                |
+| `int(x)`        | Convert to integer               |
+| `float(x)`      | Convert to float                 |
+| `len(s)`        | String / array length            |
+| `range(n)`      | Generate range `[0, n)`          |
+| `range(a, b)`   | Generate range `[a, b)`          |
 
-### 2.7 Error Handling
-```sub
-try
-    // risky code
-    var result = divide(10, 0)
-catch DivisionError as e
-    print("Error: " + e.message)
-    print(e.stackTrace)
-catch TypeError as e
-    print("Type error: " + e.message)
-finally
-    // cleanup code (always executes)
-    print("Cleanup complete")
-end
+### 2.8 Embedding Foreign Code
 
-// Throw custom errors
-throw CustomError("Something went wrong")
-```
-
-### 2.8 UI Components
-```sub
-ui.window(title="App", width=800, height=600)
-    ui.button(text="Click", onclick=handler)
-    ui.label(text="Hello")
-    ui.input(placeholder="Name", id="input1")
-    ui.slider(min=0, max=100, value=50)
-end
-```
-
-### 2.9 Embedded Languages
-
-**C++ Embedding:**
-```sub
-embed cpp
-    #include <vector>
-    #include <algorithm>
-    
-    std::vector<int> numbers = {1, 2, 3, 4, 5};
-    std::sort(numbers.begin(), numbers.end());
-    
-    // Export function to SUB
-    extern "C" int getSum() {
-        return std::accumulate(numbers.begin(), numbers.end(), 0);
-    }
-endembed
-
-// Call C++ function from SUB
-var total = getSum()
-```
-
-**C Embedding:**
 ```sub
 embed c
-    #include <stdio.h>
     #include <math.h>
-    
-    double calculate(double x) {
-        return sqrt(x) + pow(x, 2);
-    }
+    double square(double x) { return x * x; }
 endembed
 ```
 
-**Python Embedding:**
-```sub
-embed python
-    import numpy as np
-    import pandas as pd
-    
-    data = np.array([1, 2, 3, 4, 5])
-    mean_value = np.mean(data)
-endembed
-```
+`embed <lang> ... endembed` blocks are recognized by the parser for the
+`c` and `cpp` targets specifically; any other language tag is accepted
+lexically but passed through as an opaque code block rather than being
+semantically understood.
 
-**JavaScript Embedding:**
-```sub
-embed javascript
-    const items = [1, 2, 3, 4, 5];
-    const doubled = items.map(x => x * 2);
-    console.log(doubled);
-endembed
-```
+## 3. Reserved Keywords
 
-**Ruby Embedding:**
-```sub
-embed ruby
-    class Calculator
-      def add(a, b)
-        a + b
-      end
+`var`, `const`, `let`, `function`, `return`, `if`, `elif`, `else`, `for`,
+`while`, `do`, `end`, `break`, `continue`, `embed`, `endembed`, `true`,
+`false`, `null`
 
-      def multiply(a, b)
-        a * b
-      end
-    end
+The lexer also recognizes a larger set of keywords reserved for future use
+(`class`, `try`/`catch`/`finally`/`throw`, `async`/`await`/`yield`, `ui`,
+`extends`, `new`, `this`, etc.) — see [`ROADMAP.md`](ROADMAP.md) for status.
 
-    calc = Calculator.new
-    puts calc.add(5, 3)
-    puts calc.multiply(4, 7)
-endembed
-```
-
-**Rust Embedding (New):**
-```sub
-embed rust
-    fn fibonacci(n: u32) -> u32 {
-        match n {
-            0 => 0,
-            1 => 1,
-            _ => fibonacci(n-1) + fibonacci(n-2)
-        }
-    }
-endembed
-```
-
-**Go Embedding:**
-```sub
-embed go
-    package main
-    import "fmt"
-    func fibonacci(n int) int {
-        if n <= 1 { return n }
-        return fibonacci(n-1) + fibonacci(n-2)
-    }
-    func main() {
-        fmt.Println(fibonacci(10))
-    }
-endembed
-```
-
-## 3. Clean, Modern Syntax
-
-SUB utilizes a highly recognizable C-style syntax designed to be intuitive for programmers coming from JavaScript, C++, or Java. The language supports // and /* */ as well as # for comments.
-
-## 4. Cross-Platform Compilation
-
-SUB compiles to native code for multiple platforms:
-
-| Platform | Output | Framework | Performance |
-|----------|--------|-----------|-------------|
-| Android | Java/Kotlin | Android SDK | Native |
-| iOS | Swift | UIKit | Native |
-| Web | JavaScript/WASM | HTML5 | Fast |
-| Windows | C/C++ | Win32 | Native |
-| macOS | Swift/ObjC | Cocoa | Native |
-| Linux | C/C++ | GTK | Native |
-| Ruby | .rb | MRI/JRuby | Interpreted |
-
-## 5. Standard Library
-
-### 5.1 I/O Operations
-- `print(value)` - Output to console
-- `input(prompt)` - Get user input
-- `readFile(path)` - Read file contents
-- `writeFile(path, content)` - Write to file
-- `appendFile(path, content)` - Append to file
-
-### 5.2 String Operations
-- `length(str)` - String length
-- `concat(str1, str2)` - Concatenate
-- `substring(str, start, end)` - Extract substring
-- `split(str, delimiter)` - Split string
-- `replace(str, old, new)` - Replace text
-- `trim(str)` - Remove whitespace
-- `toUpper(str)` - Convert to uppercase
-- `toLower(str)` - Convert to lowercase
-
-### 5.3 Math Operations
-- `abs(x)` - Absolute value
-- `sqrt(x)` - Square root
-- `pow(x, y)` - Power
-- `floor(x)` - Floor function
-- `ceil(x)` - Ceiling function
-- `round(x)` - Round to nearest integer
-- `random()` - Random number (0-1)
-- `randomInt(min, max)` - Random integer
-- `sin(x)`, `cos(x)`, `tan(x)` - Trigonometric functions
-
-### 5.4 Array/Collection Operations
-- `push(arr, item)` - Add to end
-- `pop(arr)` - Remove from end
-- `shift(arr)` - Remove from start
-- `unshift(arr, item)` - Add to start
-- `slice(arr, start, end)` - Extract subset
-- `map(arr, func)` - Transform elements
-- `filter(arr, func)` - Filter elements
-- `reduce(arr, func, initial)` - Reduce to single value
-- `sort(arr)` - Sort array
-- `reverse(arr)` - Reverse array
-
-### 5.5 UI Operations
-- `ui.alert(message)` - Show alert
-- `ui.confirm(message)` - Show confirmation
-- `ui.prompt(message)` - Get input
-- `ui.getInput(id)` - Get input value
-- `ui.setProperty(id, prop, value)` - Set property
-- `ui.addClass(id, className)` - Add CSS class
-- `ui.removeClass(id, className)` - Remove CSS class
-
-### 5.6 Network Operations (New)
-- `http.get(url)` - HTTP GET request
-- `http.post(url, data)` - HTTP POST request
-- `http.put(url, data)` - HTTP PUT request
-- `http.delete(url)` - HTTP DELETE request
-- `ws.connect(url)` - WebSocket connection
-
-### 5.7 Date/Time Operations (New)
-- `now()` - Current timestamp
-- `date.format(timestamp, format)` - Format date
-- `date.parse(string, format)` - Parse date
-- `date.add(date, amount, unit)` - Add time
-- `date.diff(date1, date2, unit)` - Date difference
-
-## 6. Memory Management
-
-### 6.1 Automatic Memory Management
-SUB uses reference counting with cycle detection for automatic memory management:
-```sub
-var data = allocate(1000)  // Automatically managed
-// Memory freed when data goes out of scope
-```
-
-### 6.2 Manual Memory Control (Advanced)
-```sub
-var ptr = malloc(size)     // Manual allocation
-free(ptr)                  // Manual deallocation
-```
-
-## 7. Performance Features
-
-### 7.1 Inline Assembly (Advanced)
-```sub
-asm x86_64
-    mov rax, 1
-    xor rbx, rbx
-endasm
-```
-
-### 7.2 SIMD Operations
-```sub
-var vec1 = simd.vector([1, 2, 3, 4])
-var vec2 = simd.vector([5, 6, 7, 8])
-var result = simd.add(vec1, vec2)  // Parallel addition
-```
-
-### 7.3 Parallel Processing
-```sub
-parallel for i in range(1000)
-    // Runs in parallel threads
-    process(i)
-end
-```
-
-## 8. File Extension
+## 4. File Extension
 
 SUB source files use the `.sb` extension.
 
-## 9. Compiler Phases
+## 5. Compiler Phases
 
-1. **Lexical Analysis** - Tokenization
-2. **Syntax Analysis** - Parsing into AST
-3. **Semantic Analysis** - Type checking and validation
-4. **Optimization** - Multi-pass optimization
-   - Dead code elimination
-   - Constant folding
-   - Loop unrolling
-   - Inline expansion
-5. **Code Generation** - Platform-specific output
-6. **Linking** - Combine with embedded code
+1. **Lexical Analysis** — tokenization (`src/core/lexer.c`)
+2. **Syntax Analysis** — parsing into an AST (`src/core/parser_enhanced.c`)
+3. **Semantic Analysis** — type checking and validation (`src/core/semantic.c`)
+4. **Code Generation** — target-specific output (`src/codegen/`), or direct
+   tree-walking evaluation (`src/core/interpreter.c`) for `subi`
 
-## 10. Reserved Keywords
+## 6. Supported Transpilation Targets
 
-var, function, if, elif, else, for, while, do, return, end, embed, endembed, ui, import, from, try, catch, finally, throw, class, extends, implements, new, this, super, static, private, public, protected, async, await, yield, true, false, null, auto, const, let, in, of, break, continue, switch, case, default, interface, enum, namespace, using, template, typename, typedef, sizeof, typeof, instanceof
-
-## 11. Build System Integration
-
-### 11.1 Build Configuration
-```sub
-// build.sb - Build configuration file
-config
-    name: "MyApp"
-    version: "1.0.0"
-    targets: ["android", "ios", "web"]
-    optimize: true
-    minify: true
-end
-```
-
-### 11.2 Dependencies
-```sub
-dependencies
-    "math-lib": "^2.0.0"
-    "ui-toolkit": "1.5.3"
-end
-```
-
-## 12. Interoperability
-
-### 12.1 C/C++ Interop
-- Direct function calls to C/C++ libraries
-- Zero-copy data sharing
-- ABI compatibility
-
-### 12.2 Foreign Function Interface (FFI)
-```sub
-ffi
-    library: "mylib.so"
-    function calculateSum(a:int, b:int):int
-end
-
-var result = calculateSum(5, 10)
-```
-
-## 13. Debugging Features
-
-- Source-level debugging
-- Breakpoints support
-- Stack trace generation
-- Memory profiling
-- Performance profiling
+See the table in the main [README](../README.md#supported-transpilation-targets).
 
 ---
-**Version**: 2.0  
-**Last Updated**: November 2025  
-**Status**: Active Development
+**Status**: Reflects the implementation as of this document's last edit.

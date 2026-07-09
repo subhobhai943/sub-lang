@@ -1,21 +1,21 @@
 # SUB Language Compiler Makefile
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c11 -O2 -Isrc/include -Isrc/core -Isrc/codegen -Isrc/ir -I.
+CFLAGS = -Wall -Wextra -std=c11 -O2 -Isrc/include -Isrc/core -Isrc/codegen -I.
 LDFLAGS = 
 
 # Source files for the main compiler/transpiler (sub)
-COMPILER_SRC = src/compilers/sub.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/targets.c src/core/utils.c
+COMPILER_SRC = src/compilers/sub.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
 COMPILER_OBJ = $(COMPILER_SRC:.c=.o)
 COMPILER_TARGET = sub
 
 # Source files for the native compiler (subc) - now uses C backend + gcc
-NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/targets.c src/core/utils.c
+NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
 NATIVE_COMPILER_OBJ = $(NATIVE_COMPILER_SRC:.c=.o)
 NATIVE_COMPILER_TARGET = subc
 
 # Source files for the interpreter (subi)
-INTERP_SRC = src/compilers/subi.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/core/utils.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/targets.c
+INTERP_SRC = src/compilers/subi.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/core/utils.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c
 INTERP_OBJ = $(INTERP_SRC:.c=.o)
 INTERP_TARGET = subi
 

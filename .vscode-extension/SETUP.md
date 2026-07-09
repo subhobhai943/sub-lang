@@ -28,7 +28,7 @@ This guide will help you set up syntax highlighting for SUB Language in various 
 
 2. **Install the extension**:
    ```bash
-   code --install-extension sub-language-support-1.0.0.vsix
+   code --install-extension sub-language-support-1.1.0.vsix
    ```
 
 3. **Reload VS Code** and open any `.sb` file!
@@ -68,24 +68,24 @@ Create a test file `test.sb`:
 
 ```sub
 # This is a comment
-#var message = "Hello, SUB Language!"
-#var count = 42
+var message = "Hello, SUB Language!"
+var count = 42
 
-#function greet(name)
-    #if name != ""
-        #print("Hello, " + name + "!")
-    #else
-        #print("Hello, World!")
-    #end
-#end
+function greet(name) {
+    if name != "" {
+        print("Hello, " + name + "!")
+    } else {
+        print("Hello, World!")
+    }
+}
 
-#for i in range(5)
-    #greet("User " + i)
-#end
+for i in range(5) {
+    greet("User " + i)
+}
 
-#embed ruby
-    puts "This is Ruby!"
-#end
+embed python
+    print("This is Python!")
+endembed
 ```
 
 Open this file in VS Code and you should see:
@@ -172,8 +172,8 @@ When you push `.sb` files to GitHub:
    endif
 
    " Keywords
-   syn keyword subKeyword #var #function #if #elif #else #for #while #break #continue #return #print #input #end #import #class #embed
-   syn keyword subBoolean true false null nil True False None
+   syn keyword subKeyword var const let function fn def if elif else for while break continue return print show input end import class embed endembed
+   syn keyword subBoolean true false null
    syn keyword subType int float string bool list dict array
 
    " Strings
@@ -188,7 +188,7 @@ When you push `.sb` files to GitHub:
    syn match subBinary "\<0[bB][01]\+\>"
 
    " Comments
-   syn match subComment "#\(\(var\|function\|if\|elif\|else\|for\|while\|end\)\)\@!.*$"
+   syn match subComment "#.*$"
 
    " Operators
    syn match subOperator "+\|-\|\*\|/\|%\|==\|!=\|<\|>\|<=\|>="
@@ -258,7 +258,7 @@ npm --version   # v6 or higher
    vsce package
    ```
 
-   This creates `sub-language-support-1.0.0.vsix`
+   This creates `sub-language-support-1.1.0.vsix`
 
 5. **Install locally**:
    ```bash
@@ -340,7 +340,7 @@ In `sub.tmLanguage.json`:
 ```json
 {
   "name": "keyword.control.sub",
-  "match": "\\b(#newkeyword)\\b"
+  "match": "\\b(newkeyword)\\b"
 }
 ```
 
@@ -352,8 +352,8 @@ In `.vscode-extension/snippets/sub.json`:
 "Snippet Name": {
   "prefix": "shortcut",
   "body": [
-    "#code ${1:placeholder}",
-    "#end"
+    "code ${1:placeholder}",
+    "end"
   ],
   "description": "Description"
 }

@@ -23,13 +23,13 @@
   ],
   "folding": {
     "markers": {
-      "start": "^\\s*#(function|if|for|while|class)",
-      "end": "^\\s*#end"
+      "start": "^\\s*\\b(function|if|for|while|class)\\b.*\\{?\\s*$",
+      "end": "^\\s*(\\}|end)\\s*$"
     }
   },
   "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\`\\~\\!\\@\\#\\%\\^\\&\\*\\(\\)\\-\\=\\+\\[\\{\\]\\}\\\\\\|\\;\\:\\'\\\"\\,\\.\\<\\>\\/\\?\\s]+)",
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*#(function|if|elif|else|for|while|class).*$",
-    "decreaseIndentPattern": "^\\s*#end\\s*$"
+    "increaseIndentPattern": "^\\s*\\b(function|if|elif|else|for|while|class)\\b.*$",
+    "decreaseIndentPattern": "^\\s*(\\}|end|elif\\b|else\\b)"
   }
 }

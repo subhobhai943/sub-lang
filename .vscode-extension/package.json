@@ -2,7 +2,7 @@
   "name": "sub-language-support",
   "displayName": "SUB Language Support",
   "description": "Syntax highlighting and language support for SUB Programming Language",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "subhobhai943",
   "icon": "images/icon.png",
   "repository": {

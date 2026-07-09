@@ -58,6 +58,7 @@ output_*
 
 # Generated transpiled files (allow in examples/tests)
 *.py
+test_hello.c
 !.github/scripts/opencode.py
 *.js
 *.rb

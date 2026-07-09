@@ -2,145 +2,136 @@
   "Variable Declaration": {
     "prefix": "var",
     "body": [
-      "#var ${1:name} = ${2:value}"
+      "var ${1:name} = ${2:value}"
     ],
     "description": "Declare a variable"
   },
   "Function Declaration": {
     "prefix": "func",
     "body": [
-      "#function ${1:name}(${2:params})",
+      "function ${1:name}(${2:params}) {",
       "    ${3:# function body}",
-      "#end"
+      "}"
     ],
     "description": "Declare a function"
   },
   "If Statement": {
     "prefix": "if",
     "body": [
-      "#if ${1:condition}",
+      "if ${1:condition} {",
       "    ${2:# code}",
-      "#end"
+      "}"
     ],
     "description": "If statement"
   },
   "If-Else Statement": {
     "prefix": "ifelse",
     "body": [
-      "#if ${1:condition}",
+      "if ${1:condition} {",
       "    ${2:# code}",
-      "#else",
+      "} else {",
       "    ${3:# code}",
-      "#end"
+      "}"
     ],
     "description": "If-else statement"
   },
   "If-Elif-Else Statement": {
     "prefix": "ifelif",
     "body": [
-      "#if ${1:condition}",
+      "if ${1:condition} {",
       "    ${2:# code}",
-      "#elif ${3:condition}",
+      "} elif ${3:condition} {",
       "    ${4:# code}",
-      "#else",
+      "} else {",
       "    ${5:# code}",
-      "#end"
+      "}"
     ],
     "description": "If-elif-else statement"
   },
   "For Loop": {
     "prefix": "for",
     "body": [
-      "#for ${1:i} in range(${2:n})",
+      "for ${1:i} in range(${2:n}) {",
       "    ${3:# code}",
-      "#end"
+      "}"
     ],
     "description": "For loop"
   },
   "While Loop": {
     "prefix": "while",
     "body": [
-      "#while ${1:condition}",
+      "while ${1:condition} {",
       "    ${2:# code}",
-      "#end"
+      "}"
     ],
     "description": "While loop"
   },
   "Print Statement": {
     "prefix": "print",
     "body": [
-      "#print(${1:value})"
+      "print(${1:value})"
     ],
     "description": "Print to console"
   },
   "Input Statement": {
     "prefix": "input",
     "body": [
-      "#var ${1:name} = #input(${2:\"prompt\"})"
+      "var ${1:name} = input(${2:\"prompt\"})"
     ],
     "description": "Get user input"
   },
   "Class Declaration": {
     "prefix": "class",
     "body": [
-      "#class ${1:ClassName}",
+      "class ${1:ClassName}",
       "    ${2:# class body}",
-      "#end"
+      "end"
     ],
     "description": "Declare a class"
   },
   "Import Statement": {
     "prefix": "import",
     "body": [
-      "#import ${1:module}"
+      "import ${1:module}"
     ],
     "description": "Import a module"
   },
   "Embed Python": {
     "prefix": "embedpy",
     "body": [
-      "#embed python",
+      "embed python",
       "    ${1:# Python code here}",
-      "#end"
+      "endembed"
     ],
     "description": "Embed Python code"
   },
   "Embed JavaScript": {
     "prefix": "embedjs",
     "body": [
-      "#embed javascript",
+      "embed javascript",
       "    ${1:// JavaScript code here}",
-      "#end"
+      "endembed"
     ],
     "description": "Embed JavaScript code"
-  },
-  "Embed Ruby": {
-    "prefix": "embedrb",
-    "body": [
-      "#embed ruby",
-      "    ${1:# Ruby code here}",
-      "#end"
-    ],
-    "description": "Embed Ruby code"
   },
   "Return Statement": {
     "prefix": "return",
     "body": [
-      "#return ${1:value}"
+      "return ${1:value}"
     ],
     "description": "Return from function"
   },
   "Break Statement": {
     "prefix": "break",
     "body": [
-      "#break"
+      "break"
     ],
     "description": "Break from loop"
   },
   "Continue Statement": {
     "prefix": "continue",
     "body": [
-      "#continue"
+      "continue"
     ],
     "description": "Continue to next iteration"
   }

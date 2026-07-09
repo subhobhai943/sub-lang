@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include "codegen_cpp.h"
 #include "logo.h"
 #include "windows_compat.h"
 
@@ -164,7 +165,7 @@ static char* generate_language_code(const char *name, ASTNode *ast, const char *
 
     /* C++ target → use the dedicated C++ codegen */
     if (strcasecmp(name, "cpp") == 0 || strcasecmp(name, "c++") == 0) {
-        return codegen_generate_cpp(ast, PLATFORM_LINUX);
+        return codegen_cpp_generate(ast, source);
     }
 
     /* TypeScript → same codegen as JavaScript */

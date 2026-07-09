@@ -5,11 +5,8 @@ This directory contains the core components of the SUB language compiler.
 ## Files
 
 - lexer.c - Tokenization and lexical analysis
-- parser.c - Basic parser implementation
-- parser_enhanced.c - Enhanced parser with additional features
+- parser_enhanced.c - Recursive-descent parser (produces the AST used by every tool)
 - semantic.c - Semantic analysis and symbol table management
-- type_system.c - Type system implementation
-- type_system.h - Type system header and definitions
-- error_handler.c - Error handling implementation
-- error_handler.h - Error handling header
+- type_system.c / type_system.h - Type system implementation
+- interpreter.c / interpreter.h - Tree-walking evaluator used by `subi`
 - utils.c - Utility functions for the compiler

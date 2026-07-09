@@ -297,7 +297,6 @@ void class_def_free(ClassDef *cls);
 
 // Code Generation
 char* codegen_generate(ASTNode *ast, Platform platform);
-char* codegen_generate_cpp(ASTNode *ast, Platform platform);
 char* codegen_generate_c(ASTNode *ast, Platform platform);
 char* codegen_embed_cpp(const char *cpp_code);
 char* codegen_embed_c(const char *c_code);

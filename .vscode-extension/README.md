@@ -1,6 +1,6 @@
 # SUB Language Support for VS Code
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/subhobhai943/sub-lang)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/subhobhai943/sub-lang)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/subhobhai943/sub-lang/blob/main/LICENSE)
 
 Official VS Code extension providing syntax highlighting and language support for the SUB Programming Language.
@@ -9,7 +9,7 @@ Official VS Code extension providing syntax highlighting and language support fo
 
 ### ✨ Syntax Highlighting
 
-- **Keywords**: `#var`, `#function`, `#if`, `#for`, `#while`, `#end`, etc.
+- **Keywords**: `var`, `function`, `if`, `for`, `while`, `end`, etc.
 - **Strings**: Double and single-quoted strings with escape sequences
 - **Numbers**: Integers, floats, hex, binary, and octal
 - **Comments**: Line comments starting with `#`
@@ -35,7 +35,6 @@ Quick snippets for common SUB constructs:
 - `import` - Import statement
 - `embedpy` - Embed Python code
 - `embedjs` - Embed JavaScript code
-- `embedrb` - Embed Ruby code
 - `return` - Return statement
 - `break` - Break statement
 - `continue` - Continue statement
@@ -71,7 +70,7 @@ cd .vscode-extension
 npm install
 npm install -g vsce
 vsce package
-code --install-extension sub-language-support-1.0.0.vsix
+code --install-extension sub-language-support-1.1.0.vsix
 ```
 
 ## Usage
@@ -85,23 +84,23 @@ code --install-extension sub-language-support-1.0.0.vsix
 
 ```sub
 # Hello World in SUB
-#var greeting = "Hello, World!"
+var greeting = "Hello, World!"
 
-#function greet(name)
-    #print("Hello, " + name + "!")
-#end
+function greet(name) {
+    print("Hello, " + name + "!")
+}
 
-#greet("Developer")
+greet("Developer")
 
 # For loop example
-#for i in range(5)
-    #print(i)
-#end
+for i in range(5) {
+    print(i)
+}
 
-# Embedded Ruby code
-#embed ruby
-    puts "This is Ruby code!"
-#end
+# Embedded Python code
+embed python
+    print("This is Python code!")
+endembed
 ```
 
 ## About SUB Language

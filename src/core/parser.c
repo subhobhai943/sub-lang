@@ -1,1 +1,0 @@
-$(cat /tmp/file_0.txt)

@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include "codegen_cpp.h"
 #include "logo.h"
 #include "windows_compat.h"
 #include <stdio.h>
@@ -89,7 +90,7 @@ int compile_to_native(const char *input_file, const char *output_name,
 
     char tmp_c[512];
 #ifdef _WIN32
-    snprintf(tmp_c, sizeof(tmp_c), "sub_tmp_%d.c", (int)GetCurrentProcessId());
+    snprintf(tmp_c, sizeof(tmp_c), "sub_tmp_%d.c", (int)_getpid());
 #else
     snprintf(tmp_c, sizeof(tmp_c), "/tmp/sub_tmp_%d.c", (int)getpid());
 #endif
@@ -210,7 +211,7 @@ void write_file(const char *filename, const char *content) {
 
 static char* generate_language_code_native(const char *name, ASTNode *ast, const char *source) {
     if (strcasecmp(name, "c") == 0) return codegen_generate(ast, PLATFORM_LINUX);
-    if (strcasecmp(name, "cpp") == 0 || strcasecmp(name, "c++") == 0) return codegen_generate_cpp(ast, PLATFORM_LINUX);
+    if (strcasecmp(name, "cpp") == 0 || strcasecmp(name, "c++") == 0) return codegen_cpp_generate(ast, source);
     if (strcasecmp(name, "typescript") == 0 || strcasecmp(name, "ts") == 0) return codegen_javascript(ast, source);
     if (strcasecmp(name, "python") == 0     || strcasecmp(name, "py") == 0)     return codegen_python(ast, source);
     if (strcasecmp(name, "javascript") == 0 || strcasecmp(name, "js") == 0)     return codegen_javascript(ast, source);

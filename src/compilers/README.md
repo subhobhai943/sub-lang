@@ -4,7 +4,6 @@ This directory contains the main compiler driver programs.
 
 ## Files
 
-- sub.c - Standard SUB compiler
-- sub_multilang.c - Multi-language transpiler
-- sub_native.c - Native compiler (older version)
-- sub_native_compiler.c - Native compiler (newer version)
+- sub.c - `sub`, the transpiler (any target from `src/codegen/`)
+- sub_native.c - `subc`, the native compiler (transpiles to C, then invokes gcc/clang)
+- subi.c - `subi`, the interpreter (drives `src/core/interpreter.c` directly)

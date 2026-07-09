@@ -619,3 +619,9 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
     sb_free(main_sb);
     return sb_to_string(sb);
 }
+
+char* codegen_cpp_generate(ASTNode *ast, const char *source) {
+    CPPCodegenOptions options;
+    codegen_cpp_get_default_options(CPP_VER_17, &options);
+    return codegen_cpp(ast, source, &options);
+}

@@ -33,35 +33,46 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
           echo "Found $(echo "$sb_files" | wc -l) .sb files"
       
+      - name: Build sub compiler
+        run: make compiler
+
       - name: Validate SUB syntax
         run: |
           echo "Validating SUB file syntax..."
+          # Files under these paths are intentionally invalid (negative
+          # test cases for the semantic checker) or are pre-existing,
+          # separately-tracked stdlib issues; they're reported but don't
+          # fail this job.
+          non_blocking='test_type_error|/stdlib/'
           errors=0
-          
+
           while IFS= read -r file; do
             if [ -z "$file" ]; then continue; fi
-            
+
             echo "Checking: $file"
-            
+
             # Check for basic syntax issues
             if grep -q '[^[:print:][:space:]]' "$file"; then
               echo "❌ Warning: Non-printable characters found in $file"
-              errors=$((errors + 1))
             fi
-            
-            # Check for unmatched #end statements
-            opens=$(grep -c "#\(function\|if\|for\|while\|embed\)" "$file" || true)
-            ends=$(grep -c "#end" "$file" || true)
-            
-            if [ $opens -gt 0 ] && [ $opens -ne $ends ]; then
-              echo "⚠️  Warning: Possible unmatched #end in $file (opens: $opens, ends: $ends)"
+
+            # Parse+check the file for real instead of pattern-matching
+            # source text against a stale keyword dialect.
+            if ! ./sub "$file" c >/dev/null 2>&1; then
+              if echo "$file" | grep -qE "$non_blocking"; then
+                echo "⚠️  $file failed validation (known, non-blocking)"
+              else
+                echo "❌ Error: $file failed to parse/validate"
+                errors=$((errors + 1))
+              fi
+            else
+              echo "✅ $file validated"
             fi
-            
-            echo "✅ $file validated"
           done <<< "${{ steps.find-files.outputs.files }}"
-          
+
           if [ $errors -gt 0 ]; then
-            echo "Found $errors validation warnings"
+            echo "Found $errors validation errors"
+            exit 1
           else
             echo "All files validated successfully!"
           fi

@@ -700,7 +700,7 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_CALL_EXPR:
             indent_code(sb, indent);
             // Map print to console.log
-            if (node->value && strcmp(node->value, "print") == 0) {
+            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) {
                 sb_append(sb, "console.log(");
                 if (node->child_count > 0) generate_expr_js(sb, node->children[0]);
                 sb_append(sb, ")");
@@ -797,7 +797,7 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
             break;
         case AST_CALL_EXPR: {
             const char *fn = node->value ? node->value : "func";
-            if (strcmp(fn, "print") == 0) {
+            if (strcmp(fn, "print") == 0 || strcmp(fn, "show") == 0) {
                 sb_append(sb, "System.out.println(");
                 if (node->child_count > 0) generate_expr_java(sb, node->children[0]);
                 sb_append(sb, ")");
@@ -1067,7 +1067,7 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, " %s ", node->value ? node->value : "+");
             generate_expr_swift(sb, node->right); sb_append(sb, ")"); break;
         case AST_CALL_EXPR:
-            if (node->value && strcmp(node->value, "print") == 0) sb_append(sb, "print(");
+            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) sb_append(sb, "print(");
             else if (node->value) sb_append(sb, "%s(", node->value);
             else { generate_expr_swift(sb, node->left); sb_append(sb, "("); }
             for (int i = 0; i < node->child_count; i++) {
@@ -1241,7 +1241,7 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, " %s ", node->value ? node->value : "+");
             generate_expr_kotlin(sb, node->right); sb_append(sb, ")"); break;
         case AST_CALL_EXPR:
-            if (node->value && strcmp(node->value, "print") == 0) sb_append(sb, "println(");
+            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) sb_append(sb, "println(");
             else if (node->value) sb_append(sb, "%s(", node->value);
             else { generate_expr_kotlin(sb, node->left); sb_append(sb, "("); }
             for (int i = 0; i < node->child_count; i++) {
@@ -1456,7 +1456,7 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
 
         case AST_CALL_EXPR: {
             const char *func_name = node->value ? node->value : "func";
-            if (strcmp(func_name, "print") == 0) {
+            if (strcmp(func_name, "print") == 0 || strcmp(func_name, "show") == 0) {
                 sb_append(sb, "puts");
                 if (node->child_count > 0) {
                     sb_append(sb, " ");
@@ -1739,7 +1739,7 @@ static void indent_go(StringBuilder *sb, int level) {
 static bool ast_needs_fmt(ASTNode *node) {
     if (!node) return false;
     if (node->type == AST_CALL_EXPR && node->value &&
-        strcmp(node->value, "print") == 0)
+        (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0))
         return true;
     if (ast_needs_fmt(node->left)) return true;
     if (ast_needs_fmt(node->right)) return true;
@@ -1818,7 +1818,7 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
 
         case AST_CALL_EXPR: {
             const char *func_name = node->value ? node->value : "fn";
-            if (strcmp(func_name, "print") == 0) {
+            if (strcmp(func_name, "print") == 0 || strcmp(func_name, "show") == 0) {
                 sb_append(sb, "fmt.Println(");
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");

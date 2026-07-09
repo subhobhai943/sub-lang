@@ -32,6 +32,11 @@ typedef struct {
 /* Generate C++ code from AST with version support */
 char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options);
 
+/* Generate C++17 code from AST using default options — matches the
+   (ASTNode*, const char*) signature shared by the other codegen_* backends,
+   for use directly from the transpiler/native-compiler drivers. */
+char* codegen_cpp_generate(ASTNode *ast, const char *source);
+
 /* Get default options for a C++ version */
 void codegen_cpp_get_default_options(CPPVersion version, CPPCodegenOptions *options);
 

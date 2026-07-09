@@ -27,7 +27,7 @@
 SUB is a modern, easy-to-learn compiled programming language that:
 
 - **Compiles to native machine code** via a C backend (GCC/Clang)
-- **Transpiles** to 10+ languages: Python, C, C++, JavaScript, TypeScript, Rust, Go, Java, Kotlin, Swift, Lua, Ruby
+- **Transpiles** to Python, C, C++, JavaScript, TypeScript, Rust, Go, Java, Kotlin, Swift, Assembly, CSS, and Ruby
 - **Interprets** code directly with the built-in SUBI interpreter
 - Has a **clean, minimal syntax** — no semicolons required, optional `{}` or `end` blocks
 
@@ -43,11 +43,11 @@ make
 
 This builds three tools:
 
-| Tool    | Description                                    |
-|---------|------------------------------------------------|
-| `subc`  | The **compiler** — produces a native binary    |
-| `subcc` | The **transpiler** — converts to another language |
-| `subi`  | The **interpreter** — runs `.sb` files directly |
+| Tool   | Description                                        |
+|--------|-----------------------------------------------------|
+| `sub`  | The **transpiler** — converts to another language  |
+| `subc` | The **native compiler** — produces a native binary |
+| `subi` | The **interpreter** — runs `.sb` files directly     |
 
 ---
 
@@ -63,22 +63,20 @@ This builds three tools:
 ### Transpile to another language
 
 ```bash
-./subcc hello.sb python            # produces hello.py
-./subcc hello.sb c                 # produces hello.c
-./subcc hello.sb js                # produces hello.js
-./subcc hello.sb rust              # produces hello.rs
-./subcc hello.sb go                # produces hello.go
-./subcc hello.sb ts                # produces hello.ts
-./subcc hello.sb java              # produces hello.java
-./subcc hello.sb kotlin            # produces hello.kt
-./subcc hello.sb swift             # produces hello.swift
-./subcc hello.sb lua               # produces hello.lua
-./subcc hello.sb ruby              # produces hello.rb
-./subcc hello.sb cpp               # produces hello.cpp
+./sub hello.sb python            # produces hello.py
+./sub hello.sb c                 # produces hello.c
+./sub hello.sb js                # produces hello.js
+./sub hello.sb rust               # produces hello.rs
+./sub hello.sb go                # produces hello.go
+./sub hello.sb ts                 # produces hello.ts
+./sub hello.sb java                # produces hello.java
+./sub hello.sb kotlin              # produces hello.kt
+./sub hello.sb swift               # produces hello.swift
+./sub hello.sb ruby                # produces hello.rb
 
 # Custom output name:
-./subcc first.sb python first      # produces first.py
-./subcc first.sb c    mylib        # produces mylib.c
+./sub first.sb python first      # produces first.py
+./sub first.sb c    mylib        # produces mylib.c
 ```
 
 ### Interpret directly
@@ -256,17 +254,18 @@ for i in range(10) {
 source.sb
     │
     ├─ Lexer       (src/core/lexer.c)
-    ├─ Parser      (src/core/parser.c)       ← recursion depth guard
+    ├─ Parser      (src/core/parser_enhanced.c)
     ├─ Semantic    (src/core/semantic.c)
     │
-    ├─ Compiler    (src/compilers/sub_native_compiler.c)
-    │       └─ C backend → gcc/clang → native binary
+    ├─ subc — native compiler (src/compilers/sub_native.c)
+    │       └─ C backend (src/codegen/codegen.c) → gcc/clang → native binary
     │
-    ├─ Transpiler  (src/compilers/sub_multilang.c)
+    ├─ sub — transpiler (src/compilers/sub.c)
+    │       └─ src/codegen/codegen_multilang.c + codegen_rust.c
     │       └─ generates <input-stem>.<ext> automatically
     │
-    └─ Interpreter (src/core/interpreter.c + src/compilers/subi.c)
-            └─ tree-walk evaluator with all built-ins
+    └─ subi — interpreter (src/compilers/subi.c)
+            └─ tree-walk evaluator (src/core/interpreter.c) with all built-ins
 ```
 
 ---
@@ -285,7 +284,8 @@ source.sb
 | Java       | `java`     | `.java`         |
 | Kotlin     | `kotlin`   | `.kt`           |
 | Swift      | `swift`    | `.swift`        |
-| Lua        | `lua`      | `.lua`          |
+| Assembly   | `asm`      | `.asm`          |
+| CSS        | `css`      | `.css`          |
 | Ruby       | `ruby`     | `.rb`           |
 
 ---
@@ -294,7 +294,7 @@ source.sb
 
 - GCC or Clang (for native compilation)
 - GNU Make
-- Linux / macOS / Windows (WSL recommended on Windows)
+- Linux / macOS / Windows (via MSYS2/MinGW or Git Bash — see CI config in `.github/workflows/build.yml`; WSL also works)
 
 ---
 

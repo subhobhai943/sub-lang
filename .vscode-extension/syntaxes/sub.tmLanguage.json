@@ -33,15 +33,7 @@
       "patterns": [
         {
           "name": "comment.line.number-sign.sub",
-          "match": "(^\\s*)?(#)(?!var|function|if|elif|else|for|while|break|continue|return|print|input|end|import|class|embed).*$\\n?",
-          "captures": {
-            "1": {
-              "name": "punctuation.whitespace.comment.leading.sub"
-            },
-            "2": {
-              "name": "punctuation.definition.comment.sub"
-            }
-          }
+          "match": "#.*$"
         }
       ]
     },
@@ -49,23 +41,23 @@
       "patterns": [
         {
           "name": "keyword.control.sub",
-          "match": "\\b(#if|#elif|#else|#for|#while|#break|#continue|#return|#end)\\b"
+          "match": "\\b(if|elif|else|for|while|do|end|break|continue|return|try|catch|finally|throw)\\b"
         },
         {
           "name": "keyword.declaration.sub",
-          "match": "\\b(#var|#function|#class|#import)\\b"
+          "match": "\\b(var|const|let|function|fn|def|class|extends|implements|import)\\b"
         },
         {
           "name": "keyword.other.sub",
-          "match": "\\b(#print|#input|#embed)\\b"
+          "match": "\\b(print|show|input|embed|endembed|new|this|super|static|private|public|protected|async|await|yield|in|range)\\b"
         },
         {
           "name": "constant.language.sub",
-          "match": "\\b(true|false|null|nil|True|False|None)\\b"
+          "match": "\\b(true|false|null)\\b"
         },
         {
           "name": "support.type.sub",
-          "match": "\\b(int|float|string|bool|list|dict|array)\\b"
+          "match": "\\b(int|float|string|bool|auto|void|list|dict|array)\\b"
         }
       ]
     },
@@ -123,7 +115,7 @@
       "patterns": [
         {
           "name": "entity.name.function.sub",
-          "match": "(?<=#function\\s+)\\w+"
+          "match": "(?<=\\b(function|fn|def)\\s)\\w+"
         },
         {
           "name": "entity.name.function.call.sub",
@@ -135,7 +127,7 @@
       "patterns": [
         {
           "name": "variable.other.declaration.sub",
-          "match": "(?<=#var\\s+)\\w+"
+          "match": "(?<=\\b(var|const|let)\\s)\\w+"
         },
         {
           "name": "variable.other.sub",
@@ -167,8 +159,8 @@
       "patterns": [
         {
           "name": "meta.embedded.block.python",
-          "begin": "#embed\\s+python",
-          "end": "#end",
+          "begin": "\\bembed\\s+python\\b",
+          "end": "\\bendembed\\b",
           "patterns": [
             {
               "include": "source.python"
@@ -177,8 +169,8 @@
         },
         {
           "name": "meta.embedded.block.javascript",
-          "begin": "#embed\\s+javascript",
-          "end": "#end",
+          "begin": "\\bembed\\s+javascript\\b",
+          "end": "\\bendembed\\b",
           "patterns": [
             {
               "include": "source.js"
@@ -186,19 +178,9 @@
           ]
         },
         {
-          "name": "meta.embedded.block.java",
-          "begin": "#embed\\s+java",
-          "end": "#end",
-          "patterns": [
-            {
-              "include": "source.java"
-            }
-          ]
-        },
-        {
           "name": "meta.embedded.block.c",
-          "begin": "#embed\\s+c",
-          "end": "#end",
+          "begin": "\\bembed\\s+c\\b",
+          "end": "\\bendembed\\b",
           "patterns": [
             {
               "include": "source.c"
@@ -206,19 +188,29 @@
           ]
         },
         {
-          "name": "meta.embedded.block.ruby",
-          "begin": "#embed\\s+ruby",
-          "end": "#end",
+          "name": "meta.embedded.block.cpp",
+          "begin": "\\bembed\\s+cpp\\b",
+          "end": "\\bendembed\\b",
           "patterns": [
             {
-              "include": "source.ruby"
+              "include": "source.cpp"
+            }
+          ]
+        },
+        {
+          "name": "meta.embedded.block.rust",
+          "begin": "\\bembed\\s+rust\\b",
+          "end": "\\bendembed\\b",
+          "patterns": [
+            {
+              "include": "source.rust"
             }
           ]
         },
         {
           "name": "meta.embedded.block.generic",
-          "begin": "#embed\\s+\\w+",
-          "end": "#end",
+          "begin": "\\bembed\\s+\\w+\\b",
+          "end": "\\bendembed\\b",
           "contentName": "meta.embedded.content.sub"
         }
       ]
