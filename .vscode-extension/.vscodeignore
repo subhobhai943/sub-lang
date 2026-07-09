@@ -1,0 +1,8 @@
+.vscode/**
+.vscode-test/**
+node_modules/**
+*.map
+.gitignore
+SETUP.md
+images/icon_source.jpg
+package-lock.json

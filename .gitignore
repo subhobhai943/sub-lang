@@ -1,3 +1,8 @@
+# VS Code extension build artifacts
+*.vsix
+.vscode-extension/images/icon_source.*
+.vscode-extension/package-lock.json
+
 # Compiled binaries and executables
 subc-native
 subc-native-*
