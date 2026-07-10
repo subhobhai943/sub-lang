@@ -6,27 +6,38 @@ on:
 
 jobs:
   build-unix:
-    name: build (${{ matrix.os }} / ${{ matrix.arch }})
+    name: build (${{ matrix.platform }} / ${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+            platform: linux
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+          - os: macos-13
+            platform: macos
             arch: x86_64
           - os: macos-26
+            platform: macos
             arch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Build compiler + transpiler + interpreter
+      - name: Build all tools
         run: make all
-      - name: Smoke test compiler + transpiler
+      - name: Smoke test transpiler
         run: |
-          ./sub tests/test_simple.sb linux
-          test -f test_simple.c
-      - name: Build interpreter
-        run: make interpreter
+          ./sub tests/test_simple.sb python
+      - name: Smoke test native compiler
+        run: |
+          echo 'var x = 10' > /tmp/test_native.sb
+          echo 'print(x)' >> /tmp/test_native.sb
+          ./subc /tmp/test_native.sb /tmp/test_native_out
+          /tmp/test_native_out
       - name: Smoke test interpreter
         run: |
           echo 'var x = 10' > /tmp/test_interp.sb
@@ -34,14 +45,8 @@ jobs:
           ./subi /tmp/test_interp.sb
 
   build-windows:
-    name: build (windows / ${{ matrix.arch }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            arch: x86_64
+    name: build (windows / x86_64)
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,11 +61,17 @@ jobs:
       - name: Build all tools
         shell: msys2 {0}
         run: make all
-      - name: Smoke test compiler + transpiler
+      - name: Smoke test transpiler
         shell: msys2 {0}
         run: |
-          ./sub.exe tests/test_simple.sb linux
-          test -f test_simple.c
+          ./sub.exe tests/test_simple.sb python
+      - name: Smoke test native compiler
+        shell: msys2 {0}
+        run: |
+          echo 'var x = 10' > test_native.sb
+          echo 'print(x)' >> test_native.sb
+          ./subc.exe test_native.sb test_native_out
+          ./test_native_out.exe
       - name: Smoke test interpreter
         shell: msys2 {0}
         run: |

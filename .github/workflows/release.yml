@@ -13,96 +13,124 @@ on:
         type: string
 
 jobs:
-  build-and-release:
+  build-unix:
+    name: build (${{ matrix.platform }}-${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+            platform: linux
             arch: x86_64
-            compiler_name: sub
-            native_name: subc
-            interp_name: subi
-            asset_name: sub-linux-x86_64
-          - os: macos-26
+            binary_suffix: ''
+          - os: ubuntu-24.04-arm
+            platform: linux
             arch: arm64
-            compiler_name: sub
-            native_name: subc
-            interp_name: subi
-            asset_name: sub-macos-arm64
-          - os: windows-latest
+            binary_suffix: ''
+          - os: macos-13
+            platform: macos
             arch: x86_64
-            compiler_name: sub.exe
-            native_name: subc.exe
-            interp_name: subi.exe
-            asset_name: sub-windows-x86_64
+            binary_suffix: ''
+          - os: macos-26
+            platform: macos
+            arch: arm64
+            binary_suffix: ''
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup build environment (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Setup build environment
         run: |
           if [ "$RUNNER_OS" == "Linux" ]; then
             sudo apt-get update
             sudo apt-get install -y gcc make
           elif [ "$RUNNER_OS" == "macOS" ]; then
-            brew install gcc make
+            brew install gcc make || true
           fi
 
-      - name: Setup MSYS2 (Windows)
-        if: runner.os == 'Windows'
+      - name: Build all tools
+        run: |
+          make clean
+          make all
+
+      - name: Smoke test all tools
+        run: |
+          echo 'var x = 42' > /tmp/smoke.sb
+          echo 'print(x)' >> /tmp/smoke.sb
+          ./sub /tmp/smoke.sb python
+          ./subc /tmp/smoke.sb /tmp/smoke_bin
+          /tmp/smoke_bin
+          ./subi /tmp/smoke.sb
+
+      - name: Package release archive
+        run: |
+          ARCHIVE_NAME="sub-${{ matrix.platform }}-${{ matrix.arch }}"
+          mkdir -p "${ARCHIVE_NAME}"
+          cp sub subc subi "${ARCHIVE_NAME}/"
+          cp LICENSE README.md "${ARCHIVE_NAME}/"
+          tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}/"
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: sub-${{ matrix.platform }}-${{ matrix.arch }}
+          path: sub-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          retention-days: 5
+
+  build-windows:
+    name: build (windows-x86_64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           update: true
           install: >-
             mingw-w64-x86_64-gcc
             make
+            zip
           msystem: MINGW64
 
-      - name: Build all tools (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          make clean
-          make all
-          cp ${{ matrix.compiler_name }} ${{ matrix.asset_name }}
-          cp ${{ matrix.native_name }} ${{ matrix.asset_name }}-native
-          cp ${{ matrix.interp_name }} ${{ matrix.asset_name }}-interp
-
-      - name: Build all tools (Windows)
-        if: runner.os == 'Windows'
+      - name: Build all tools
         shell: msys2 {0}
         run: |
           make clean
           make all
-          cp ${{ matrix.compiler_name }} ${{ matrix.asset_name }}.exe
-          cp ${{ matrix.native_name }} ${{ matrix.asset_name }}-native.exe
-          cp ${{ matrix.interp_name }} ${{ matrix.asset_name }}-interp.exe
 
-      - name: Upload compiler artifact
+      - name: Smoke test all tools
+        shell: msys2 {0}
+        run: |
+          echo 'var x = 42' > smoke.sb
+          echo 'print(x)' >> smoke.sb
+          ./sub.exe smoke.sb python
+          ./subc.exe smoke.sb smoke_bin
+          ./smoke_bin.exe
+          ./subi.exe smoke.sb
+
+      - name: Package release archive
+        shell: msys2 {0}
+        run: |
+          ARCHIVE_NAME="sub-windows-x86_64"
+          mkdir -p "${ARCHIVE_NAME}"
+          cp sub.exe subc.exe subi.exe "${ARCHIVE_NAME}/"
+          cp LICENSE README.md "${ARCHIVE_NAME}/"
+          zip -r "${ARCHIVE_NAME}.zip" "${ARCHIVE_NAME}/"
+
+      - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}-compiler
-          path: ${{ matrix.asset_name }}${{ runner.os == 'Windows' && '.exe' || '' }}
-          retention-days: 5
-
-      - name: Upload native compiler artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset_name }}-native
-          path: ${{ matrix.asset_name }}-native${{ runner.os == 'Windows' && '.exe' || '' }}
-          retention-days: 5
-
-      - name: Upload interpreter artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset_name }}-interp
-          path: ${{ matrix.asset_name }}-interp${{ runner.os == 'Windows' && '.exe' || '' }}
+          name: sub-windows-x86_64
+          path: sub-windows-x86_64.zip
           retention-days: 5
 
   create-release:
-    needs: build-and-release
+    needs: [build-unix, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -118,10 +146,19 @@ jobs:
         with:
           path: ./artifacts
 
-      - name: List downloaded artifacts
+      - name: Flatten artifacts
         run: |
-          echo "Listing all downloaded artifacts:"
-          ls -lR ./artifacts/
+          mkdir -p ./release-assets
+          find ./artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} ./release-assets/ \;
+          echo "Release assets:"
+          ls -lh ./release-assets/
+
+      - name: Generate checksums
+        working-directory: ./release-assets
+        run: |
+          sha256sum * > checksums-sha256.txt
+          echo "Checksums:"
+          cat checksums-sha256.txt
 
       - name: Get version
         id: version
@@ -148,6 +185,25 @@ jobs:
             echo "## SUB Language ${{ steps.version.outputs.VERSION }}";
             echo "";
             cat docs/RELEASE_NOTES.md;
+            echo "";
+            echo "---";
+            echo "";
+            echo "### Downloads";
+            echo "";
+            echo "Each archive contains the full SUB toolchain: \`sub\` (transpiler), \`subc\` (native compiler), and \`subi\` (interpreter).";
+            echo "";
+            echo "| Platform | Architecture | Archive |";
+            echo "|----------|-------------|---------|";
+            echo "| Linux | x86_64 | \`sub-linux-x86_64.tar.gz\` |";
+            echo "| Linux | arm64 | \`sub-linux-arm64.tar.gz\` |";
+            echo "| macOS | x86_64 (Intel) | \`sub-macos-x86_64.tar.gz\` |";
+            echo "| macOS | arm64 (Apple Silicon) | \`sub-macos-arm64.tar.gz\` |";
+            echo "| Windows | x86_64 | \`sub-windows-x86_64.zip\` |";
+            echo "";
+            echo "### Verify checksums";
+            echo "\`\`\`bash";
+            echo "sha256sum -c checksums-sha256.txt";
+            echo "\`\`\`";
           } > release_notes.md
 
       - name: Create Release
@@ -159,20 +215,13 @@ jobs:
           draft: false
           prerelease: ${{ steps.prerelease.outputs.PRERELEASE }}
           files: |
-            artifacts/sub-linux-x86_64-compiler/*
-            artifacts/sub-linux-x86_64-native/*
-            artifacts/sub-linux-x86_64-interp/*
-            artifacts/sub-macos-arm64-compiler/*
-            artifacts/sub-macos-arm64-native/*
-            artifacts/sub-macos-arm64-interp/*
-            artifacts/sub-windows-x86_64-compiler/*
-            artifacts/sub-windows-x86_64-native/*
-            artifacts/sub-windows-x86_64-interp/*
+            release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Release Summary
         run: |
-          echo "\u2705 Release ${{ steps.version.outputs.VERSION }} created successfully!"
-          echo "\ud83d\udce6 Artifacts: Linux (x86_64), macOS (ARM64), Windows (x86_64) — sub, subc, subi"
-          echo "\ud83d\udd17 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.VERSION }}"
+          echo "✅ Release ${{ steps.version.outputs.VERSION }} created successfully!"
+          echo "📦 Artifacts: Linux (x86_64, arm64), macOS (x86_64, arm64), Windows (x86_64)"
+          echo "🔧 Tools: sub (transpiler), subc (native compiler), subi (interpreter)"
+          echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.VERSION }}"

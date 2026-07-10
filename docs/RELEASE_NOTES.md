@@ -27,10 +27,13 @@
 - `tests/test_go_edge_cases.sb` — edge cases (empty functions, nested control flow, arrays, maps)
 
 ### Components
-- **sub**: Compiler/transpiler driver
-- **subc**: Native compiler driver
+- **sub**: Transpiler (SUB → Python, JavaScript, C, Go, Rust, and more)
+- **subc**: Native compiler (SUB → machine binary via C backend)
+- **subi**: Tree-walk interpreter (direct execution)
 
 ### Supported Platforms
 - Linux x86_64
-- macOS ARM64 (Apple Silicon)
+- Linux arm64 (aarch64)
+- macOS x86_64 (Intel)
+- macOS arm64 (Apple Silicon)
 - Windows x86_64 (MinGW)
