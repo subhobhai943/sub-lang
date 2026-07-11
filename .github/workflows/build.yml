@@ -18,9 +18,6 @@ jobs:
           - os: ubuntu-24.04-arm
             platform: linux
             arch: arm64
-          - os: macos-13
-            platform: macos
-            arch: x86_64
           - os: macos-26
             platform: macos
             arch: arm64
@@ -36,7 +33,7 @@ jobs:
         run: |
           echo 'var x = 10' > /tmp/test_native.sb
           echo 'print(x)' >> /tmp/test_native.sb
-          ./subc /tmp/test_native.sb /tmp/test_native_out
+          ./subc /tmp/test_native.sb -o /tmp/test_native_out
           /tmp/test_native_out
       - name: Smoke test interpreter
         run: |
@@ -73,7 +70,7 @@ jobs:
         run: |
           echo 'var x = 10' > test_native.sb
           echo 'print(x)' >> test_native.sb
-          ./subc.exe test_native.sb test_native_out
+          ./subc.exe test_native.sb -o test_native_out
           ./test_native_out.exe
       - name: Smoke test interpreter
         shell: msys2 {0}
