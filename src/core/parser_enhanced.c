@@ -271,7 +271,7 @@ static ASTNode* parse_primary(ParserState *state) {
         return node;
     }
 
-    if (match(state, TOKEN_IDENTIFIER)) {
+    if (match(state, TOKEN_IDENTIFIER) || match(state, TOKEN_INT) || match(state, TOKEN_FLOAT) || match(state, TOKEN_STRING) || match(state, TOKEN_BOOL)) {
         ASTNode *ident = create_node(AST_IDENTIFIER, tok, tok->value);
         if (!ident) return NULL;
         advance(state);

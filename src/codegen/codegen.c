@@ -344,14 +344,36 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     }
                     sb_append(sb, ")");
                 } else {
-                    sb_append(sb, "%s(", node->value);
-                    for (int i = 0; i < node->child_count; i++) {
-                        generate_expression(sb, node->children[i]);
-                        if (i + 1 < node->child_count) {
-                            sb_append(sb, ", ");
+                    const char *fn = node->value;
+                    if (strcmp(fn, "float") == 0) {
+                        if (node->child_count > 0 && node->children[0]->data_type == TYPE_STRING) sb_append(sb, "sub_float_from_str(");
+                        else sb_append(sb, "(double)(");
+                    }
+                    else if (strcmp(fn, "int") == 0) {
+                        if (node->child_count > 0 && node->children[0]->data_type == TYPE_STRING) sb_append(sb, "sub_int_from_str(");
+                        else sb_append(sb, "(long)(");
+                    }
+                    else if (strcmp(fn, "str") == 0) {
+                        if (node->child_count > 0) {
+                            if (node->children[0]->data_type == TYPE_FLOAT) sb_append(sb, "sub_str_from_double(");
+                            else if (node->children[0]->data_type == TYPE_STRING) sb_append(sb, "sub_strdup(");
+                            else sb_append(sb, "sub_str_from_long(");
+                        } else {
+                            sb_append(sb, "sub_strdup(\"\")");
                         }
                     }
-                    sb_append(sb, ")");
+                    else if (strcmp(fn, "input") == 0) sb_append(sb, "sub_input(");
+                    else sb_append(sb, "%s(", fn);
+                    
+                    if (strcmp(fn, "str") != 0 || node->child_count > 0) {
+                        for (int i = 0; i < node->child_count; i++) {
+                            generate_expression(sb, node->children[i]);
+                            if (i + 1 < node->child_count) {
+                                sb_append(sb, ", ");
+                            }
+                        }
+                        sb_append(sb, ")");
+                    }
                 }
             }
             break;
@@ -619,6 +641,23 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    } \\\n");
     sb_append(sb, "} while(0)\n");
     sb_append(sb, "#endif /* SUB_ERROR_H */\n\n");
+    
+    sb_append(sb, "/* Built-in Functions */\n");
+    sb_append(sb, "static inline char* sub_input(const char* prompt) {\n");
+    sb_append(sb, "    if (prompt) printf(\"%%s\", prompt);\n");
+    sb_append(sb, "    char buf[1024];\n");
+    sb_append(sb, "    if (fgets(buf, sizeof(buf), stdin)) {\n");
+    sb_append(sb, "        size_t len = strlen(buf);\n");
+    sb_append(sb, "        if (len > 0 && buf[len-1] == '\\n') buf[len-1] = '\\0';\n");
+    sb_append(sb, "        if (len > 1 && buf[len-2] == '\\r') buf[len-2] = '\\0';\n");
+    sb_append(sb, "        return sub_strdup(buf);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    return sub_strdup(\"\");\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "static inline double sub_float_from_str(const char* s) { return s ? atof(s) : 0.0; }\n");
+    sb_append(sb, "static inline long sub_int_from_str(const char* s) { return s ? atol(s) : 0; }\n");
+    sb_append(sb, "static inline char* sub_str_from_long(long v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%ld\", v); return sub_strdup(buf); }\n");
+    sb_append(sb, "static inline char* sub_str_from_double(double v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%f\", v); return sub_strdup(buf); }\n\n");
     
     /* Pass 1: Generate function declarations at file scope */
     if (ast && (ast->type == AST_PROGRAM || ast->type == AST_BLOCK)) {
