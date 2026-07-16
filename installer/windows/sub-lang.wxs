@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SUB Language Windows MSI Installer
+  Built with WiX Toolset v4 (wix.exe)
+
+  Installs sub.exe, subc.exe, and subi.exe to:
+    %ProgramFiles%\SUB Language\
+  and adds that directory to the system PATH.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package
+    Name="SUB Language"
+    Manufacturer="SUB Language Project"
+    Version="!(bind.FileVersion.sub.exe)"
+    UpgradeCode="A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+    Scope="perMachine"
+    InstallerVersion="500"
+    Compressed="yes">
+
+    <!-- Allow clean upgrades -->
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of SUB Language is already installed."
+      Schedule="afterInstallInitialize" />
+
+    <!-- Media / cabinet -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Install directory: C:\Program Files\SUB Language -->
+    <StandardDirectory Id="ProgramFilesFolder">
+      <Directory Id="INSTALLDIR" Name="SUB Language">
+
+        <Component Id="MainBinaries" Guid="B1C2D3E4-F5A6-7890-BCDE-F12345678901">
+          <File Id="sub.exe"  Source="../../sub.exe"  KeyPath="yes" />
+          <File Id="subc.exe" Source="../../subc.exe" />
+          <File Id="subi.exe" Source="../../subi.exe" />
+          <File Id="LICENSE"  Source="../../LICENSE"  />
+          <File Id="README"   Source="../../README.md" />
+
+          <!-- Add install directory to system PATH -->
+          <Environment
+            Id="PATH"
+            Name="PATH"
+            Value="[INSTALLDIR]"
+            Permanent="no"
+            Part="last"
+            Action="set"
+            System="yes" />
+        </Component>
+
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Start Menu shortcuts -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuFolder" Name="SUB Language">
+        <Component Id="StartMenuShortcuts" Guid="C2D3E4F5-A6B7-8901-CDEF-123456789012">
+          <Shortcut
+            Id="SubInterpreterShortcut"
+            Name="SUB Interpreter (subi)"
+            Description="Run the SUB Language interpreter"
+            Target="[INSTALLDIR]subi.exe"
+            WorkingDirectory="INSTALLDIR" />
+          <RemoveFolder Id="CleanAppMenuFolder" On="uninstall" />
+          <RegistryValue
+            Root="HKCU"
+            Key="Software\SUBLanguage"
+            Name="installed"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Feature tree -->
+    <Feature Id="ProductFeature" Title="SUB Language Toolchain" Level="1">
+      <ComponentRef Id="MainBinaries" />
+      <ComponentRef Id="StartMenuShortcuts" />
+    </Feature>
+
+  </Package>
+</Wix>

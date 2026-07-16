@@ -5,14 +5,18 @@ on:
     tags:
       - 'v*.*.*'
       - 'v*.*.*-beta'
+      - 'v*.*.*-alpha'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., v1.0.8-beta)'
+        description: 'Version to release (e.g., v1.0.8-alpha)'
         required: true
         type: string
 
 jobs:
+  # ─────────────────────────────────────────────
+  # 1. Build Linux & macOS binaries
+  # ─────────────────────────────────────────────
   build-unix:
     name: build (${{ matrix.platform }}-${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
@@ -28,7 +32,6 @@ jobs:
             platform: linux
             arch: arm64
             binary_suffix: ''
-
           - os: macos-26
             platform: macos
             arch: arm64
@@ -61,7 +64,7 @@ jobs:
           /tmp/smoke_bin
           ./subi /tmp/smoke.sb
 
-      - name: Package release archive
+      - name: Package release archive (.tar.gz)
         run: |
           ARCHIVE_NAME="sub-${{ matrix.platform }}-${{ matrix.arch }}"
           mkdir -p "${ARCHIVE_NAME}"
@@ -76,8 +79,147 @@ jobs:
           path: sub-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
           retention-days: 5
 
-  build-windows:
-    name: build (windows-x86_64)
+  # ─────────────────────────────────────────────
+  # 2. Build Linux packages (.deb, .rpm, .pkg.tar.zst)
+  # ─────────────────────────────────────────────
+  build-linux-packages:
+    name: linux packages (${{ matrix.arch }})
+    needs: build-unix
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+            deb_arch: amd64
+            rpm_arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            deb_arch: arm64
+            rpm_arch: aarch64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc make rpm
+
+      - name: Build binaries
+        run: |
+          make clean
+          make all
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            RAW="${{ inputs.version }}"
+          else
+            RAW="${GITHUB_REF#refs/tags/}"
+          fi
+          # Strip leading 'v' for package version fields
+          echo "VERSION=${RAW}" >> $GITHUB_OUTPUT
+          echo "PKG_VERSION=${RAW#v}" >> $GITHUB_OUTPUT
+
+      # ── .deb (Debian / Ubuntu) ───────────────
+      - name: Build .deb package
+        run: |
+          PKG="sub-lang_${{ steps.version.outputs.PKG_VERSION }}_${{ matrix.deb_arch }}"
+          mkdir -p "${PKG}/DEBIAN"
+          mkdir -p "${PKG}/usr/local/bin"
+          mkdir -p "${PKG}/usr/share/doc/sub-lang"
+
+          cp sub subc subi "${PKG}/usr/local/bin/"
+          cp LICENSE README.md "${PKG}/usr/share/doc/sub-lang/"
+
+          cat > "${PKG}/DEBIAN/control" <<EOF
+          Package: sub-lang
+          Version: ${{ steps.version.outputs.PKG_VERSION }}
+          Section: devel
+          Priority: optional
+          Architecture: ${{ matrix.deb_arch }}
+          Maintainer: SUB Language Project <noreply@github.com>
+          Description: SUB Programming Language Toolchain
+           A modern programming language with transpiler (sub),
+           native compiler (subc), and interpreter (subi).
+          EOF
+
+          dpkg-deb --build "${PKG}"
+          echo "Built: ${PKG}.deb"
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.arch }}
+          path: "*.deb"
+          retention-days: 5
+
+      # ── .rpm (Red Hat / Fedora / openSUSE) ───
+      - name: Build .rpm package
+        run: |
+          PKG_VER="${{ steps.version.outputs.PKG_VERSION }}"
+          RPM_ARCH="${{ matrix.rpm_arch }}"
+          RPM_ROOT="${HOME}/rpmbuild"
+
+          mkdir -p "${RPM_ROOT}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          mkdir -p "${RPM_ROOT}/BUILDROOT/sub-lang-${PKG_VER}-1.${RPM_ARCH}/usr/local/bin"
+          mkdir -p "${RPM_ROOT}/BUILDROOT/sub-lang-${PKG_VER}-1.${RPM_ARCH}/usr/share/doc/sub-lang"
+
+          cp sub subc subi "${RPM_ROOT}/BUILDROOT/sub-lang-${PKG_VER}-1.${RPM_ARCH}/usr/local/bin/"
+          cp LICENSE README.md "${RPM_ROOT}/BUILDROOT/sub-lang-${PKG_VER}-1.${RPM_ARCH}/usr/share/doc/sub-lang/"
+
+          cat > "${RPM_ROOT}/SPECS/sub-lang.spec" <<EOF
+          Name:           sub-lang
+          Version:        ${PKG_VER}
+          Release:        1%{?dist}
+          Summary:        SUB Programming Language Toolchain
+          License:        MIT
+          BuildArch:      ${RPM_ARCH}
+
+          %description
+          A modern programming language with transpiler (sub),
+          native compiler (subc), and interpreter (subi).
+
+          %install
+          cp -a %{_builddir}/../BUILDROOT/sub-lang-${PKG_VER}-1.${RPM_ARCH}/. %{buildroot}/
+
+          %files
+          /usr/local/bin/sub
+          /usr/local/bin/subc
+          /usr/local/bin/subi
+          /usr/share/doc/sub-lang/LICENSE
+          /usr/share/doc/sub-lang/README.md
+
+          %changelog
+          * $(date '+%a %b %d %Y') SUB Language Project <noreply@github.com> - ${PKG_VER}-1
+          - Release ${PKG_VER}
+          EOF
+
+          rpmbuild -bb \
+            --define "_topdir ${RPM_ROOT}" \
+            --define "_builddir ${RPM_ROOT}/BUILDROOT" \
+            "${RPM_ROOT}/SPECS/sub-lang.spec"
+
+          find "${RPM_ROOT}/RPMS" -name "*.rpm" -exec cp {} . \;
+          echo "Built RPMs:"
+          ls *.rpm
+
+      - name: Upload .rpm artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.arch }}
+          path: "*.rpm"
+          retention-days: 5
+
+  # ─────────────────────────────────────────────
+  # 3. Build Windows MSI installer
+  # ─────────────────────────────────────────────
+  build-windows-msi:
+    name: build (windows-x86_64 MSI)
     runs-on: windows-latest
 
     steps:
@@ -91,7 +233,6 @@ jobs:
           install: >-
             mingw-w64-x86_64-gcc
             make
-            zip
           msystem: MINGW64
 
       - name: Build all tools
@@ -110,24 +251,55 @@ jobs:
           ./smoke_bin.exe
           ./subi.exe smoke.sb
 
-      - name: Package release archive
-        shell: msys2 {0}
+      - name: Get version
+        id: version
+        shell: pwsh
         run: |
-          ARCHIVE_NAME="sub-windows-x86_64"
-          mkdir -p "${ARCHIVE_NAME}"
-          cp sub.exe subc.exe subi.exe "${ARCHIVE_NAME}/"
-          cp LICENSE README.md "${ARCHIVE_NAME}/"
-          zip -r "${ARCHIVE_NAME}.zip" "${ARCHIVE_NAME}/"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $raw = "${{ inputs.version }}"
+          } else {
+            $raw = "$env:GITHUB_REF" -replace "refs/tags/", ""
+          }
+          # WiX requires a numeric dotted version – strip pre-release suffix
+          $numeric = ($raw -replace "^v", "") -replace "[^0-9.].*", ""
+          # Pad to 4 parts
+          $parts = $numeric.Split(".")
+          while ($parts.Count -lt 4) { $parts += "0" }
+          $wixVer = $parts[0..3] -join "."
+          echo "VERSION=$raw" >> $env:GITHUB_OUTPUT
+          echo "WIX_VERSION=$wixVer" >> $env:GITHUB_OUTPUT
 
-      - name: Upload release archive
+      - name: Install WiX Toolset v4
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 4.0.5
+          echo "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.WIX_VERSION }}"
+          # Patch the WiX source to use the explicit version (override bind.FileVersion)
+          $wxsPath = "installer\windows\sub-lang.wxs"
+          $wxsContent = Get-Content $wxsPath -Raw
+          $wxsContent = $wxsContent -replace 'Version="!\(bind\.FileVersion\.sub\.exe\)"', "Version=`"$version`""
+          Set-Content $wxsPath $wxsContent
+
+          wix build installer\windows\sub-lang.wxs `
+            -o sub-lang-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi
+
+      - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sub-windows-x86_64
-          path: sub-windows-x86_64.zip
+          name: windows-msi
+          path: "*.msi"
           retention-days: 5
 
+  # ─────────────────────────────────────────────
+  # 4. Create GitHub Release
+  # ─────────────────────────────────────────────
   create-release:
-    needs: [build-unix, build-windows]
+    needs: [build-unix, build-linux-packages, build-windows-msi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -146,7 +318,8 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p ./release-assets
-          find ./artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} ./release-assets/ \;
+          find ./artifacts -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' -o -name '*.msi' \) \
+            -exec cp {} ./release-assets/ \;
           echo "Release assets:"
           ls -lh ./release-assets/
 
@@ -169,7 +342,8 @@ jobs:
       - name: Determine prerelease
         id: prerelease
         run: |
-          if [[ "${{ steps.version.outputs.VERSION }}" == *"-beta"* ]]; then
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          if [[ "$VERSION" == *"-beta"* ]] || [[ "$VERSION" == *"-alpha"* ]]; then
             echo "PRERELEASE=true" >> $GITHUB_OUTPUT
           else
             echo "PRERELEASE=false" >> $GITHUB_OUTPUT
@@ -187,15 +361,20 @@ jobs:
             echo "";
             echo "### Downloads";
             echo "";
-            echo "Each archive contains the full SUB toolchain: \`sub\` (transpiler), \`subc\` (native compiler), and \`subi\` (interpreter).";
+            echo "Each archive / package contains the full SUB toolchain: \`sub\` (transpiler), \`subc\` (native compiler), and \`subi\` (interpreter).";
             echo "";
-            echo "| Platform | Architecture | Archive |";
-            echo "|----------|-------------|---------|";
-            echo "| Linux | x86_64 | \`sub-linux-x86_64.tar.gz\` |";
-            echo "| Linux | arm64 | \`sub-linux-arm64.tar.gz\` |";
-
-            echo "| macOS | arm64 (Apple Silicon) | \`sub-macos-arm64.tar.gz\` |";
-            echo "| Windows | x86_64 | \`sub-windows-x86_64.zip\` |";
+            echo "| Platform | Format | Architecture | File |";
+            echo "|----------|--------|-------------|------|";
+            echo "| Linux | .tar.gz | x86_64 | \`sub-linux-x86_64.tar.gz\` |";
+            echo "| Linux | .tar.gz | arm64  | \`sub-linux-arm64.tar.gz\` |";
+            echo "| Linux | .deb (Debian/Ubuntu) | x86_64 | \`sub-lang_*_amd64.deb\` |";
+            echo "| Linux | .deb (Debian/Ubuntu) | arm64  | \`sub-lang_*_arm64.deb\` |";
+            echo "| Linux | .rpm (Red Hat/Fedora) | x86_64 | \`sub-lang-*-x86_64.rpm\` |";
+            echo "| Linux | .rpm (Red Hat/Fedora) | arm64  | \`sub-lang-*-aarch64.rpm\` |";
+            echo "| macOS | .tar.gz | arm64 (Apple Silicon) | \`sub-macos-arm64.tar.gz\` |";
+            echo "| Windows | .msi installer | x86_64 | \`sub-lang-*-windows-x86_64.msi\` |";
+            echo "";
+            echo "> **Windows users**: Run the \`.msi\` installer — it installs all three tools and adds them to your system PATH automatically.";
             echo "";
             echo "### Verify checksums";
             echo "\`\`\`bash";
@@ -219,6 +398,6 @@ jobs:
       - name: Release Summary
         run: |
           echo "✅ Release ${{ steps.version.outputs.VERSION }} created successfully!"
-          echo "📦 Artifacts: Linux (x86_64, arm64), macOS (arm64), Windows (x86_64)"
+          echo "📦 Artifacts: Linux (x86_64, arm64) tarballs + .deb + .rpm, macOS (arm64) tarball, Windows MSI"
           echo "🔧 Tools: sub (transpiler), subc (native compiler), subi (interpreter)"
           echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.VERSION }}"
