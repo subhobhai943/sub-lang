@@ -187,26 +187,38 @@ jobs:
           cp sub subc subi "${STAGE}/usr/local/bin/"
           cp LICENSE README.md "${STAGE}/usr/share/doc/sub-lang/"
 
-          cat > "${RPM_ROOT}/SPECS/sub-lang.spec" <<EOF
-Name:           sub-lang
-Version:        ${BASE_VER}
-Release:        ${RELEASE}%{?dist}
+          # Export vars so the Python script below can read them via os.environ
+          export PKG_VER BASE_VER RELEASE RPM_ARCH RPM_ROOT
+
+          python3 - <<'PYEOF'
+import os, subprocess, datetime
+
+pkg_ver  = os.environ["PKG_VER"]
+base_ver = os.environ["BASE_VER"]
+release  = os.environ["RELEASE"]
+rpm_arch = os.environ["RPM_ARCH"]
+rpm_root = os.environ["RPM_ROOT"]
+today    = datetime.date.today().strftime("%a %b %d %Y")
+
+spec = f"""Name:           sub-lang
+Version:        {base_ver}
+Release:        {release}%{{?dist}}
 Summary:        SUB Programming Language Toolchain
 License:        MIT
-BuildArch:      ${RPM_ARCH}
+BuildArch:      {rpm_arch}
 
 %description
 A modern programming language with transpiler (sub),
 native compiler (subc), and interpreter (subi).
 
 %install
-install -d %{buildroot}/usr/local/bin
-install -d %{buildroot}/usr/share/doc/sub-lang
-install -m 0755 %{_builddir}/usr/local/bin/sub   %{buildroot}/usr/local/bin/sub
-install -m 0755 %{_builddir}/usr/local/bin/subc  %{buildroot}/usr/local/bin/subc
-install -m 0755 %{_builddir}/usr/local/bin/subi  %{buildroot}/usr/local/bin/subi
-install -m 0644 %{_builddir}/usr/share/doc/sub-lang/LICENSE   %{buildroot}/usr/share/doc/sub-lang/LICENSE
-install -m 0644 %{_builddir}/usr/share/doc/sub-lang/README.md %{buildroot}/usr/share/doc/sub-lang/README.md
+install -d %{{buildroot}}/usr/local/bin
+install -d %{{buildroot}}/usr/share/doc/sub-lang
+install -m 0755 %{{_builddir}}/usr/local/bin/sub   %{{buildroot}}/usr/local/bin/sub
+install -m 0755 %{{_builddir}}/usr/local/bin/subc  %{{buildroot}}/usr/local/bin/subc
+install -m 0755 %{{_builddir}}/usr/local/bin/subi  %{{buildroot}}/usr/local/bin/subi
+install -m 0644 %{{_builddir}}/usr/share/doc/sub-lang/LICENSE   %{{buildroot}}/usr/share/doc/sub-lang/LICENSE
+install -m 0644 %{{_builddir}}/usr/share/doc/sub-lang/README.md %{{buildroot}}/usr/share/doc/sub-lang/README.md
 
 %files
 /usr/local/bin/sub
@@ -216,9 +228,16 @@ install -m 0644 %{_builddir}/usr/share/doc/sub-lang/README.md %{buildroot}/usr/s
 /usr/share/doc/sub-lang/README.md
 
 %changelog
-* $(date '+%a %b %d %Y') SUB Language Project <noreply@github.com> - ${BASE_VER}-${RELEASE}
-- Release ${PKG_VER}
-EOF
+* {today} SUB Language Project <noreply@github.com> - {base_ver}-{release}
+- Release {pkg_ver}
+"""
+
+spec_path = f"{rpm_root}/SPECS/sub-lang.spec"
+with open(spec_path, "w") as f:
+    f.write(spec)
+print(f"Written spec to {spec_path}")
+print(spec)
+PYEOF
 
           rpmbuild -bb \
             --define "_topdir ${RPM_ROOT}" \
