@@ -165,17 +165,30 @@ jobs:
           RPM_ARCH="${{ matrix.rpm_arch }}"
           RPM_ROOT="${HOME}/rpmbuild"
 
-          mkdir -p "${RPM_ROOT}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          mkdir -p "${RPM_ROOT}/BUILDROOT/sub-lang-${PKG_VER}-1.${RPM_ARCH}/usr/local/bin"
-          mkdir -p "${RPM_ROOT}/BUILDROOT/sub-lang-${PKG_VER}-1.${RPM_ARCH}/usr/share/doc/sub-lang"
+          # RPM Version field must not contain hyphens.
+          # Split "1.0.8-alpha" → BASE_VER="1.0.8", RELEASE="1.alpha"
+          if [[ "${PKG_VER}" =~ ^([0-9][0-9.]*)(-(.+))?$ ]]; then
+            BASE_VER="${BASH_REMATCH[1]}"
+            PRE="${BASH_REMATCH[3]}"
+            RELEASE="1${PRE:+.${PRE}}"
+          else
+            BASE_VER="${PKG_VER}"
+            RELEASE="1"
+          fi
 
-          cp sub subc subi "${RPM_ROOT}/BUILDROOT/sub-lang-${PKG_VER}-1.${RPM_ARCH}/usr/local/bin/"
-          cp LICENSE README.md "${RPM_ROOT}/BUILDROOT/sub-lang-${PKG_VER}-1.${RPM_ARCH}/usr/share/doc/sub-lang/"
+          BUILDROOT_DIR="sub-lang-${BASE_VER}-${RELEASE}.${RPM_ARCH}"
+
+          mkdir -p "${RPM_ROOT}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          mkdir -p "${RPM_ROOT}/BUILDROOT/${BUILDROOT_DIR}/usr/local/bin"
+          mkdir -p "${RPM_ROOT}/BUILDROOT/${BUILDROOT_DIR}/usr/share/doc/sub-lang"
+
+          cp sub subc subi "${RPM_ROOT}/BUILDROOT/${BUILDROOT_DIR}/usr/local/bin/"
+          cp LICENSE README.md "${RPM_ROOT}/BUILDROOT/${BUILDROOT_DIR}/usr/share/doc/sub-lang/"
 
           cat > "${RPM_ROOT}/SPECS/sub-lang.spec" <<EOF
           Name:           sub-lang
-          Version:        ${PKG_VER}
-          Release:        1%{?dist}
+          Version:        ${BASE_VER}
+          Release:        ${RELEASE}%{?dist}
           Summary:        SUB Programming Language Toolchain
           License:        MIT
           BuildArch:      ${RPM_ARCH}
@@ -185,7 +198,7 @@ jobs:
           native compiler (subc), and interpreter (subi).
 
           %install
-          cp -a %{_builddir}/../BUILDROOT/sub-lang-${PKG_VER}-1.${RPM_ARCH}/. %{buildroot}/
+          cp -a %{_builddir}/../BUILDROOT/${BUILDROOT_DIR}/. %{buildroot}/
 
           %files
           /usr/local/bin/sub
@@ -195,7 +208,7 @@ jobs:
           /usr/share/doc/sub-lang/README.md
 
           %changelog
-          * $(date '+%a %b %d %Y') SUB Language Project <noreply@github.com> - ${PKG_VER}-1
+          * $(date '+%a %b %d %Y') SUB Language Project <noreply@github.com> - ${BASE_VER}-${RELEASE}
           - Release ${PKG_VER}
           EOF
 
