@@ -84,11 +84,41 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
 
     /* string concat */
     if (strcmp(op, "+") == 0 && (L.type == VAL_STRING || R.type == VAL_STRING)) {
-        char lb[64], rb[64];
-        const char *ls = L.type==VAL_STRING ? L.sv : (snprintf(lb,sizeof(lb),L.type==VAL_INT?"%lld":"%g",L.type==VAL_INT?(double)L.iv:L.fv),lb);
-        const char *rs = R.type==VAL_STRING ? R.sv : (snprintf(rb,sizeof(rb),R.type==VAL_INT?"%lld":"%g",R.type==VAL_INT?(double)R.iv:R.fv),rb);
-        size_t n = strlen(ls)+strlen(rs)+1;
-        char *buf = malloc(n); snprintf(buf, n, "%s%s", ls, rs);
+        /* Use dynamically allocated buffers to prevent stack buffer overflow */
+        char *lb = NULL, *rb = NULL;
+        if (L.type == VAL_STRING) {
+            lb = strdup(L.sv ? L.sv : "");
+        } else if (L.type == VAL_INT) {
+            lb = malloc(32);
+            if (lb) snprintf(lb, 32, "%lld", L.iv);
+        } else if (L.type == VAL_FLOAT) {
+            lb = malloc(64);
+            if (lb) snprintf(lb, 64, "%g", L.fv);
+        } else {
+            lb = strdup("");
+        }
+        if (R.type == VAL_STRING) {
+            rb = strdup(R.sv ? R.sv : "");
+        } else if (R.type == VAL_INT) {
+            rb = malloc(32);
+            if (rb) snprintf(rb, 32, "%lld", R.iv);
+        } else if (R.type == VAL_FLOAT) {
+            rb = malloc(64);
+            if (rb) snprintf(rb, 64, "%g", R.fv);
+        } else {
+            rb = strdup("");
+        }
+        const char *ls = lb ? lb : "";
+        const char *rs = rb ? rb : "";
+        size_t n = strlen(ls) + strlen(rs) + 1;
+        char *buf = malloc(n);
+        if (buf) {
+            snprintf(buf, n, "%s%s", ls, rs);
+        } else {
+            buf = strdup("");
+        }
+        free(lb);
+        free(rb);
         SubVal res = {VAL_STRING}; res.sv = buf; return res;
     }
 
@@ -305,10 +335,16 @@ static SubVal eval_block(ASTNode *node, Env *env) {
 int interpret_file(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) { fprintf(stderr, "Cannot open: %s\n", path); return 1; }
-    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
-    char *src = malloc(sz + 1);
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 1; }
+    long sz = ftell(f);
+    if (sz < 0) { fclose(f); return 1; }
+    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return 1; }
+    char *src = malloc((size_t)sz + 1);
     if (!src) { fclose(f); return 1; }
-    fread(src, 1, sz, f); src[sz] = '\0'; fclose(f);
+    size_t read_size = fread(src, 1, (size_t)sz, f);
+    fclose(f);
+    if (read_size != (size_t)sz) { free(src); return 1; }
+    src[read_size] = '\0';
     int ntok;
     Token *toks = lexer_tokenize(src, &ntok);
     ASTNode *ast = parser_parse(toks, ntok);
