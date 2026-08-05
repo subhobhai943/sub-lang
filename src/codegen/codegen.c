@@ -297,6 +297,10 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     } else {
                         sb_append(sb, "false");
                     }
+                } else if (node->data_type == TYPE_NULL ||
+                           strcmp(node->value, "null") == 0 ||
+                           strcmp(node->value, "nil") == 0) {
+                    sb_append(sb, "0");
                 } else {
                     sb_append(sb, "%s", node->value);
                 }
@@ -349,6 +353,13 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, ", ");
                     generate_expression(sb, node->right);
                     sb_append(sb, ") %s)", cop);
+                } else if (node->value && strcmp(node->value, "**") == 0) {
+                    /* Power operator: a ** b -> pow(a, b) */
+                    sb_append(sb, "pow(");
+                    generate_expression(sb, node->left);
+                    sb_append(sb, ", ");
+                    generate_expression(sb, node->right);
+                    sb_append(sb, ")");
                 } else {
                     sb_append(sb, "(");
                     generate_expression(sb, node->left);
@@ -369,8 +380,8 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
             
         case AST_CALL_EXPR:
             if (node->value) {
-                /* Map SUB print() to C printf() */
-                if ((strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) {
+                /* Map SUB print()/println()/show() to C printf() */
+                if ((strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0 || strcmp(node->value, "println") == 0)) {
                     if (node->child_count > 0) {
                         sb_append(sb, "printf(\"");
                         for (int i = 0; i < node->child_count; i++) {
@@ -426,6 +437,13 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                         }
                     }
                     else if (strcmp(fn, "input") == 0) sb_append(sb, "sub_input(");
+                    else if (strcmp(fn, "sqrt") == 0) sb_append(sb, "sqrt(");
+                    else if (strcmp(fn, "abs") == 0) sb_append(sb, "fabs(");
+                    else if (strcmp(fn, "floor") == 0) sb_append(sb, "floor(");
+                    else if (strcmp(fn, "ceil") == 0) sb_append(sb, "ceil(");
+                    else if (strcmp(fn, "round") == 0) sb_append(sb, "round(");
+                    else if (strcmp(fn, "min") == 0) sb_append(sb, "fmin(");
+                    else if (strcmp(fn, "max") == 0) sb_append(sb, "fmax(");
                     else sb_append(sb, "%s(", fn);
                     
                     if (strcmp(fn, "str") != 0 || node->child_count > 0) {
@@ -687,7 +705,8 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "#include <stdlib.h>\n");
     sb_append(sb, "#include <string.h>\n");
     sb_append(sb, "#include <stdbool.h>\n");
-    sb_append(sb, "#include <stddef.h>\n\n");
+    sb_append(sb, "#include <stddef.h>\n");
+    sb_append(sb, "#include <math.h>\n\n");
     
     sb_append(sb, "/* Memory Management Helpers */\n");
     sb_append(sb, "#ifndef SUB_STRSAFE\n");

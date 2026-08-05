@@ -1,0 +1,138 @@
+# ============================================
+#  SUB Language Calculator
+#  A fully interactive calculator with support
+#  for basic arithmetic, power, square root,
+#  and modulo operations.
+# ============================================
+
+# --- Helper Functions ---
+
+function add(a, b) {
+    return a + b
+}
+
+function subtract(a, b) {
+    return a - b
+}
+
+function multiply(a, b) {
+    return a * b
+}
+
+function divide(a, b) {
+    if b == 0 {
+        println("Error: Division by zero!")
+        return null
+    }
+    return a / b
+}
+
+function modulo(a, b) {
+    if b == 0 {
+        println("Error: Modulo by zero!")
+        return null
+    }
+    return a % b
+}
+
+function power(a, b) {
+    return a ** b
+}
+
+function square_root(a) {
+    if a < 0 {
+        println("Error: Cannot take square root of a negative number!")
+        return null
+    }
+    return sqrt(a)
+}
+
+function absolute(a) {
+    return abs(a)
+}
+
+# --- Display Menu ---
+
+function show_menu() {
+    println("")
+    println("╔══════════════════════════════════════╗")
+    println("║       SUB LANGUAGE CALCULATOR        ║")
+    println("╠══════════════════════════════════════╣")
+    println("║  1.  Addition        (+)             ║")
+    println("║  2.  Subtraction     (-)             ║")
+    println("║  3.  Multiplication  (*)             ║")
+    println("║  4.  Division        (/)             ║")
+    println("║  5.  Modulo          (%)             ║")
+    println("║  6.  Power           (**)            ║")
+    println("║  7.  Square Root                     ║")
+    println("║  8.  Absolute Value                  ║")
+    println("║  0.  Exit                            ║")
+    println("╚══════════════════════════════════════╝")
+    println("")
+}
+
+# --- Main Calculator Loop ---
+
+var running = true
+
+while running {
+    show_menu()
+
+    var choice = input("Enter your choice (0-8): ")
+    var op = int(choice)
+
+    if op == 0 {
+        println("")
+        println("Thanks for using SUB Calculator! Goodbye!")
+        running = false
+    } elif op == 7 {
+        # Square root only needs one number
+        var num_str = input("Enter a number: ")
+        var num = float(num_str)
+        var result = square_root(num)
+        if result != null {
+            println("sqrt(" + str(num) + ") = " + str(result))
+        }
+    } elif op == 8 {
+        # Absolute value only needs one number
+        var num_str = input("Enter a number: ")
+        var num = float(num_str)
+        var result = absolute(num)
+        println("|" + str(num) + "| = " + str(result))
+    } elif op >= 1 && op <= 6 {
+        # Two-operand operations
+        var a_str = input("Enter first number: ")
+        var b_str = input("Enter second number: ")
+        var a = float(a_str)
+        var b = float(b_str)
+
+        var result = null
+        var symbol = ""
+
+        if op == 1 {
+            result = add(a, b)
+            symbol = "+"
+        } elif op == 2 {
+            result = subtract(a, b)
+            symbol = "-"
+        } elif op == 3 {
+            result = multiply(a, b)
+            symbol = "*"
+        } elif op == 4 {
+            result = divide(a, b)
+            symbol = "/"
+        } elif op == 5 {
+            result = modulo(a, b)
+            symbol = "%"
+        } elif op == 6 {
+            result = power(a, b)
+            symbol = "**"
+        }
+
+        if result != null {
+            println(str(a) + " " + symbol + " " + str(b) + " = " + str(result))
+        }
+    } else {
+        println("Invalid choice! Please enter a number between 0 and 8.")
+    }
+}

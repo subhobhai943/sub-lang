@@ -193,6 +193,9 @@ static bool data_types_are_compatible(DataType expected, DataType actual) {
     if (expected == TYPE_FLOAT && actual == TYPE_INT) return true;
     if (expected == TYPE_INT && actual == TYPE_FLOAT) return true;
     
+    // null is compatible with any type (dynamic typing)
+    if (expected == TYPE_NULL || actual == TYPE_NULL) return true;
+    
     return false;
 }
 
@@ -357,6 +360,18 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 // Auto/unknown types - allow comparison (dynamic typing)
                 if (left_type == TYPE_UNKNOWN || left_type == TYPE_AUTO ||
                     right_type == TYPE_UNKNOWN || right_type == TYPE_AUTO) {
+                    node->data_type = TYPE_BOOL;
+                    return TYPE_BOOL;
+                }
+                
+                // Null comparison - allow comparing anything with null
+                if (left_type == TYPE_NULL || right_type == TYPE_NULL) {
+                    node->data_type = TYPE_BOOL;
+                    return TYPE_BOOL;
+                }
+                
+                // Bool comparison
+                if (left_type == TYPE_BOOL && right_type == TYPE_BOOL) {
                     node->data_type = TYPE_BOOL;
                     return TYPE_BOOL;
                 }
@@ -539,6 +554,37 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                         check_expression_type(node->children[i], table);
                     node->data_type = TYPE_ARRAY;
                     return TYPE_ARRAY;
+                }
+                /* Math built-ins returning float */
+                if (fn_name && (strcmp(fn_name, "abs") == 0 || strcmp(fn_name, "sqrt") == 0 ||
+                                strcmp(fn_name, "min") == 0 || strcmp(fn_name, "max") == 0)) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_FLOAT;
+                    return TYPE_FLOAT;
+                }
+                /* Math built-ins returning int */
+                if (fn_name && (strcmp(fn_name, "floor") == 0 || strcmp(fn_name, "ceil") == 0 ||
+                                strcmp(fn_name, "round") == 0)) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_INT;
+                    return TYPE_INT;
+                }
+                /* String built-ins */
+                if (fn_name && (strcmp(fn_name, "trim") == 0 || strcmp(fn_name, "char_at") == 0 ||
+                                strcmp(fn_name, "join") == 0 || strcmp(fn_name, "to_string") == 0)) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_STRING;
+                    return TYPE_STRING;
+                }
+                /* Array mutation built-ins */
+                if (fn_name && (strcmp(fn_name, "push") == 0 || strcmp(fn_name, "pop") == 0)) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_VOID;
+                    return TYPE_VOID;
                 }
                 
                 LocalSymbolEntry *entry = lookup_symbol(table, fn_name);
@@ -804,13 +850,7 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
             }
             
             expr_type = check_expression_type(node->condition, table);
-            if (expr_type != TYPE_BOOL && expr_type != TYPE_UNKNOWN) {
-                char error_msg[512];
-                snprintf(error_msg, sizeof(error_msg),
-                         "Type error: If condition must be boolean, got %s",
-                         data_type_to_string(expr_type));
-                compile_error(error_msg, node->line);
-            }
+            // Relaxed if condition check to allow any truthy type
             
             check_statement_type(node->body, table, current_function);
             if (node->right) check_statement_type(node->right, table, current_function);  // else/elif
@@ -824,13 +864,7 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
             }
             
             expr_type = check_expression_type(node->condition, table);
-            if (expr_type != TYPE_BOOL && expr_type != TYPE_UNKNOWN) {
-                char error_msg[512];
-                snprintf(error_msg, sizeof(error_msg),
-                         "Type error: While condition must be boolean, got %s",
-                         data_type_to_string(expr_type));
-                compile_error(error_msg, node->line);
-            }
+            // Relaxed while condition check to allow any truthy type
             
             check_statement_type(node->body, table, current_function);
             break;
@@ -864,8 +898,10 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
             if (node->right) {
                 DataType return_type = check_expression_type(node->right, table);
                 if (current_function) {
-                    if (current_function->return_type == TYPE_UNKNOWN || current_function->return_type == TYPE_AUTO) {
-                        current_function->return_type = return_type;
+                    if (current_function->return_type == TYPE_UNKNOWN || current_function->return_type == TYPE_AUTO || current_function->return_type == TYPE_NULL) {
+                        if (return_type != TYPE_NULL || current_function->return_type == TYPE_UNKNOWN || current_function->return_type == TYPE_AUTO) {
+                            current_function->return_type = return_type;
+                        }
                     } else if (!data_types_are_compatible(current_function->return_type, return_type) &&
                                return_type != TYPE_UNKNOWN) {
                         char error_msg[512];

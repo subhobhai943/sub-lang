@@ -133,7 +133,7 @@ int compile_to_native(const char *input_file, const char *output_name,
             return 1;
         }
     }
-    snprintf(cmd, sizeof(cmd), "gcc %s -o \"%s\" \"%s\"", opt, output_name, tmp_c);
+    snprintf(cmd, sizeof(cmd), "gcc %s -o \"%s\" \"%s\" -lm", opt, output_name, tmp_c);
     int ret = system(cmd);
     remove(tmp_c);
 
@@ -384,7 +384,7 @@ int main(int argc, char *argv[]) {
             }
             char compile_cmd[1024];
             const char *bin_ext = (target->platform == PLATFORM_WINDOWS) ? ".exe" : "";
-            snprintf(compile_cmd, sizeof(compile_cmd), "gcc -O2 -o \"%s%s\" \"%s\"", base_name, bin_ext, output_file);
+            snprintf(compile_cmd, sizeof(compile_cmd), "gcc -O2 -o \"%s%s\" \"%s\" -lm", base_name, bin_ext, output_file);
             printf("\nCompiling intermediate C code to native machine code...\n");
             int ret = system(compile_cmd);
             if (ret == 0) {
