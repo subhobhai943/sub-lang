@@ -60,19 +60,43 @@ int compile_to_native(const char *input_file, const char *output_name,
     /* ---- Phase 1: Read source ---- */
     FILE *f = fopen(input_file, "rb");
     if (!f) { fprintf(stderr, "Cannot open: %s\n", input_file); return 1; }
-    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
-    char *source = malloc(sz + 1);
-    if (!source) { fclose(f); return 1; }
-    fread(source, 1, sz, f); source[sz] = '\0'; fclose(f);
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fprintf(stderr, "Error: Failed to seek file %s\n", input_file);
+        fclose(f); return 1;
+    }
+    long sz = ftell(f);
+    if (sz < 0) {
+        fprintf(stderr, "Error: Failed to determine file size for %s\n", input_file);
+        fclose(f); return 1;
+    }
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fprintf(stderr, "Error: Failed to rewind file %s\n", input_file);
+        fclose(f); return 1;
+    }
+    char *source = malloc((size_t)sz + 1);
+    if (!source) { fprintf(stderr, "Error: Out of memory reading %s\n", input_file); fclose(f); return 1; }
+    size_t read_size = fread(source, 1, (size_t)sz, f);
+    fclose(f);
+    if (read_size != (size_t)sz) {
+        fprintf(stderr, "Error: Failed to read complete file %s\n", input_file);
+        free(source); return 1;
+    }
+    source[read_size] = '\0';
 
     /* ---- Phase 2: Lex ---- */
     if (verbose) printf("[1/4] Lexing...\n");
     int ntok;
     Token *tokens = lexer_tokenize(source, &ntok);
+    if (!tokens) { free(source); return 1; }
 
     /* ---- Phase 3: Parse ---- */
     if (verbose) printf("[2/4] Parsing...\n");
     ASTNode *ast = parser_parse(tokens, ntok);
+    if (!ast) {
+        fprintf(stderr, "Parsing failed.\n");
+        lexer_free_tokens(tokens, ntok); free(source);
+        return 1;
+    }
 
     /* ---- Phase 4: Semantic ---- */
     if (verbose) printf("[3/4] Semantic analysis...\n");
@@ -101,6 +125,15 @@ int compile_to_native(const char *input_file, const char *output_name,
     /* ---- Phase 6: Compile with gcc ---- */
     const char *opt = opt_level >= 2 ? "-O2" : opt_level == 1 ? "-O1" : "-O0";
     char cmd[1024];
+    /* Validate output_name contains no shell metacharacters to prevent command injection */
+    for (const char *p = output_name; *p; p++) {
+        if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-' && *p != '.' && *p != '/') {
+            fprintf(stderr, "Error: Output name contains unsafe characters: '%c'. Only alphanumeric, underscore, dash, dot, and slash are allowed.\n", *p);
+            remove(tmp_c);
+            free(c_code); /* c_code already freed above, but for safety */
+            return 1;
+        }
+    }
     snprintf(cmd, sizeof(cmd), "gcc %s -o \"%s\" \"%s\"", opt, output_name, tmp_c);
     int ret = system(cmd);
     remove(tmp_c);
@@ -185,17 +218,35 @@ char* read_file(const char *filename) {
         fprintf(stderr, "Error: Cannot open file %s\n", filename);
         return NULL;
     }
-    fseek(file, 0, SEEK_END);
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fprintf(stderr, "Error: Failed to seek file %s\n", filename);
+        fclose(file);
+        return NULL;
+    }
     long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    char *content = malloc(size + 1);
+    if (size < 0) {
+        fprintf(stderr, "Error: Failed to read file size for %s\n", filename);
+        fclose(file);
+        return NULL;
+    }
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        fprintf(stderr, "Error: Failed to rewind file %s\n", filename);
+        fclose(file);
+        return NULL;
+    }
+    char *content = malloc((size_t)size + 1);
     if (!content) {
         fclose(file);
         return NULL;
     }
-    size_t read_size = fread(content, 1, size, file);
-    content[read_size] = '\0';
+    size_t read_size = fread(content, 1, (size_t)size, file);
     fclose(file);
+    if (read_size != (size_t)size) {
+        fprintf(stderr, "Error: Failed to read complete file %s\n", filename);
+        free(content);
+        return NULL;
+    }
+    content[read_size] = '\0';
     return content;
 }
 
@@ -270,7 +321,14 @@ int main(int argc, char *argv[]) {
         
         int token_count;
         Token *tokens = lexer_tokenize(source, &token_count);
+        if (!tokens) { free(source); return 1; }
         ASTNode *ast = parser_parse(tokens, token_count);
+        if (!ast) {
+            fprintf(stderr, "Parsing failed.\n");
+            free(source);
+            lexer_free_tokens(tokens, token_count);
+            return 1;
+        }
         
         if (!semantic_analyze(ast)) {
             fprintf(stderr, "Semantic analysis failed\n");
@@ -314,9 +372,20 @@ int main(int argc, char *argv[]) {
         // If it is a platform target that compiles to C under the hood, compile to machine code directly
         if (target->kind == TARGET_KIND_PLATFORM && 
             (target->platform == PLATFORM_LINUX || target->platform == PLATFORM_WINDOWS || target->platform == PLATFORM_MACOS)) {
+            /* Validate base_name and output_file contain no shell metacharacters */
+            const char *check_names[] = { base_name, output_file, NULL };
+            for (int ci = 0; check_names[ci]; ci++) {
+                for (const char *p = check_names[ci]; *p; p++) {
+                    if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-' && *p != '.' && *p != '/') {
+                        fprintf(stderr, "Error: Output name contains unsafe characters: '%c'\n", *p);
+                        free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast); free(output_code);
+                        return 1;
+                    }
+                }
+            }
             char compile_cmd[1024];
             const char *bin_ext = (target->platform == PLATFORM_WINDOWS) ? ".exe" : "";
-            snprintf(compile_cmd, sizeof(compile_cmd), "gcc -O2 -o %s%s %s", base_name, bin_ext, output_file);
+            snprintf(compile_cmd, sizeof(compile_cmd), "gcc -O2 -o \"%s%s\" \"%s\"", base_name, bin_ext, output_file);
             printf("\nCompiling intermediate C code to native machine code...\n");
             int ret = system(compile_cmd);
             if (ret == 0) {
