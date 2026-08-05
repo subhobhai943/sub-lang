@@ -54,9 +54,15 @@ static void sb_append(StringBuilder *sb, const char *fmt, ...) {
         return;
     }
     
-    // Resize if necessary
-    while (sb->size + needed + 1 > sb->capacity) {
-        sb->capacity *= 2;
+    // Resize if necessary (guard against capacity overflow)
+    while (sb->size + (size_t)needed + 1 > sb->capacity) {
+        size_t new_cap = sb->capacity * 2;
+        if (new_cap <= sb->capacity) {
+            /* Overflow detected */
+            va_end(args);
+            return;
+        }
+        sb->capacity = new_cap;
         char *new_buffer = realloc(sb->buffer, sb->capacity);
         if (!new_buffer) {
             va_end(args);
@@ -67,7 +73,7 @@ static void sb_append(StringBuilder *sb, const char *fmt, ...) {
     
     // Append
     vsnprintf(sb->buffer + sb->size, needed + 1, fmt, args);
-    sb->size += needed;
+    sb->size += (size_t)needed;
     va_end(args);
 }
 
@@ -77,6 +83,41 @@ static char* sb_to_string(StringBuilder *sb) {
     free(sb->buffer);
     free(sb);
     return result;
+}
+
+/* Escape a string literal for safe inclusion in generated C code */
+static char* escape_c_string_literal(const char *raw) {
+    if (!raw) return strdup("");
+    size_t len = strlen(raw);
+    /* Worst case: every char needs escaping (\xNN) = 4 bytes per char + 1 null */
+    char *escaped = malloc(len * 4 + 1);
+    if (!escaped) return strdup("");
+    size_t out = 0;
+    for (size_t i = 0; i < len && out < len * 4; i++) {
+        switch ((unsigned char)raw[i]) {
+            case '\n': escaped[out++] = '\\'; escaped[out++] = 'n'; break;
+            case '\t': escaped[out++] = '\\'; escaped[out++] = 't'; break;
+            case '\r': escaped[out++] = '\\'; escaped[out++] = 'r'; break;
+            case '\\': escaped[out++] = '\\'; escaped[out++] = '\\'; break;
+            case '"':  escaped[out++] = '\\'; escaped[out++] = '"';  break;
+            case '\0': escaped[out++] = '\\'; escaped[out++] = '0';  break;
+            default:
+                /* Pass through printable ASCII and common UTF-8 continuation bytes */
+                if ((unsigned char)raw[i] >= 32 && (unsigned char)raw[i] < 127) {
+                    escaped[out++] = raw[i];
+                } else if ((unsigned char)raw[i] >= 0x80) {
+                    /* Pass through UTF-8 bytes as-is */
+                    escaped[out++] = raw[i];
+                } else {
+                    /* Escape other control characters */
+                    snprintf(escaped + out, 5, "\\x%02x", (unsigned char)raw[i]);
+                    out += 4;
+                }
+                break;
+        }
+    }
+    escaped[out] = '\0';
+    return escaped;
 }
 
 /* Forward declarations */
@@ -109,7 +150,9 @@ static void optimize_remove_dead_code(ASTNode *node) {
     switch (node->type) {
         case AST_PROGRAM:
         case AST_BLOCK: {
-            ASTNode **new_children = malloc(sizeof(ASTNode*) * node->child_count);
+            if (node->child_count <= 0) break;
+            ASTNode **new_children = malloc(sizeof(ASTNode*) * (size_t)node->child_count);
+            if (!new_children) break; /* OOM — skip optimization */
             int new_count = 0;
             
             for (int i = 0; i < node->child_count; i++) {
@@ -244,7 +287,9 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
         case AST_LITERAL:
             if (node->value) {
                 if (node->data_type == TYPE_STRING) {
-                    sb_append(sb, "\"%s\"", node->value);
+                    char *escaped = escape_c_string_literal(node->value);
+                    sb_append(sb, "\"%s\"", escaped);
+                    free(escaped);
                 } else if (node->data_type == TYPE_BOOL) {
                     if (strcmp(node->value, "true") == 0) {
                         sb_append(sb, "true");
@@ -270,8 +315,8 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     (node->data_type == TYPE_STRING ||
                      (node->left && node->left->data_type == TYPE_STRING) ||
                      (node->right && node->right->data_type == TYPE_STRING))) {
-                    /* Generate runtime string concat via sprintf */
-                    sb_append(sb, "({char _buf[1024]; snprintf(_buf, sizeof(_buf), \"");
+                    /* Generate runtime string concat via snprintf with larger buffer */
+                    sb_append(sb, "({char _buf[4096]; snprintf(_buf, sizeof(_buf), \"");
                     /* Build format string */
                     if (node->left->data_type == TYPE_STRING) sb_append(sb, "%%s");
                     else if (node->left->data_type == TYPE_INT) sb_append(sb, "%%ld");
