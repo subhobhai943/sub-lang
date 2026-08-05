@@ -246,7 +246,7 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
         }
 
         case AST_ARRAY_LITERAL:
-            sb_append(sb, "std::vector<auto>{");
+            sb_append(sb, "std::vector<std::string>{");
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
                 generate_expr_cpp(sb, node->children[i]);
@@ -255,7 +255,7 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
             break;
 
         case AST_OBJECT_LITERAL:
-            sb_append(sb, "std::map<std::string, auto>{");
+            sb_append(sb, "std::map<std::string, std::string>{");
             for (int i = 0; i < node->child_count; i++) {
                 ASTNode *pair = node->children[i];
                 if (!pair) continue;

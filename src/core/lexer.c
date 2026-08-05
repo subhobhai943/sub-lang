@@ -139,6 +139,9 @@ static const KWEntry kw_table[] = {
     {"javascript",  TOKEN_JAVASCRIPT},
     {"rust",        TOKEN_RUST},
 
+    /* Module system */
+    {"import",      TOKEN_IMPORT},
+
     /* UI */
     {"ui",          TOKEN_UI},
 
@@ -606,6 +609,7 @@ const char* token_type_to_string(TokenType type) {
         case TOKEN_PYTHON:         return "PYTHON";
         case TOKEN_JAVASCRIPT:     return "JAVASCRIPT";
         case TOKEN_RUST:           return "RUST";
+        case TOKEN_IMPORT:         return "IMPORT";
         case TOKEN_UI:             return "UI";
         case TOKEN_CLASS:          return "CLASS";
         case TOKEN_EXTENDS:        return "EXTENDS";

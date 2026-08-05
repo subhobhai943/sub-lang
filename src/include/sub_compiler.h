@@ -49,7 +49,8 @@ typedef enum {
     TOKEN_JAVASCRIPT,     // javascript
     TOKEN_RUST,           // rust
     
-    // UI Components
+    // Module System
+    TOKEN_IMPORT,         // import
     TOKEN_UI,             // ui
     
     // OOP Keywords
@@ -169,7 +170,10 @@ typedef enum {
     AST_NEW_EXPR,         // new ClassName()
     AST_RANGE_EXPR,       // range(n) or range(start, end)
     AST_ARRAY_ITERATION,  // for item in collection
-    AST_PARAM_DECL        // Function parameter declaration
+    AST_PARAM_DECL,       // Function parameter declaration
+    AST_SWITCH_STMT,      // switch/match statement
+    AST_CASE_CLAUSE,      // case clause in switch
+    AST_DEFAULT_CLAUSE    // default clause in switch
 } ASTNodeType;
 
 /* AST Node Structure */

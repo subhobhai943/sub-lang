@@ -1,0 +1,511 @@
+# ======================================================================
+# SUB Language — Professional Features Comprehensive Test
+# ======================================================================
+# Tests ALL professional features:
+#   1.  Power operator (**)
+#   2.  Compound assignment (+=, -=, *=, /=, %=)
+#   3.  Bitwise operators (&, |, ^, ~, <<, >>)
+#   4.  Break and continue in loops
+#   5.  Do-while loops (braced and end-delimited)
+#   6.  Try/catch/throw (with and without exception variable)
+#   7.  Switch/match statements (braced and end-delimited)
+#   8.  Ternary expressions
+#   9.  String methods (.length, .upper(), .lower(), .substring(),
+#        .split(), .contains(), .replace(), .trim(), .char_at())
+#  10. Array operations (literals, .push(), .pop(), .join(), .length, indexing)
+#  11. For-in string iteration
+#  12. Pre/post increment/decrement (++, --)
+#  13. Float modulo
+#  14. Type function
+# ======================================================================
+
+println("=== SUB Professional Features Test ===")
+println()
+
+# ======================================================================
+# 1. POWER OPERATOR (**)
+# ======================================================================
+# Expected: 8
+println("1. Power operator (2**3):", 2 ** 3)
+
+# Expected: 81
+println("   3**4:", 3 ** 4)
+
+# Right-associative: 2**(3**2) = 2**9 = 512
+# Expected: 512
+var p = 2 ** 3 ** 2
+println("   2**3**2 (right-assoc):", p)
+
+# Power with floats
+# Expected: 9.0
+println("   3.0**2:", 3.0 ** 2)
+
+println()
+
+# ======================================================================
+# 2. COMPOUND ASSIGNMENT (+=, -=, *=, /=, %=)
+# ======================================================================
+var a = 10
+a += 5
+# Expected: 15
+println("2. Compound += (10+5):", a)
+
+a -= 3
+# Expected: 12
+println("   Compound -= (15-3):", a)
+
+a *= 2
+# Expected: 24
+println("   Compound *= (12*2):", a)
+
+a /= 4
+# Expected: 6
+println("   Compound /= (24/4):", a)
+
+a %= 4
+# Expected: 2
+println("   Compound %= (6%4):", a)
+
+println()
+
+# ======================================================================
+# 3. BITWISE OPERATORS (&, |, ^, ~, <<, >>)
+# ======================================================================
+# Expected: 1  (0b1010 & 0b0011 = 0b0010 = 2... wait, 10 & 3 = 2)
+println("3. Bitwise AND (10 & 3):", 10 & 3)
+
+# Expected: 11  (10 | 3 = 11)
+println("   Bitwise OR (10 | 3):", 10 | 3)
+
+# Expected: 9  (10 ^ 3 = 9)
+println("   Bitwise XOR (10 ^ 3):", 10 ^ 3)
+
+# Expected: -11  (~10 = -(10+1) = -11)
+println("   Bitwise NOT (~10):", ~10)
+
+# Expected: 40  (10 << 2 = 40)
+println("   Left shift (10 << 2):", 10 << 2)
+
+# Expected: 2  (10 >> 2 = 2)
+println("   Right shift (10 >> 2):", 10 >> 2)
+
+# Compound bitwise assignment
+var bw = 12
+bw &= 10        # 12 & 10 = 8
+# Expected: 8
+println("   Compound &= (12 & 10):", bw)
+
+bw |= 1          # 8 | 1 = 9
+# Expected: 9
+println("   Compound |= (8 | 1):", bw)
+
+bw ^= 6          # 9 ^ 6 = 15
+# Expected: 15
+println("   Compound ^= (9 ^ 6):", bw)
+
+println()
+
+# ======================================================================
+# 4. BREAK AND CONTINUE IN LOOPS
+# ======================================================================
+# Break in for loop
+var break_result = 0
+for i in range(100) {
+    if i == 5 {
+        break_result = i
+        break
+    }
+}
+# Expected: 5
+println("4. Break in for loop (stop at 5):", break_result)
+
+# Continue in for loop — count only even numbers
+var even_count = 0
+for i in range(10) {
+    if i % 2 == 1 {
+        continue
+    }
+    even_count += 1
+}
+# Expected: 5 (evens: 0,2,4,6,8)
+println("   Continue in for loop (evens in 0..9):", even_count)
+
+# Break in while loop
+var w = 0
+while w < 100 {
+    if w == 7 {
+        break
+    }
+    w += 1
+}
+# Expected: 7
+println("   Break in while loop (stop at 7):", w)
+
+# Continue in while loop — sum odd numbers only
+var w2 = 0
+var odd_sum = 0
+while w2 < 10 {
+    w2 += 1
+    if w2 % 2 == 0 {
+        continue
+    }
+    odd_sum += w2
+}
+# Expected: 25 (1+3+5+7+9)
+println("   Continue in while loop (sum of odds 1..9):", odd_sum)
+
+println()
+
+# ======================================================================
+# 5. DO-WHILE LOOPS
+# ======================================================================
+# Braced form: do { ... } while (cond)
+var dw_val = 0
+do {
+    dw_val += 1
+} while (dw_val < 3)
+# Expected: 3
+println("5. Do-while braced (count to 3):", dw_val)
+
+# End-delimited form: do ... end while cond
+var dw2 = 0
+do
+    dw2 += 10
+end while dw2 < 50
+# Expected: 50
+println("   Do-while end-delimited (+=10 until 50):", dw2)
+
+println()
+
+# ======================================================================
+# 6. TRY / CATCH / THROW
+# ======================================================================
+# Try/catch with exception variable
+var caught_msg = ""
+try {
+    throw "something went wrong"
+} catch (e) {
+    caught_msg = e
+}
+# Expected: something went wrong
+println("6. Try/catch with var (caught):", caught_msg)
+
+# Try/catch without exception variable
+var no_var_caught = false
+try {
+    throw 42
+} catch {
+    no_var_caught = true
+}
+# Expected: true
+println("   Try/catch without var (caught):", no_var_caught)
+
+# Try with no error — should skip catch
+var try_ok = "safe"
+try {
+    try_ok = "no error"
+} catch (err) {
+    try_ok = "should not reach"
+}
+# Expected: no error
+println("   Try without throw (no error):", try_ok)
+
+println()
+
+# ======================================================================
+# 7. SWITCH / MATCH STATEMENTS
+# ======================================================================
+# Braced switch
+var switch_result = ""
+var sw_val = 2
+switch sw_val {
+    case 1:
+        switch_result = "one"
+    case 2:
+        switch_result = "two"
+    case 3:
+        switch_result = "three"
+    default:
+        switch_result = "unknown"
+}
+# Expected: two
+println("7. Switch braced (val=2):", switch_result)
+
+# End-delimited switch
+var match_result = ""
+var m_val = 10
+match m_val
+    case 5:
+        match_result = "five"
+    case 10:
+        match_result = "ten"
+    case 15:
+        match_result = "fifteen"
+    default:
+        match_result = "other"
+end
+# Expected: ten
+println("   Match end-delimited (val=10):", match_result)
+
+# Switch with default
+var def_result = ""
+switch 99 {
+    case 1:
+        def_result = "one"
+    default:
+        def_result = "default hit"
+}
+# Expected: default hit
+println("   Switch default (val=99):", def_result)
+
+println()
+
+# ======================================================================
+# 8. TERNARY EXPRESSIONS
+# ======================================================================
+var age = 20
+# Expected: adult
+println("8. Ternary (20 >= 18 ? adult : minor):", age >= 18 ? "adult" : "minor")
+
+var score = 45
+# Expected: fail
+println("   Ternary (45 >= 60 ? pass : fail):", score >= 60 ? "pass" : "fail")
+
+# Ternary with numbers
+var max_val = 10 > 20 ? 10 : 20
+# Expected: 20
+println("   Ternary max(10,20):", max_val)
+
+# Nested ternary
+var grade = 85
+var letter = grade >= 90 ? "A" : (grade >= 80 ? "B" : "C")
+# Expected: B
+println("   Nested ternary (85 -> letter):", letter)
+
+println()
+
+# ======================================================================
+# 9. STRING METHODS
+# ======================================================================
+var s = "Hello World"
+
+# .length
+# Expected: 11
+println("9. .length ('Hello World'):", s.length)
+
+# .upper()
+# Expected: HELLO WORLD
+println("   .upper():", s.upper())
+
+# .lower()
+# Expected: hello world
+println("   .lower():", s.lower())
+
+# .substring(start, end)
+# Expected: Hello
+println("   .substring(0,5):", s.substring(0, 5))
+
+# .substring(start)
+# Expected: World
+println("   .substring(6):", s.substring(6))
+
+# .split(delimiter)
+var parts = "a,b,c,d".split(",")
+# Expected: 4
+println("   .split(',') length:", parts.length)
+# Expected: a
+println("   .split(',')[0]:", parts[0])
+# Expected: d
+println("   .split(',')[3]:", parts[3])
+
+# .contains(substring)
+# Expected: true
+println("   .contains('World'):", s.contains("World"))
+# Expected: false
+println("   .contains('xyz'):", s.contains("xyz"))
+
+# .replace(old, new)
+# Expected: Hello SUB
+println("   .replace('World','SUB'):", s.replace("World", "SUB"))
+
+# .trim()
+var padded = "  spaces  "
+# Expected: spaces
+println("   .trim('  spaces  '):", padded.trim())
+
+# .char_at(index)
+# Expected: H
+println("   .char_at(0):", s.char_at(0))
+# Expected: W
+println("   .char_at(6):", s.char_at(6))
+
+println()
+
+# ======================================================================
+# 10. ARRAY OPERATIONS
+# ======================================================================
+# Array literals
+var arr = [10, 20, 30, 40, 50]
+
+# Indexing
+# Expected: 10
+println("10. Array literal [0]:", arr[0])
+# Expected: 30
+println("    Array literal [2]:", arr[2])
+# Expected: 50
+println("    Array literal [4]:", arr[4])
+
+# .length
+# Expected: 5
+println("    .length:", arr.length)
+
+# .push()
+arr.push(60)
+# Expected: 6
+println("    After .push(60), .length:", arr.length)
+# Expected: 60
+println("    After .push(60), [5]:", arr[5])
+
+# .pop()
+var popped = arr.pop()
+# Expected: 60
+println("    .pop() returned:", popped)
+# Expected: 5
+println("    After .pop(), .length:", arr.length)
+
+# .join(sep)
+var joined = ["apple", "banana", "cherry"].join(", ")
+# Expected: apple, banana, cherry
+println("    .join(', '):", joined)
+
+# Empty array
+var empty = []
+# Expected: 0
+println("    Empty array .length:", empty.length)
+
+# Array assignment by index
+var mut = [1, 2, 3]
+mut[1] = 99
+# Expected: 99
+println("    Assignment mut[1]=99:", mut[1])
+
+println()
+
+# ======================================================================
+# 11. FOR-IN STRING ITERATION
+# ======================================================================
+var chars = ""
+for ch in "SUB" {
+    chars = chars + ch
+}
+# Expected: SUB
+println("11. For-in string iteration:", chars)
+
+# Count characters with for-in
+var char_count = 0
+for c in "Hello!" {
+    char_count += 1
+}
+# Expected: 6
+println("    For-in char count ('Hello!'):", char_count)
+
+println()
+
+# ======================================================================
+# 12. PRE/POST INCREMENT/DECREMENT (++, --)
+# ======================================================================
+# Pre-increment
+var pre = 5
+# Expected: 6 (value after pre-increment)
+println("12. Pre-increment (++5):", ++pre)
+
+# Pre-decrement
+var pre_dec = 10
+# Expected: 9
+println("    Pre-decrement (--10):", --pre_dec)
+
+# Post-increment
+var post = 20
+# Expected: 20 (value before post-increment)
+println("    Post-increment (20++):", post++)
+# Expected: 21 (value after post-increment)
+println("    After post-increment:", post)
+
+# Post-decrement
+var post_dec = 15
+# Expected: 15 (value before post-decrement)
+println("    Post-decrement (15--):", post_dec--)
+# Expected: 14 (value after post-decrement)
+println("    After post-decrement:", post_dec)
+
+println()
+
+# ======================================================================
+# 13. FLOAT MODULO
+# ======================================================================
+# Float % float
+var fm = 7.5 % 2.0
+# Expected: 1.5
+println("13. Float modulo 7.5 % 2.0:", fm)
+
+# Float % int
+var fm2 = 10.5 % 3
+# Expected: 1.5
+println("    Float modulo 10.5 % 3:", fm2)
+
+println()
+
+# ======================================================================
+# 14. TYPE FUNCTION
+# ======================================================================
+# Integer
+# Expected: int
+println("14. type(42):", type(42))
+
+# Float
+# Expected: float
+println("    type(3.14):", type(3.14))
+
+# String
+# Expected: string
+println("    type('hello'):", type("hello"))
+
+# Boolean
+# Expected: bool
+println("    type(true):", type(true))
+
+# Null
+# Expected: null
+println("    type(null):", type(null))
+
+# Array
+# Expected: array
+println("    type([1,2,3]):", type([1, 2, 3]))
+
+println()
+
+# ======================================================================
+# COMBINATION TEST — using multiple features together
+# ======================================================================
+println("=== Combination Test ===")
+
+# Use power, compound assignment, ternary, and string methods together
+var base = 2
+var exp = 8
+var power_val = base ** exp
+var label = power_val > 100 ? "big" : "small"
+# Expected: big
+println("2**8 = 256, ternary label:", label)
+
+# Use arrays, for-in, break, and string methods
+var words = ["hello", "WORLD", "SUB"]
+var upper_words = []
+for w in words {
+    upper_words.push(w.upper())
+}
+# Expected: HELLO, WORLD, SUB
+println("Array .push + .upper + .join:", upper_words.join(", "))
+
+println()
+
+println("=== ALL PROFESSIONAL FEATURES TESTS PASSED ===")

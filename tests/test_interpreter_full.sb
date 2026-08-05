@@ -1,0 +1,235 @@
+# Comprehensive interpreter test
+# Tests features supported by the current parser
+
+# === Basic types and builtins ===
+print("=== Types & Builtins ===")
+print(type(42))
+print(type(3.14))
+print(type("hello"))
+print(type(true))
+print(type(null))
+
+# === Array literal and indexing ===
+print("=== Arrays ===")
+var arr = [10, 20, 30]
+print(arr[0])
+print(arr[1])
+print(arr[2])
+print(arr.length)
+
+# === Array push and pop (builtin) ===
+var pa = [1]
+push(pa, 2)
+push(pa, 3)
+print(pa.length)
+print(pop(pa))
+print(pa.length)
+
+# === Array join (builtin) ===
+print(join(pa, ", "))
+
+# === Object literal ===
+print("=== Objects ===")
+var obj = {"name": "SUB", "version": 2}
+print(obj["name"])
+print(obj["version"])
+
+# === For-in range ===
+print("=== For-in Range ===")
+var sum = 0
+for i in range(5) {
+    sum = sum + i
+}
+print(sum)
+
+# === For-in string ===
+print("=== For-in String ===")
+var chars = ""
+for ch in "abc" {
+    chars = chars + ch
+}
+print(chars)
+
+# === For-in array ===
+print("=== For-in Array ===")
+var items = [10, 20, 30]
+var total = 0
+for item in items {
+    total = total + item
+}
+print(total)
+
+# === Break in for loop ===
+print("=== Break ===")
+var found = 0
+for i in range(10) {
+    if i == 5 {
+        found = i
+        break
+    }
+}
+print(found)
+
+# === Continue in for loop ===
+print("=== Continue ===")
+var evens = 0
+for i in range(10) {
+    if i % 2 == 1 {
+        continue
+    }
+    evens = evens + 1
+}
+print(evens)
+
+# === Break in while loop ===
+print("=== While Break ===")
+var w = 0
+while w < 100 {
+    if w == 3 {
+        break
+    }
+    w = w + 1
+}
+print(w)
+
+# === Continue in while loop ===
+print("=== While Continue ===")
+var wc = 0
+var wcsum = 0
+while wc < 10 {
+    wc = wc + 1
+    if wc % 2 == 0 {
+        continue
+    }
+    wcsum = wcsum + wc
+}
+print(wcsum)
+
+# === Nested loops with break/continue ===
+print("=== Nested Loops ===")
+var result = 0
+for i in range(3) {
+    for j in range(3) {
+        if j == 2 {
+            break
+        }
+        result = result + 1
+    }
+}
+print(result)
+
+# === String methods ===
+print("=== String Methods ===")
+var s = "Hello World"
+print(s.length)
+print(s.upper())
+print(s.lower())
+print(s.substring(0, 5))
+print(s.contains("World"))
+print(s.contains("xyz"))
+print(s.replace("World", "SUB"))
+print(trim("  spaces  "))
+
+# === String split ===
+print("=== String Split ===")
+var parts = "a,b,c".split(",")
+print(parts[0])
+print(parts[1])
+print(parts[2])
+print(parts.length)
+
+# === String char_at ===
+print("=== Char At ===")
+print(char_at("Hello", 0))
+print(char_at("Hello", 4))
+
+# === Math builtins ===
+print("=== Math ===")
+print(abs(-42))
+print(min(10, 20))
+print(max(10, 20))
+print(floor(3.7))
+print(ceil(3.2))
+print(round(3.5))
+print(sqrt(16))
+
+# === Float modulo ===
+print("=== Float Modulo ===")
+print(7.5 % 2.0)
+
+# === Ternary ===
+print("=== Ternary ===")
+var x = 10
+print(x > 5 ? "big" : "small")
+print(x < 5 ? "big" : "small")
+
+# === println ===
+print("=== Println ===")
+println("hello", "world")
+println(1, 2, 3)
+
+# === to_string ===
+print("=== To String ===")
+print(to_string(42))
+print(to_string(3.14))
+
+# === Logical operators ===
+print("=== Logic ===")
+print(true && true)
+print(true && false)
+print(false || true)
+print(!true)
+print(!false)
+
+# === Comparison ===
+print("=== Comparison ===")
+print(1 < 2)
+print(2 > 1)
+print(1 == 1)
+print(1 != 2)
+
+# === String comparison ===
+print("=== String Comparison ===")
+print("abc" < "def")
+print("abc" == "abc")
+print("abc" != "def")
+
+# === Nested function calls ===
+print("=== Nested Calls ===")
+print(str(42))
+print(str(3.14))
+print(int("42"))
+print(float("3.14"))
+
+# === Function returning value used in expression ===
+print("=== Function Expressions ===")
+function double(n) {
+    return n * 2
+}
+print(double(5))
+print(double(3) + double(4))
+
+# === Recursive function ===
+print("=== Recursion ===")
+function fib(n) {
+    if n <= 1 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+print(fib(10))
+
+# === Array methods via member access ===
+print("=== Array Member Methods ===")
+var ma = [1, 2, 3]
+print(ma.length)
+ma.push(4)
+print(ma.length)
+print(ma.pop())
+print(ma.length)
+print(ma.join("-"))
+
+# === println empty ===
+println()
+
+print("=== ALL TESTS PASSED ===")

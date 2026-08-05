@@ -264,11 +264,24 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, "%s", node->value);
             break;
         case AST_BINARY_EXPR:
-            sb_append(sb, "(");
-            generate_expr_rust(sb, node->left);
-            sb_append(sb, " %s ", node->value ? node->value : "+");
-            generate_expr_rust(sb, node->right);
-            sb_append(sb, ")");
+            if (node->value && strcmp(node->value, "+") == 0 &&
+                (node->data_type == TYPE_STRING ||
+                 (node->left && node->left->data_type == TYPE_STRING) ||
+                 (node->right && node->right->data_type == TYPE_STRING))) {
+                /* String concatenation: use format! because Rust cannot
+                   use + between &str and String without explicit .to_string() */
+                sb_append(sb, "format!(\"{}{}\", ");
+                generate_expr_rust(sb, node->left);
+                sb_append(sb, ", ");
+                generate_expr_rust(sb, node->right);
+                sb_append(sb, ")");
+            } else {
+                sb_append(sb, "(");
+                generate_expr_rust(sb, node->left);
+                sb_append(sb, " %s ", node->value ? node->value : "+");
+                generate_expr_rust(sb, node->right);
+                sb_append(sb, ")");
+            }
             break;
         case AST_UNARY_EXPR:
             sb_append(sb, "%s", node->value ? node->value : "");

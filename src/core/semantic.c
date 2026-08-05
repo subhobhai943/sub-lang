@@ -293,7 +293,7 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
             // Arithmetic operators
             if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
                 strcmp(op, "*") == 0 || strcmp(op, "/") == 0 ||
-                strcmp(op, "%") == 0) {
+                strcmp(op, "%") == 0 || strcmp(op, "**") == 0) {
                 
                 // String concatenation
                 if (strcmp(op, "+") == 0) {
@@ -395,6 +395,52 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 return TYPE_BOOL;
             }
             
+            // Bitwise operators (int only)
+            if (strcmp(op, "&") == 0 || strcmp(op, "|") == 0 ||
+                strcmp(op, "^") == 0 || strcmp(op, "<<") == 0 ||
+                strcmp(op, ">>") == 0) {
+                if (left_type == TYPE_INT && right_type == TYPE_INT) {
+                    node->data_type = TYPE_INT;
+                    return TYPE_INT;
+                }
+                if (left_type == TYPE_UNKNOWN || left_type == TYPE_AUTO ||
+                    right_type == TYPE_UNKNOWN || right_type == TYPE_AUTO) {
+                    node->data_type = TYPE_INT;
+                    return TYPE_INT;
+                }
+                char error_msg[512];
+                snprintf(error_msg, sizeof(error_msg),
+                         "Type error: Bitwise operator '%s' requires integer types, got %s and %s",
+                         op, data_type_to_string(left_type), data_type_to_string(right_type));
+                compile_error(error_msg, node->line);
+                node->data_type = TYPE_UNKNOWN;
+                return TYPE_UNKNOWN;
+            }
+
+            // Compound assignment operators (binary expression context)
+            if (strcmp(op, "+=") == 0 || strcmp(op, "-=") == 0 ||
+                strcmp(op, "*=") == 0 || strcmp(op, "/=") == 0 ||
+                strcmp(op, "%=") == 0) {
+                if (left_type == TYPE_INT || left_type == TYPE_FLOAT) {
+                    if (right_type == TYPE_INT || right_type == TYPE_FLOAT) {
+                        node->data_type = (left_type == TYPE_FLOAT || right_type == TYPE_FLOAT) ? TYPE_FLOAT : TYPE_INT;
+                        return node->data_type;
+                    }
+                }
+                if (left_type == TYPE_UNKNOWN || left_type == TYPE_AUTO ||
+                    right_type == TYPE_UNKNOWN || right_type == TYPE_AUTO) {
+                    node->data_type = TYPE_INT;
+                    return TYPE_INT;
+                }
+                char error_msg[512];
+                snprintf(error_msg, sizeof(error_msg),
+                         "Type error: Cannot apply compound operator '%s' to %s and %s",
+                         op, data_type_to_string(left_type), data_type_to_string(right_type));
+                compile_error(error_msg, node->line);
+                node->data_type = TYPE_UNKNOWN;
+                return TYPE_UNKNOWN;
+            }
+
             compile_error("Unknown binary operator", node->line);
             node->data_type = TYPE_UNKNOWN;
             return TYPE_UNKNOWN;
@@ -431,6 +477,19 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 return right_type;
             }
             
+            // Bitwise NOT (int only)
+            if (strcmp(node->value, "~") == 0) {
+                if (right_type != TYPE_INT && right_type != TYPE_UNKNOWN && right_type != TYPE_AUTO) {
+                    char error_msg[512];
+                    snprintf(error_msg, sizeof(error_msg),
+                             "Type error: Bitwise NOT requires integer type, got %s",
+                             data_type_to_string(right_type));
+                    compile_error(error_msg, node->line);
+                }
+                node->data_type = TYPE_INT;
+                return TYPE_INT;
+            }
+
             compile_error("Unknown unary operator", node->line);
             return TYPE_UNKNOWN;
             
@@ -968,19 +1027,31 @@ int semantic_check_types(ASTNode *ast) {
         fprintf(stderr, "Semantic error: NULL AST\n");
         return 0;
     }
-    
-    printf("[Type Check] Running strict type checking...\n");
-    
+
+    /* Save the global error counter so we can isolate this pass */
+    int prev_errors = g_semantic_error_count;
+
+    fprintf(stderr, "[Type Check] Running strict type checking...\n");
+
     LocalSymbolTable *table = create_symbol_table();
     if (!table) return 0;
-    
-    // Perform type checking on all statements
+
+    /* Perform type checking on all statements */
     check_statement_type(ast, table, NULL);
-    
+
     free_symbol_table(table);
-    
-    printf("[Type Check] Type checking complete\n");
-    return 1;
+
+    /* Restore the previous error count (isolate this pass) */
+    int errors_this_pass = g_semantic_error_count - prev_errors;
+    g_semantic_error_count = prev_errors;
+
+    if (errors_this_pass > 0) {
+        fprintf(stderr, "[Type Check] Type checking found %d error(s)\n", errors_this_pass);
+    } else {
+        fprintf(stderr, "[Type Check] Type checking complete\n");
+    }
+
+    return errors_this_pass == 0 ? 1 : 0;
 }
 
 // Infer type from AST node (helper for code generation)

@@ -22,6 +22,11 @@ typedef struct {
 /* Forward declarations */
 static ASTNode* parse_statement(ParserState *state);
 static ASTNode* parse_expression(ParserState *state);
+static ASTNode* parse_do_while(ParserState *state);
+static ASTNode* parse_try(ParserState *state);
+static ASTNode* parse_throw(ParserState *state);
+static ASTNode* parse_switch(ParserState *state);
+static ASTNode* parse_import(ParserState *state);
 
 /* String builder for embed blocks */
 typedef struct {
@@ -179,8 +184,12 @@ static void synchronize(ParserState *state) {
             case TOKEN_IF:
             case TOKEN_FOR:
             case TOKEN_WHILE:
+            case TOKEN_DO:
+            case TOKEN_TRY:
+            case TOKEN_THROW:
             case TOKEN_BREAK:
             case TOKEN_CONTINUE:
+            case TOKEN_IMPORT:
                 return;
             default:
                 advance(state);
@@ -443,8 +452,28 @@ static ASTNode* parse_call(ParserState *state) {
     return expr;
 }
 
+/* Power (**) - right-associative, higher precedence than *,/,% */
+static ASTNode* parse_power(ParserState *state) {
+    ASTNode *expr = parse_call(state);
+    if (check_operator(state, "**")) {
+        Token *op = current_token(state);
+        advance(state);
+        ASTNode *right = parse_power(state); /* right-associative: recurse into parse_power */
+        ASTNode *node = create_node(AST_BINARY_EXPR, op, op->value);
+        if (!node) {
+            parser_free_ast(expr);
+            parser_free_ast(right);
+            return NULL;
+        }
+        node->left = expr;
+        node->right = right;
+        return node;
+    }
+    return expr;
+}
+
 static ASTNode* parse_unary(ParserState *state) {
-    if (check_operator(state, "!") || check_operator(state, "-")) {
+    if (check_operator(state, "!") || check_operator(state, "-") || check_operator(state, "+")) {
         Token *op = current_token(state);
         advance(state);
         ASTNode *right = parse_unary(state);
@@ -457,7 +486,35 @@ static ASTNode* parse_unary(ParserState *state) {
         return node;
     }
 
-    return parse_call(state);
+    /* Prefix ++ and -- */
+    if (check_operator(state, "++") || check_operator(state, "--")) {
+        Token *op = current_token(state);
+        advance(state);
+        ASTNode *operand = parse_call(state);
+        ASTNode *node = create_node(AST_UNARY_EXPR, op, op->value);
+        if (!node) {
+            parser_free_ast(operand);
+            return NULL;
+        }
+        node->right = operand;
+        return node;
+    }
+
+    /* Bitwise NOT */
+    if (check_operator(state, "~")) {
+        Token *op = current_token(state);
+        advance(state);
+        ASTNode *right = parse_unary(state);
+        ASTNode *node = create_node(AST_UNARY_EXPR, op, op->value);
+        if (!node) {
+            parser_free_ast(right);
+            return NULL;
+        }
+        node->right = right;
+        return node;
+    }
+
+    return parse_power(state);
 }
 
 static ASTNode* parse_factor(ParserState *state) {
@@ -537,12 +594,88 @@ static ASTNode* parse_equality(ParserState *state) {
     return expr;
 }
 
-static ASTNode* parse_logical_and(ParserState *state) {
+static ASTNode* parse_bitwise_and(ParserState *state) {
     ASTNode *expr = parse_equality(state);
-    while (check_operator(state, "&&")) {
+    while (check_operator(state, "&")) {
         Token *op = current_token(state);
         advance(state);
         ASTNode *right = parse_equality(state);
+        ASTNode *node = create_node(AST_BINARY_EXPR, op, op->value);
+        if (!node) {
+            parser_free_ast(expr);
+            parser_free_ast(right);
+            return NULL;
+        }
+        node->left = expr;
+        node->right = right;
+        expr = node;
+    }
+    return expr;
+}
+
+static ASTNode* parse_bitwise_xor(ParserState *state) {
+    ASTNode *expr = parse_bitwise_and(state);
+    while (check_operator(state, "^")) {
+        Token *op = current_token(state);
+        advance(state);
+        ASTNode *right = parse_bitwise_and(state);
+        ASTNode *node = create_node(AST_BINARY_EXPR, op, op->value);
+        if (!node) {
+            parser_free_ast(expr);
+            parser_free_ast(right);
+            return NULL;
+        }
+        node->left = expr;
+        node->right = right;
+        expr = node;
+    }
+    return expr;
+}
+
+static ASTNode* parse_bitwise_or(ParserState *state) {
+    ASTNode *expr = parse_bitwise_xor(state);
+    while (check_operator(state, "|")) {
+        Token *op = current_token(state);
+        advance(state);
+        ASTNode *right = parse_bitwise_xor(state);
+        ASTNode *node = create_node(AST_BINARY_EXPR, op, op->value);
+        if (!node) {
+            parser_free_ast(expr);
+            parser_free_ast(right);
+            return NULL;
+        }
+        node->left = expr;
+        node->right = right;
+        expr = node;
+    }
+    return expr;
+}
+
+static ASTNode* parse_bitwise_shift(ParserState *state) {
+    ASTNode *expr = parse_bitwise_or(state);
+    while (check_operator(state, "<<") || check_operator(state, ">>")) {
+        Token *op = current_token(state);
+        advance(state);
+        ASTNode *right = parse_bitwise_or(state);
+        ASTNode *node = create_node(AST_BINARY_EXPR, op, op->value);
+        if (!node) {
+            parser_free_ast(expr);
+            parser_free_ast(right);
+            return NULL;
+        }
+        node->left = expr;
+        node->right = right;
+        expr = node;
+    }
+    return expr;
+}
+
+static ASTNode* parse_logical_and(ParserState *state) {
+    ASTNode *expr = parse_bitwise_shift(state);
+    while (check_operator(state, "&&")) {
+        Token *op = current_token(state);
+        advance(state);
+        ASTNode *right = parse_bitwise_shift(state);
         ASTNode *node = create_node(AST_BINARY_EXPR, op, op->value);
         if (!node) {
             parser_free_ast(expr);
@@ -600,19 +733,35 @@ static ASTNode* parse_ternary(ParserState *state) {
 
 static ASTNode* parse_assignment(ParserState *state) {
     ASTNode *expr = parse_ternary(state);
-    if (check_operator(state, "=")) {
+    /* Check for compound assignment operators: +=, -=, *=, /=, %=, **=, &=, |=, ^=, <<=, >>= */
+    const char *compound_ops[] = {"=", "+=", "-=", "*=", "/=", "%=", "**=", "&=", "|=", "^=", "<<=", ">>=", NULL};
+    for (int i = 0; compound_ops[i]; i++) {
+        if (check_operator(state, compound_ops[i])) {
+            Token *op = current_token(state);
+            advance(state);
+            ASTNode *value = parse_assignment(state);
+            ASTNode *assign = create_node(AST_ASSIGN_STMT, op, compound_ops[i]);
+            if (!assign) {
+                parser_free_ast(expr);
+                parser_free_ast(value);
+                return NULL;
+            }
+            assign->left = expr;
+            assign->right = value;
+            return assign;
+        }
+    }
+    /* Postfix ++ and -- */
+    if (check_operator(state, "++") || check_operator(state, "--")) {
         Token *op = current_token(state);
         advance(state);
-        ASTNode *value = parse_assignment(state);
-        ASTNode *assign = create_node(AST_ASSIGN_STMT, op, "=");
-        if (!assign) {
+        ASTNode *node = create_node(AST_UNARY_EXPR, op, op->value);
+        if (!node) {
             parser_free_ast(expr);
-            parser_free_ast(value);
             return NULL;
         }
-        assign->left = expr;
-        assign->right = value;
-        return assign;
+        node->left = expr; /* operand in left for postfix */
+        return node;
     }
     return expr;
 }
@@ -995,6 +1144,438 @@ static ASTNode* parse_return(ParserState *state) {
     return ret;
 }
 
+/* ========================================
+   do-while Statement Parsing
+   Parses:  do <body> while <condition> end
+            do { <body> } while (<condition>)
+   ======================================== */
+
+static ASTNode* parse_do_while(ParserState *state) {
+    Token *start = current_token(state);
+    advance(state); /* consume 'do' */
+
+    ASTNode *do_node = create_node(AST_DO_WHILE_STMT, start, NULL);
+    if (!do_node) return NULL;
+
+    skip_separators(state);
+
+    /* Parse body block - supports both braced and end-delimited forms */
+    do_node->body = parse_block(state, false);
+
+    skip_separators(state);
+
+    /* For end-delimited form: consume 'end' before 'while' */
+    if (match(state, TOKEN_END)) {
+        advance(state);
+        skip_separators(state);
+    }
+
+    /* Expect 'while' keyword */
+    Token *while_tok = expect(state, TOKEN_WHILE, "Expected 'while' after do-while body");
+    if (!while_tok) {
+        parser_free_ast(do_node);
+        return NULL;
+    }
+
+    skip_separators(state);
+
+    /* Optionally consume '(' around condition for C-style: while (expr) */
+    if (match(state, TOKEN_LPAREN)) {
+        advance(state);
+        do_node->condition = parse_expression(state);
+        expect(state, TOKEN_RPAREN, "Expected ')' after do-while condition");
+    } else {
+        do_node->condition = parse_expression(state);
+    }
+
+    return do_node;
+}
+
+/* ========================================
+   try/catch/finally Statement Parsing
+   Parses:  try <body> [catch (<var>) <handler>] [finally <body>] end
+            try { <body> } [catch (<var>) { <handler> }] [finally { <body> }]
+   ======================================== */
+
+static ASTNode* parse_try(ParserState *state) {
+    Token *start = current_token(state);
+    advance(state); /* consume 'try' */
+
+    ASTNode *try_node = create_node(AST_TRY_STMT, start, NULL);
+    if (!try_node) return NULL;
+
+    skip_separators(state);
+
+    /* Parse try body - stop at catch/finally/end as well as } */
+    if (match(state, TOKEN_LBRACE)) {
+        try_node->body = parse_block(state, false);
+    } else {
+        /* Custom block parsing for try body that also stops at catch/finally */
+        ASTNode *block = create_node(AST_BLOCK, current_token(state), NULL);
+        if (!block) { parser_free_ast(try_node); return NULL; }
+        ASTNode *first_stmt = NULL;
+        ASTNode *last_stmt = NULL;
+        skip_separators(state);
+        while (!match(state, TOKEN_EOF)) {
+            if (match(state, TOKEN_END) || match(state, TOKEN_RBRACE) ||
+                match(state, TOKEN_CATCH) || match(state, TOKEN_FINALLY)) {
+                break;
+            }
+            ASTNode *stmt = parse_statement(state);
+            if (stmt) {
+                if (!first_stmt) { first_stmt = stmt; last_stmt = stmt; }
+                else { last_stmt->next = stmt; last_stmt = stmt; }
+                add_child(block, stmt);
+            } else {
+                synchronize(state);
+            }
+            skip_separators(state);
+        }
+        block->body = first_stmt;
+        try_node->body = block;
+    }
+
+    skip_separators(state);
+
+    /* Optionally parse catch clause */
+    if (match(state, TOKEN_CATCH)) {
+        Token *catch_tok = current_token(state);
+        advance(state);
+
+        ASTNode *catch_node = create_node(AST_CATCH_CLAUSE, catch_tok, NULL);
+        if (!catch_node) {
+            parser_free_ast(try_node);
+            return NULL;
+        }
+
+        /* Expect '(' <identifier> ')' or just an identifier for exception variable */
+        if (match(state, TOKEN_LPAREN)) {
+            advance(state);
+            Token *exc_var = expect(state, TOKEN_IDENTIFIER, "Expected exception variable name in catch");
+            if (exc_var) {
+                catch_node->value = strdup(exc_var->value);
+                if (!catch_node->value) {
+                    parser_free_ast(catch_node);
+                    parser_free_ast(try_node);
+                    return NULL;
+                }
+            }
+            expect(state, TOKEN_RPAREN, "Expected ')' after catch variable");
+        } else if (match(state, TOKEN_IDENTIFIER)) {
+            Token *exc_var = current_token(state);
+            catch_node->value = strdup(exc_var->value);
+            advance(state);
+        }
+
+        skip_separators(state);
+
+        /* Parse catch handler body - also stop at finally/end */
+        if (match(state, TOKEN_LBRACE)) {
+            catch_node->body = parse_block(state, false);
+        } else {
+            ASTNode *cblock = create_node(AST_BLOCK, current_token(state), NULL);
+            if (!cblock) { parser_free_ast(catch_node); parser_free_ast(try_node); return NULL; }
+            ASTNode *first_stmt = NULL;
+            ASTNode *last_stmt = NULL;
+            skip_separators(state);
+            while (!match(state, TOKEN_EOF)) {
+                if (match(state, TOKEN_END) || match(state, TOKEN_RBRACE) ||
+                    match(state, TOKEN_FINALLY)) {
+                    break;
+                }
+                ASTNode *stmt = parse_statement(state);
+                if (stmt) {
+                    if (!first_stmt) { first_stmt = stmt; last_stmt = stmt; }
+                    else { last_stmt->next = stmt; last_stmt = stmt; }
+                    add_child(cblock, stmt);
+                } else {
+                    synchronize(state);
+                }
+                skip_separators(state);
+            }
+            cblock->body = first_stmt;
+            catch_node->body = cblock;
+        }
+
+        /* Chain catch as try_node->right */
+        try_node->right = catch_node;
+
+        skip_separators(state);
+    }
+
+    /* Optionally parse finally clause */
+    if (match(state, TOKEN_FINALLY)) {
+        Token *finally_tok = current_token(state);
+        advance(state);
+
+        ASTNode *finally_node = create_node(AST_FINALLY_CLAUSE, finally_tok, NULL);
+        if (!finally_node) {
+            parser_free_ast(try_node);
+            return NULL;
+        }
+
+        skip_separators(state);
+
+        /* Parse finally body */
+        finally_node->body = parse_block(state, false);
+
+        /* Chain finally */
+        if (try_node->right) {
+            try_node->right->next = finally_node;
+        } else {
+            try_node->right = finally_node;
+        }
+
+        skip_separators(state);
+    }
+
+    /* Consume closing 'end' */
+    if (match(state, TOKEN_END)) {
+        advance(state);
+    }
+
+    return try_node;
+}
+
+/* ========================================
+   throw Statement Parsing
+   Parses:  throw <expression>
+   ======================================== */
+
+static ASTNode* parse_throw(ParserState *state) {
+    Token *start = current_token(state);
+    advance(state); /* consume 'throw' */
+
+    ASTNode *throw_node = create_node(AST_THROW_STMT, start, NULL);
+    if (!throw_node) return NULL;
+
+    /* Parse the expression to throw */
+    if (!match(state, TOKEN_NEWLINE) && !match(state, TOKEN_SEMICOLON) &&
+        !match(state, TOKEN_END) && !match(state, TOKEN_RBRACE) &&
+        !match(state, TOKEN_EOF)) {
+        throw_node->right = parse_expression(state);
+    }
+
+    return throw_node;
+}
+
+/* ========================================
+   switch/match Statement Parsing
+   Parses:  switch <expr> { case <value>: <body> ... default: <body> }
+            match <expr> { case <value> => <body> ... default => <body> }
+   ======================================== */
+
+static ASTNode* parse_switch(ParserState *state) {
+    Token *start = current_token(state);
+    advance(state); /* consume 'switch' or 'match' identifier */
+
+    ASTNode *switch_node = create_node(AST_SWITCH_STMT, start, NULL);
+    if (!switch_node) return NULL;
+
+    skip_separators(state);
+
+    /* Parse the switch expression (the value being matched) */
+    switch_node->condition = parse_expression(state);
+
+    skip_separators(state);
+
+    /* Support both braced { } and end-delimited forms */
+    int braced = 0;
+    if (match(state, TOKEN_LBRACE)) {
+        advance(state);
+        braced = 1;
+    }
+
+    skip_separators(state);
+
+    /* Parse case clauses until '}' or 'end' */
+    while (!match(state, TOKEN_EOF)) {
+        if (braced && match(state, TOKEN_RBRACE)) break;
+        if (!braced && match(state, TOKEN_END)) break;
+        /* Check for 'default' clause (identifier with value "default") */
+        if (match(state, TOKEN_IDENTIFIER) &&
+            current_token(state)->value &&
+            strcmp(current_token(state)->value, "default") == 0) {
+
+            Token *def_tok = current_token(state);
+            advance(state);
+
+            ASTNode *def_node = create_node(AST_DEFAULT_CLAUSE, def_tok, "default");
+            if (!def_node) {
+                parser_free_ast(switch_node);
+                return NULL;
+            }
+
+            /* Consume ':' or '=>' separator */
+            if (match(state, TOKEN_COLON)) {
+                advance(state);
+            } else if (match(state, TOKEN_ARROW)) {
+                advance(state);
+            } else {
+                parser_error(state, "Expected ':' or '=>' after 'default'");
+            }
+
+            skip_separators(state);
+
+            /* Parse default body - collect statements until next case/default or closing */
+            ASTNode *first_stmt = NULL;
+            ASTNode *last_stmt = NULL;
+            while (!match(state, TOKEN_EOF)) {
+                if (braced && match(state, TOKEN_RBRACE)) break;
+                if (!braced && match(state, TOKEN_END)) break;
+                if (match(state, TOKEN_IDENTIFIER) &&
+                    current_token(state)->value &&
+                    (strcmp(current_token(state)->value, "case") == 0 ||
+                     strcmp(current_token(state)->value, "default") == 0)) {
+                    break;
+                }
+                ASTNode *stmt = parse_statement(state);
+                if (stmt) {
+                    if (!first_stmt) { first_stmt = stmt; last_stmt = stmt; }
+                    else { last_stmt->next = stmt; last_stmt = stmt; }
+                    add_child(def_node, stmt);
+                } else {
+                    synchronize(state);
+                }
+                skip_separators(state);
+            }
+            def_node->body = first_stmt;
+
+            add_child(switch_node, def_node);
+            skip_separators(state);
+            continue;
+        }
+
+        /* Check for 'case' clause (identifier with value "case") */
+        if (match(state, TOKEN_IDENTIFIER) &&
+            current_token(state)->value &&
+            strcmp(current_token(state)->value, "case") == 0) {
+
+            Token *case_tok = current_token(state);
+            advance(state);
+
+            ASTNode *case_node = create_node(AST_CASE_CLAUSE, case_tok, NULL);
+            if (!case_node) {
+                parser_free_ast(switch_node);
+                return NULL;
+            }
+
+            /* Parse case value(s) */
+            while (true) {
+                skip_separators(state);
+                ASTNode *case_val = parse_expression(state);
+                if (case_val) {
+                    add_child(case_node, case_val);
+                }
+                skip_separators(state);
+
+                /* Consume ':' or '=>' separator */
+                if (match(state, TOKEN_COLON)) {
+                    advance(state);
+                    break;
+                } else if (match(state, TOKEN_ARROW)) {
+                    advance(state);
+                    break;
+                } else if (match(state, TOKEN_COMMA)) {
+                    /* Multiple case values: case 1, 2, 3: ... */
+                    advance(state);
+                    continue;
+                } else {
+                    break;
+                }
+            }
+
+            skip_separators(state);
+
+            /* Parse case body - collect statements until next case/default or closing */
+            ASTNode *first_stmt = NULL;
+            ASTNode *last_stmt = NULL;
+            while (!match(state, TOKEN_EOF)) {
+                if (braced && match(state, TOKEN_RBRACE)) break;
+                if (!braced && match(state, TOKEN_END)) break;
+                if (match(state, TOKEN_IDENTIFIER) &&
+                    current_token(state)->value &&
+                    (strcmp(current_token(state)->value, "case") == 0 ||
+                     strcmp(current_token(state)->value, "default") == 0)) {
+                    break;
+                }
+                ASTNode *stmt = parse_statement(state);
+                if (stmt) {
+                    if (!first_stmt) { first_stmt = stmt; last_stmt = stmt; }
+                    else { last_stmt->next = stmt; last_stmt = stmt; }
+                    add_child(case_node, stmt);
+                } else {
+                    synchronize(state);
+                }
+                skip_separators(state);
+            }
+            case_node->body = first_stmt;
+
+            add_child(switch_node, case_node);
+            skip_separators(state);
+            continue;
+        }
+
+        /* Unknown token inside switch - skip it */
+        parser_error(state, "Expected 'case' or 'default' inside switch");
+        advance(state);
+        skip_separators(state);
+    }
+
+    /* Consume closing brace or end */
+    if (braced) {
+        expect(state, TOKEN_RBRACE, "Expected '}' to close switch statement");
+    } else if (match(state, TOKEN_END)) {
+        advance(state);
+    }
+
+    return switch_node;
+}
+
+static ASTNode* parse_import(ParserState *state) {
+    Token *start = current_token(state);
+    advance(state); /* consume 'import' */
+
+    Token *module_tok = current_token(state);
+    if (!module_tok) {
+        parser_error(state, "Expected module name after 'import'");
+        return NULL;
+    }
+
+    const char *module_name = NULL;
+    if (module_tok->type == TOKEN_STRING_LITERAL) {
+        module_name = module_tok->value;
+        advance(state);
+    } else if (module_tok->type == TOKEN_IDENTIFIER) {
+        module_name = module_tok->value;
+        advance(state);
+    } else {
+        parser_error(state, "Expected string literal or identifier as module name");
+        return NULL;
+    }
+
+    /* Build "import <module>" as the node value */
+    size_t len = 7 + strlen(module_name) + 1; /* "import " + name + "\0" */
+    char *import_str = malloc(len);
+    if (!import_str) return NULL;
+    snprintf(import_str, len, "import %s", module_name);
+
+    ASTNode *node = create_node(AST_VAR_DECL, start, import_str);
+    free(import_str);
+    if (!node) return NULL;
+
+    /* Use metadata to mark this as an import statement */
+    node->metadata = strdup("import");
+    if (!node->metadata) {
+        parser_free_ast(node);
+        return NULL;
+    }
+
+    node->line = start->line;
+    node->column = start->column;
+    return node;
+}
+
 static ASTNode* parse_statement(ParserState *state) {
     skip_separators(state);
 
@@ -1003,6 +1584,10 @@ static ASTNode* parse_statement(ParserState *state) {
 
     if (match(state, TOKEN_EMBED)) {
         return parse_embed_block(state);
+    }
+
+    if (match(state, TOKEN_IMPORT)) {
+        return parse_import(state);
     }
 
     if (match(state, TOKEN_VAR)) {
@@ -1029,6 +1614,24 @@ static ASTNode* parse_statement(ParserState *state) {
 
     if (match(state, TOKEN_WHILE)) {
         return parse_while(state);
+    }
+
+    if (match(state, TOKEN_DO)) {
+        return parse_do_while(state);
+    }
+
+    if (match(state, TOKEN_TRY)) {
+        return parse_try(state);
+    }
+
+    if (match(state, TOKEN_THROW)) {
+        return parse_throw(state);
+    }
+
+    /* switch/match recognized as identifiers */
+    if (match(state, TOKEN_IDENTIFIER) && tok->value &&
+        (strcmp(tok->value, "switch") == 0 || strcmp(tok->value, "match") == 0)) {
+        return parse_switch(state);
     }
 
     if (match(state, TOKEN_RETURN)) {
