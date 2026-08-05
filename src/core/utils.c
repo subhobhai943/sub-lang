@@ -79,14 +79,14 @@ void print_ast(ASTNode *node, int depth) {
    Symbol Table Implementation
    ======================================== */
 
-// Simple hash function
+// Simple hash function (uses unsigned to avoid signed overflow UB)
 static int hash(const char *str) {
-    int h = 5381;
+    unsigned int h = 5381;
     int c;
     while ((c = *str++)) {
-        h = ((h << 5) + h) + c;
+        h = ((h << 5) + h) + (unsigned char)c;
     }
-    return h < 0 ? -h : h;
+    return (int)(h % 2147483647u);
 }
 
 // Create a new symbol table

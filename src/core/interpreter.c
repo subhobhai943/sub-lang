@@ -44,7 +44,11 @@ void env_define(Env *env, const char *name, SubVal val) {
 void env_set(Env *env, const char *name, SubVal val) {
     for (Env *s = env; s; s = s->parent)
         for (EnvEntry *e = s->vars; e; e = e->next)
-            if (strcmp(e->name, name) == 0) { e->val = val; return; }
+            if (strcmp(e->name, name) == 0) {
+                if (e->val.type == VAL_STRING) free(e->val.sv);
+                e->val = val;
+                return;
+            }
     env_define(env, name, val);
 }
 
@@ -143,7 +147,7 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     if (strcmp(op,"-")==0) return use_float ? make_float(a-b) : make_int((long long)(a-b));
     if (strcmp(op,"*")==0) return use_float ? make_float(a*b) : make_int((long long)(a*b));
     if (strcmp(op,"/")==0) return b==0 ? (fprintf(stderr,"Division by zero\n"),NULL_VAL) : use_float ? make_float(a/b) : make_int((long long)(a/b));
-    if (strcmp(op,"%")==0) return make_int((long long)a % (long long)b);
+    if (strcmp(op,"%")==0) return b==0 ? (fprintf(stderr,"Modulo by zero\n"),NULL_VAL) : make_int((long long)a % (long long)b);
     if (strcmp(op,"==")==0) return make_bool(a==b);
     if (strcmp(op,"!=")==0) return make_bool(a!=b);
     if (strcmp(op,"<")==0)  return make_bool(a<b);

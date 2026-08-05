@@ -130,7 +130,6 @@ int compile_to_native(const char *input_file, const char *output_name,
         if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-' && *p != '.' && *p != '/') {
             fprintf(stderr, "Error: Output name contains unsafe characters: '%c'. Only alphanumeric, underscore, dash, dot, and slash are allowed.\n", *p);
             remove(tmp_c);
-            free(c_code); /* c_code already freed above, but for safety */
             return 1;
         }
     }

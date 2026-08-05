@@ -45,7 +45,9 @@ static bool sb_grow(StringBuffer *sb, size_t needed) {
     if (sb->len + needed + 1 <= sb->cap) return true;
     size_t new_cap = sb->cap;
     while (new_cap < sb->len + needed + 1) {
-        new_cap *= 2;
+        size_t next_cap = new_cap * 2;
+        if (next_cap <= new_cap) return false; /* Overflow detected */
+        new_cap = next_cap;
     }
     char *next = realloc(sb->data, new_cap);
     if (!next) return false;
@@ -114,23 +116,12 @@ static bool add_child(ASTNode *parent, ASTNode *child) {
 
 /* Get current token */
 static Token* current_token(ParserState *state) {
-    if (!state || !state->tokens) return NULL;
+    if (!state || !state->tokens || state->token_count <= 0) return NULL;
     if (state->current >= state->token_count) {
         return &state->tokens[state->token_count - 1];
     }
     return &state->tokens[state->current];
 }
-
-static Token* peek_token(ParserState *state, int offset) {
-    if (!state || !state->tokens) return NULL;
-    int pos = state->current + offset;
-    if (pos >= state->token_count) {
-        pos = state->token_count - 1;
-    }
-    if (pos < 0) pos = 0;
-    return &state->tokens[pos];
-}
-
 
 /* Advance to next token */
 static void advance(ParserState *state) {

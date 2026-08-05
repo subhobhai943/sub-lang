@@ -57,7 +57,12 @@ static void sb_append(StringBuilder *sb, const char *fmt, ...) {
     }
     
     while (sb->size + needed + 1 > sb->capacity) {
-        sb->capacity *= 2;
+        size_t new_cap = sb->capacity * 2;
+        if (new_cap <= sb->capacity) { /* Overflow detected */
+            va_end(args);
+            return;
+        }
+        sb->capacity = new_cap;
         char *new_buffer = realloc(sb->buffer, sb->capacity);
         if (!new_buffer) {
             va_end(args);

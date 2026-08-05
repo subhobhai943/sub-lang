@@ -1033,5 +1033,6 @@ char* codegen_generate(ASTNode *ast, Platform platform) {
 
 /* Generate regular C code */
 char* codegen_generate_c(ASTNode *ast, Platform platform) {
+    (void)platform;
     return generate_c_code(ast);
 }

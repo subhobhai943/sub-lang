@@ -2,7 +2,7 @@
 
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -O2 -Isrc/include -Isrc/core -Isrc/codegen -I.
-LDFLAGS = 
+LDFLAGS = -lm
 
 # Source files for the main compiler/transpiler (sub)
 COMPILER_SRC = src/compilers/sub.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c

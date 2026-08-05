@@ -79,6 +79,26 @@ static void indent_code(StringBuilder *sb, int level) {
     }
 }
 
+static char* escape_string_for_rust(const char *raw) {
+    if (!raw) return strdup("");
+    size_t len = strlen(raw);
+    char *escaped = malloc((len * 2) + 1);
+    if (!escaped) return NULL;
+    size_t out = 0;
+    for (size_t i = 0; i < len; i++) {
+        switch ((unsigned char)raw[i]) {
+            case '\\': escaped[out++] = '\\'; escaped[out++] = '\\'; break;
+            case '"':  escaped[out++] = '\\'; escaped[out++] = '"';  break;
+            case '\n': escaped[out++] = '\\'; escaped[out++] = 'n'; break;
+            case '\t': escaped[out++] = '\\'; escaped[out++] = 't'; break;
+            case '\r': escaped[out++] = '\\'; escaped[out++] = 'r'; break;
+            default:   escaped[out++] = raw[i]; break;
+        }
+    }
+    escaped[out] = '\0';
+    return escaped;
+}
+
 static void generate_expr_rust(StringBuilder *sb, ASTNode *node);
 
 static ASTNode* block_first(ASTNode *node) {
@@ -96,6 +116,7 @@ static bool ast_contains_object(ASTNode *node) {
     if (node->right && ast_contains_object(node->right)) return true;
     if (node->condition && ast_contains_object(node->condition)) return true;
     if (node->body && ast_contains_object(node->body)) return true;
+    if (node->next && ast_contains_object(node->next)) return true;
     if (node->children) {
         for (int i = 0; i < node->child_count; i++) {
             if (ast_contains_object(node->children[i])) return true;
@@ -232,7 +253,9 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
     switch (node->type) {
         case AST_LITERAL:
             if (node->data_type == TYPE_STRING) {
-                sb_append(sb, "String::from(\"%s\")", node->value);
+                char *escaped = escape_string_for_rust(node->value ? node->value : "");
+                sb_append(sb, "String::from(\"%s\")", escaped ? escaped : "");
+                free(escaped);
             } else {
                 sb_append(sb, "%s", node->value ? node->value : "0");
             }
@@ -293,7 +316,9 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                 ASTNode *pair = node->children[i];
                 if (!pair) continue;
                 if (i > 0) sb_append(sb, ", ");
-                sb_append(sb, "(String::from(\"%s\"), ", pair->value ? pair->value : "");
+                char *key_escaped = escape_string_for_rust(pair->value ? pair->value : "");
+                sb_append(sb, "(String::from(\"%s\"), ", key_escaped ? key_escaped : "");
+                free(key_escaped);
                 generate_expr_rust(sb, pair->right);
                 sb_append(sb, ")");
             }

@@ -48,6 +48,7 @@ TypeInfo* type_info_create(SubType base_type) {
 TypeInfo* type_info_create_array(TypeInfo *element_type) {
     TypeInfo *info = type_info_create(SUB_TYPE_ARRAY);
     if (!info) return NULL;
+    /* Take ownership of element_type: caller must not free it separately */
     info->element_type = element_type;
     return info;
 }
@@ -55,6 +56,7 @@ TypeInfo* type_info_create_array(TypeInfo *element_type) {
 TypeInfo* type_info_create_function(TypeInfo *return_type, TypeInfo **params, int param_count) {
     TypeInfo *info = type_info_create(SUB_TYPE_FUNCTION);
     if (!info) return NULL;
+    /* Take ownership of return_type and params: caller must not free them separately */
     info->return_type = return_type;
     info->param_types = params;
     info->param_count = param_count;
