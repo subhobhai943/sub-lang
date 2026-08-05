@@ -275,6 +275,12 @@ int main(int argc, char *argv[]) {
     // Phase 3: Parsing
     printf("[3/5] Parsing...\n");
     ASTNode *ast = parser_parse(tokens, token_count);
+    if (!ast) {
+        fprintf(stderr, "Parsing failed.\n");
+        free(source);
+        lexer_free_tokens(tokens, token_count);
+        return 1;
+    }
     printf("      AST created\n");
     
     // Phase 4: Semantic Analysis
@@ -329,9 +335,20 @@ int main(int argc, char *argv[]) {
     // If it is a platform target that compiles to C under the hood, compile to machine code directly
     if (target->kind == TARGET_KIND_PLATFORM && 
         (target->platform == PLATFORM_LINUX || target->platform == PLATFORM_WINDOWS || target->platform == PLATFORM_MACOS)) {
+        /* Validate base_name and output_file contain no shell metacharacters to prevent command injection */
+        const char *check_names[] = { base_name, output_file, NULL };
+        for (int ci = 0; check_names[ci]; ci++) {
+            for (const char *p = check_names[ci]; *p; p++) {
+                if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-' && *p != '.' && *p != '/') {
+                    fprintf(stderr, "Error: Output name contains unsafe characters: '%c'\n", *p);
+                    free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast); free(output_code);
+                    return 1;
+                }
+            }
+        }
         char compile_cmd[1024];
         const char *bin_ext = (target->platform == PLATFORM_WINDOWS) ? ".exe" : "";
-        snprintf(compile_cmd, sizeof(compile_cmd), "gcc -O2 -o %s%s %s", base_name, bin_ext, output_file);
+        snprintf(compile_cmd, sizeof(compile_cmd), "gcc -O2 -o \"%s%s\" \"%s\"", base_name, bin_ext, output_file);
         printf("\nCompiling intermediate C code to native machine code...\n");
         int ret = system(compile_cmd);
         if (ret == 0) {
