@@ -236,8 +236,9 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
             
             if (*p == '-' || *p == '+') p++;
             
+            if (!*p) is_number = false;
             while (*p) {
-                if (isdigit(*p)) {
+                if (isdigit((unsigned char)*p)) {
                     // OK
                 } else if (*p == '.' && !has_dot) {
                     has_dot = true;
@@ -253,8 +254,8 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 return node->data_type;
             }
             
-            node->data_type = TYPE_UNKNOWN;
-            return TYPE_UNKNOWN;
+            node->data_type = TYPE_STRING;
+            return TYPE_STRING;
             
         case AST_IDENTIFIER:
             if (!node->value) {
@@ -466,10 +467,10 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 return TYPE_UNKNOWN;
             }
             
-            right_type = check_expression_type(node->right, table);
+            right_type = check_expression_type(node->right ? node->right : node->left, table);
             
             if (strcmp(node->value, "!") == 0 || strcmp(node->value, "not") == 0) {
-                if (right_type != TYPE_BOOL && right_type != TYPE_UNKNOWN) {
+                if (right_type != TYPE_BOOL && right_type != TYPE_UNKNOWN && right_type != TYPE_AUTO) {
                     char error_msg[512];
                     snprintf(error_msg, sizeof(error_msg),
                              "Type error: Logical NOT requires boolean, got %s",
@@ -480,16 +481,23 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 return TYPE_BOOL;
             }
             
-            if (strcmp(node->value, "-") == 0) {
-                if (right_type != TYPE_INT && right_type != TYPE_FLOAT && right_type != TYPE_UNKNOWN) {
+            if (strcmp(node->value, "-") == 0 || strcmp(node->value, "+") == 0) {
+                if (right_type != TYPE_INT && right_type != TYPE_FLOAT && right_type != TYPE_UNKNOWN && right_type != TYPE_AUTO) {
                     char error_msg[512];
                     snprintf(error_msg, sizeof(error_msg),
-                             "Type error: Unary minus requires numeric type, got %s",
+                             "Type error: Unary %s requires numeric type, got %s",
+                             node->value,
                              data_type_to_string(right_type));
                     compile_error(error_msg, node->line);
                 }
                 node->data_type = right_type;
                 return right_type;
+            }
+
+            if (strcmp(node->value, "++") == 0 || strcmp(node->value, "--") == 0 ||
+                strcmp(node->value, "post++") == 0 || strcmp(node->value, "post--") == 0) {
+                node->data_type = (right_type != TYPE_UNKNOWN) ? right_type : TYPE_INT;
+                return node->data_type;
             }
             
             // Bitwise NOT (int only)
@@ -505,8 +513,8 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 return TYPE_INT;
             }
 
-            compile_error("Unknown unary operator", node->line);
-            return TYPE_UNKNOWN;
+            node->data_type = right_type;
+            return right_type;
             
         case AST_CALL_EXPR:
             if (!node->value && (!node->left || node->left->type != AST_IDENTIFIER)) {
@@ -665,7 +673,8 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
             left_type = check_expression_type(node->left, table);
             right_type = check_expression_type(node->right, table);
             
-            if (left_type != TYPE_ARRAY && left_type != TYPE_STRING && left_type != TYPE_UNKNOWN) {
+            if (left_type != TYPE_ARRAY && left_type != TYPE_STRING && left_type != TYPE_OBJECT &&
+                left_type != TYPE_UNKNOWN && left_type != TYPE_AUTO) {
                 char error_msg[512];
                 snprintf(error_msg, sizeof(error_msg),
                          "Type error: Cannot index into non-array type %s",
@@ -673,16 +682,25 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 compile_error(error_msg, node->line);
             }
             
-            if (right_type != TYPE_INT && right_type != TYPE_UNKNOWN) {
-                char error_msg[512];
-                snprintf(error_msg, sizeof(error_msg),
-                         "Type error: Array index must be integer, got %s",
-                         data_type_to_string(right_type));
-                compile_error(error_msg, node->line);
+            if (left_type == TYPE_OBJECT) {
+                if (right_type != TYPE_STRING && right_type != TYPE_UNKNOWN && right_type != TYPE_AUTO) {
+                    char error_msg[512];
+                    snprintf(error_msg, sizeof(error_msg),
+                             "Type error: Object key must be string, got %s",
+                             data_type_to_string(right_type));
+                    compile_error(error_msg, node->line);
+                }
+            } else if (left_type == TYPE_ARRAY || left_type == TYPE_STRING) {
+                if (right_type != TYPE_INT && right_type != TYPE_UNKNOWN && right_type != TYPE_AUTO) {
+                    char error_msg[512];
+                    snprintf(error_msg, sizeof(error_msg),
+                             "Type error: Array index must be integer, got %s",
+                             data_type_to_string(right_type));
+                    compile_error(error_msg, node->line);
+                }
             }
             
-            // For string indexing, result is string; for array, element type (unknown for now)
-            node->data_type = (left_type == TYPE_STRING) ? TYPE_STRING : TYPE_UNKNOWN;
+            node->data_type = (left_type == TYPE_STRING) ? TYPE_STRING : TYPE_AUTO;
             return node->data_type;
             
         case AST_MEMBER_ACCESS:
@@ -872,8 +890,17 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
         case AST_FOR_STMT:
             enter_scope(table);
 
+            if (node->condition) {
+                check_expression_type(node->condition, table);
+            }
+
             if (node->value) {
-                LocalSymbolEntry *loop_var = add_symbol(table, node->value, NULL, TYPE_INT);
+                DataType loop_var_type = TYPE_INT;
+                if (node->condition && (node->condition->data_type == TYPE_STRING ||
+                    (node->condition->type == AST_LITERAL && node->condition->value && !isdigit((unsigned char)node->condition->value[0])))) {
+                    loop_var_type = TYPE_STRING;
+                }
+                LocalSymbolEntry *loop_var = add_symbol(table, node->value, NULL, loop_var_type);
                 if (loop_var) {
                     loop_var->is_initialized = true;
                 }
@@ -885,8 +912,6 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
                     if (range->left) check_expression_type(range->left, table);
                     if (range->right) check_expression_type(range->right, table);
                 }
-            } else if (node->condition) {
-                check_expression_type(node->condition, table);
             }
 
             check_statement_type(node->body, table, current_function);
@@ -986,11 +1011,92 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
             }
             break;
             
+        case AST_TRY_STMT:
+            if (node->body) {
+                check_statement_type(node->body, table, current_function);
+            }
+            if (node->right) {
+                ASTNode *catch_node = node->right;
+                if (catch_node->type == AST_CATCH_CLAUSE) {
+                    enter_scope(table);
+                    if (catch_node->value) {
+                        LocalSymbolEntry *e_entry = add_symbol(table, catch_node->value, NULL, TYPE_AUTO);
+                        if (e_entry) {
+                            e_entry->is_initialized = true;
+                        }
+                    }
+                    if (catch_node->body) {
+                        check_statement_type(catch_node->body, table, current_function);
+                    }
+                    exit_scope(table);
+
+                    if (catch_node->next && catch_node->next->type == AST_FINALLY_CLAUSE) {
+                        if (catch_node->next->body) {
+                            check_statement_type(catch_node->next->body, table, current_function);
+                        }
+                    }
+                } else if (catch_node->type == AST_FINALLY_CLAUSE) {
+                    if (catch_node->body) {
+                        check_statement_type(catch_node->body, table, current_function);
+                    }
+                }
+            }
+            break;
+
+        case AST_THROW_STMT:
+            if (node->right) {
+                check_expression_type(node->right, table);
+            }
+            break;
+
+        case AST_SWITCH_STMT:
+            if (node->condition) {
+                check_expression_type(node->condition, table);
+            }
+            if (node->children) {
+                for (int i = 0; i < node->child_count; i++) {
+                    ASTNode *clause = node->children[i];
+                    if (clause) {
+                        if (clause->condition) check_expression_type(clause->condition, table);
+                        if (clause->body) check_statement_type(clause->body, table, current_function);
+                        if (clause->children) {
+                            for (int j = 0; j < clause->child_count; j++) {
+                                check_statement_type(clause->children[j], table, current_function);
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+
+        case AST_BREAK_STMT:
+        case AST_CONTINUE_STMT:
+            break;
+
+        case AST_CLASS_DECL:
+            if (node->value) {
+                LocalSymbolEntry *cls_entry = add_symbol(table, node->value, "class", TYPE_OBJECT);
+                if (cls_entry) {
+                    cls_entry->is_initialized = true;
+                }
+            }
+            if (node->body) {
+                enter_scope(table);
+                check_statement_type(node->body, table, current_function);
+                exit_scope(table);
+            }
+            break;
+
+        case AST_UI_COMPONENT:
+        case AST_EMBED_CODE:
+        case AST_EMBED_C:
+        case AST_EMBED_CPP:
+            break;
+
         case AST_CALL_EXPR:
-            /* Type-check function call arguments in expression context */
             check_expression_type(node, table);
             break;
-            
+
         default:
             // Recursively check child nodes
             if (node->left) check_statement_type(node->left, table, current_function);

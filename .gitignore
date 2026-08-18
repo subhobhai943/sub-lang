@@ -4,6 +4,9 @@
 .vscode-extension/package-lock.json
 
 # Compiled binaries and executables
+sub
+subc
+subi
 subc-native
 subc-native-*
 sublang

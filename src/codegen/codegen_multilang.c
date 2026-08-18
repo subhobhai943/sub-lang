@@ -194,7 +194,10 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
                 sb_append(sb, "\"%s\"", escaped ? escaped : "");
                 free(escaped);
             } else if (node->value) {
-                sb_append(sb, "%s", node->value);
+                if (strcmp(node->value, "true") == 0) sb_append(sb, "True");
+                else if (strcmp(node->value, "false") == 0) sb_append(sb, "False");
+                else if (strcmp(node->value, "null") == 0 || strcmp(node->value, "nil") == 0) sb_append(sb, "None");
+                else sb_append(sb, "%s", node->value);
             } else {
                 sb_append(sb, "None");
             }
@@ -205,13 +208,29 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
         case AST_BINARY_EXPR:
             sb_append(sb, "(");
             generate_expr_python(sb, node->left);
-            sb_append(sb, " %s ", node->value ? node->value : "+");
+            if (node->value && (strcmp(node->value, "&&") == 0 || strcmp(node->value, "and") == 0)) {
+                sb_append(sb, " and ");
+            } else if (node->value && (strcmp(node->value, "||") == 0 || strcmp(node->value, "or") == 0)) {
+                sb_append(sb, " or ");
+            } else {
+                sb_append(sb, " %s ", node->value ? node->value : "+");
+            }
             generate_expr_python(sb, node->right);
             sb_append(sb, ")");
             break;
         case AST_UNARY_EXPR:
-            sb_append(sb, "%s", node->value ? node->value : "");
-            generate_expr_python(sb, node->right);
+            if (node->value && (strcmp(node->value, "!") == 0 || strcmp(node->value, "not") == 0)) {
+                sb_append(sb, "(not ");
+                generate_expr_python(sb, node->right ? node->right : node->left);
+                sb_append(sb, ")");
+            } else if (node->value && strcmp(node->value, "~") == 0) {
+                sb_append(sb, "(~");
+                generate_expr_python(sb, node->right ? node->right : node->left);
+                sb_append(sb, ")");
+            } else {
+                sb_append(sb, "%s", node->value ? node->value : "");
+                generate_expr_python(sb, node->right ? node->right : node->left);
+            }
             break;
         case AST_TERNARY_EXPR:
             sb_append(sb, "(");
@@ -222,20 +241,108 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
             generate_expr_python(sb, node->right);
             sb_append(sb, ")");
             break;
-        case AST_CALL_EXPR:
-            if (node->value && strcmp(node->value, "show") == 0) {
-                sb_append(sb, "print(");
-            } else if (node->value) {
-                sb_append(sb, "%s(", node->value);
+        case AST_MEMBER_ACCESS:
+            if (node->value && strcmp(node->value, "length") == 0) {
+                sb_append(sb, "len(");
+                generate_expr_python(sb, node->left);
+                sb_append(sb, ")");
             } else {
                 generate_expr_python(sb, node->left);
-                sb_append(sb, "(");
+                sb_append(sb, ".%s", node->value ? node->value : "");
             }
-            for (int i = 0; i < node->child_count; i++) {
-                if (i > 0) sb_append(sb, ", ");
-                generate_expr_python(sb, node->children[i]);
+            break;
+        case AST_ARRAY_ACCESS:
+            generate_expr_python(sb, node->left);
+            sb_append(sb, "[");
+            generate_expr_python(sb, node->right);
+            sb_append(sb, "]");
+            break;
+        case AST_CALL_EXPR:
+            if (node->left && node->left->type == AST_MEMBER_ACCESS) {
+                const char *m = node->left->value;
+                if (m && strcmp(m, "push") == 0) {
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, ".append(");
+                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]);
+                    sb_append(sb, ")");
+                } else if (m && strcmp(m, "pop") == 0) {
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, ".pop()");
+                } else if (m && strcmp(m, "join") == 0) {
+                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]);
+                    else sb_append(sb, "\"\"");
+                    sb_append(sb, ".join(");
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, ")");
+                } else if (m && strcmp(m, "upper") == 0) {
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, ".upper()");
+                } else if (m && strcmp(m, "lower") == 0) {
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, ".lower()");
+                } else if (m && strcmp(m, "trim") == 0) {
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, ".strip()");
+                } else if (m && strcmp(m, "substring") == 0) {
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, "[");
+                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]); else sb_append(sb, "0");
+                    sb_append(sb, ":");
+                    if (node->child_count > 1) generate_expr_python(sb, node->children[1]);
+                    sb_append(sb, "]");
+                } else if (m && strcmp(m, "split") == 0) {
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, ".split(");
+                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]);
+                    sb_append(sb, ")");
+                } else if (m && strcmp(m, "contains") == 0) {
+                    sb_append(sb, "(");
+                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]); else sb_append(sb, "\"\"");
+                    sb_append(sb, " in ");
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, ")");
+                } else if (m && strcmp(m, "replace") == 0) {
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, ".replace(");
+                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]); else sb_append(sb, "\"\"");
+                    sb_append(sb, ", ");
+                    if (node->child_count > 1) generate_expr_python(sb, node->children[1]); else sb_append(sb, "\"\"");
+                    sb_append(sb, ")");
+                } else if (m && strcmp(m, "char_at") == 0) {
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, "[");
+                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]); else sb_append(sb, "0");
+                    sb_append(sb, "]");
+                } else {
+                    generate_expr_python(sb, node->left);
+                    sb_append(sb, "(");
+                    for (int i = 0; i < node->child_count; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_python(sb, node->children[i]);
+                    }
+                    sb_append(sb, ")");
+                }
+            } else if (node->value) {
+                const char *fn = node->value;
+                if (strcmp(fn, "print") == 0 || strcmp(fn, "println") == 0 || strcmp(fn, "show") == 0) {
+                    sb_append(sb, "print(");
+                } else if (strcmp(fn, "sqrt") == 0) {
+                    sb_append(sb, "math.sqrt(");
+                } else if (strcmp(fn, "floor") == 0) {
+                    sb_append(sb, "math.floor(");
+                } else if (strcmp(fn, "ceil") == 0) {
+                    sb_append(sb, "math.ceil(");
+                } else if (strcmp(fn, "type") == 0) {
+                    sb_append(sb, "(lambda x: 'int' if isinstance(x, int) and not isinstance(x, bool) else ('float' if isinstance(x, float) else ('string' if isinstance(x, str) else ('bool' if isinstance(x, bool) else ('array' if isinstance(x, list) else ('null' if x is None else type(x).__name__))))))(");
+                } else {
+                    sb_append(sb, "%s(", fn);
+                }
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    generate_expr_python(sb, node->children[i]);
+                }
+                sb_append(sb, ")");
             }
-            sb_append(sb, ")");
             break;
         case AST_ARRAY_LITERAL:
             sb_append(sb, "[");
@@ -255,16 +362,6 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
                 generate_expr_python(sb, pair->right);
             }
             sb_append(sb, "}");
-            break;
-        case AST_MEMBER_ACCESS:
-            generate_expr_python(sb, node->left);
-            sb_append(sb, ".%s", node->value ? node->value : "");
-            break;
-        case AST_ARRAY_ACCESS:
-            generate_expr_python(sb, node->left);
-            sb_append(sb, "[");
-            generate_expr_python(sb, node->right);
-            sb_append(sb, "]");
             break;
         default:
             break;
@@ -402,6 +499,52 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
                 sb_append(sb, "pass\n");
             }
             break;
+
+        case AST_DO_WHILE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "while True:\n");
+            generate_node_python(sb, node->body, indent + 1);
+            indent_code(sb, indent + 1);
+            sb_append(sb, "if not (");
+            generate_expr_python(sb, node->condition);
+            sb_append(sb, "): break\n");
+            break;
+
+        case AST_BREAK_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "break\n");
+            break;
+
+        case AST_CONTINUE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "continue\n");
+            break;
+
+        case AST_TRY_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "try:\n");
+            generate_node_python(sb, node->body, indent + 1);
+            if (!node->body || block_first(node->body) == NULL) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "pass\n");
+            }
+            if (node->right && node->right->type == AST_CATCH_CLAUSE) {
+                indent_code(sb, indent);
+                sb_append(sb, "except Exception as %s:\n", node->right->value ? node->right->value : "e");
+                generate_node_python(sb, node->right->body, indent + 1);
+                if (!node->right->body || block_first(node->right->body) == NULL) {
+                    indent_code(sb, indent + 1);
+                    sb_append(sb, "pass\n");
+                }
+            }
+            break;
+
+        case AST_THROW_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "raise Exception(");
+            if (node->right) generate_expr_python(sb, node->right);
+            sb_append(sb, ")\n");
+            break;
             
         case AST_RETURN_STMT:
             indent_code(sb, indent);
@@ -436,9 +579,8 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_EMBED_CODE:
         case AST_EMBED_CPP:
         case AST_EMBED_C:
-            // Include embedded code directly
-            if (node->value) {
-                sb_append(sb, "# Embedded code\n");
+            if (node->value && (!node->metadata || strcasecmp((const char*)node->metadata, "python") == 0)) {
+                sb_append(sb, "# Embedded Python code\n");
                 sb_append(sb, "%s\n", node->value);
             }
             break;
@@ -453,11 +595,11 @@ char* codegen_python(ASTNode *ast, const char *source) {
     if (!sb) return NULL;
     
     sb_append(sb, "#!/usr/bin/env python3\n");
-    sb_append(sb, "# Generated by SUB Language Compiler\n\n");
-    
-    // Check for embedded Python code first
+    sb_append(sb, "# Generated by SUB Language Compiler\n");
+    sb_append(sb, "import math\n");
+    sb_append(sb, "import sys\n\n");
+
     char *embedded = extract_embedded_code(source, "python");
-    bool has_embedded = embedded != NULL;
     if (embedded) {
         sb_append(sb, "# Embedded Python code from SUB\n");
         sb_append(sb, "%s\n", embedded);
@@ -466,12 +608,6 @@ char* codegen_python(ASTNode *ast, const char *source) {
 
     // Generate from AST
     generate_node_python(sb, ast, 0);
-    
-    // Add main guard if no embedded code
-    if (!has_embedded) {
-        sb_append(sb, "\nif __name__ == '__main__':\n");
-        sb_append(sb, "    pass\n");
-    }
     
     return sb_to_string(sb);
 }
@@ -1424,8 +1560,208 @@ char* codegen_kotlin(ASTNode *ast, const char *source) {
     sb_free(main_sb);
     return sb_to_string(sb);
 }
-char* codegen_css(ASTNode *ast, const char *source) { (void)ast; (void)source; return strdup("body { font-family: Arial; }\n"); }
-char* codegen_assembly(ASTNode *ast, const char *source) { (void)ast; (void)source; return strdup("; SUB Program\nsection .text\n\tglobal _start\n_start:\n\tmov rax, 60\n\txor rdi, rdi\n\tsyscall\n"); }
+/* ========================================
+   CSS CODE GENERATOR
+   ======================================== */
+static void generate_css_ast(StringBuilder *sb, ASTNode *node) {
+    if (!node) return;
+    switch (node->type) {
+        case AST_PROGRAM:
+        case AST_BLOCK:
+            for (ASTNode *stmt = block_first(node); stmt; stmt = stmt->next) {
+                generate_css_ast(sb, stmt);
+            }
+            break;
+        case AST_UI_COMPONENT: {
+            const char *comp = node->value ? node->value : "component";
+            sb_append(sb, ".sub-%s {\n", comp);
+            sb_append(sb, "    display: block;\n");
+            sb_append(sb, "    box-sizing: border-box;\n");
+            sb_append(sb, "    margin: 8px 0;\n");
+            sb_append(sb, "    padding: 10px 14px;\n");
+            sb_append(sb, "    font-family: inherit;\n");
+            sb_append(sb, "}\n\n");
+            if (node->body) generate_css_ast(sb, node->body);
+            break;
+        }
+        case AST_CALL_EXPR:
+            if (node->left && node->left->type == AST_MEMBER_ACCESS) {
+                const char *m = node->left->value;
+                sb_append(sb, ".ui-%s {\n", m ? m : "element");
+                sb_append(sb, "    display: inline-block;\n");
+                sb_append(sb, "    padding: 6px 12px;\n");
+                sb_append(sb, "}\n\n");
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+char* codegen_css(ASTNode *ast, const char *source) {
+    StringBuilder *sb = sb_create();
+    if (!sb) return NULL;
+    sb_append(sb, "/* Generated CSS by SUB Compiler */\n\n");
+    sb_append(sb, ":root {\n");
+    sb_append(sb, "    --font-family: system-ui, -apple-system, sans-serif;\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "body {\n");
+    sb_append(sb, "    font-family: var(--font-family);\n");
+    sb_append(sb, "    margin: 0;\n");
+    sb_append(sb, "    padding: 20px;\n");
+    sb_append(sb, "}\n\n");
+    
+    char *embedded = extract_embedded_code(source, "css");
+    if (embedded) {
+        sb_append(sb, "/* Embedded CSS */\n");
+        sb_append(sb, "%s\n", embedded);
+        free(embedded);
+    }
+    
+    generate_css_ast(sb, ast);
+    return sb_to_string(sb);
+}
+
+/* ========================================
+   ASSEMBLY (x86-64 NASM) CODE GENERATOR
+   ======================================== */
+static void generate_asm_expr(StringBuilder *sb, ASTNode *node, int *str_lbl, StringBuilder *data_sb) {
+    if (!node) return;
+    switch (node->type) {
+        case AST_LITERAL:
+            if (node->data_type == TYPE_STRING) {
+                int lbl = (*str_lbl)++;
+                sb_append(data_sb, "    str_%d: db \"%s\", 0\n", lbl, node->value ? node->value : "");
+                sb_append(sb, "    lea rax, [rel str_%d]\n", lbl);
+            } else {
+                sb_append(sb, "    mov rax, %s\n", node->value ? node->value : "0");
+            }
+            break;
+        case AST_IDENTIFIER:
+            sb_append(sb, "    mov rax, [rel var_%s]\n", node->value ? node->value : "x");
+            break;
+        case AST_BINARY_EXPR:
+            generate_asm_expr(sb, node->left, str_lbl, data_sb);
+            sb_append(sb, "    push rax\n");
+            generate_asm_expr(sb, node->right, str_lbl, data_sb);
+            sb_append(sb, "    mov rbx, rax\n");
+            sb_append(sb, "    pop rax\n");
+            if (node->value && strcmp(node->value, "+") == 0) {
+                sb_append(sb, "    add rax, rbx\n");
+            } else if (node->value && strcmp(node->value, "-") == 0) {
+                sb_append(sb, "    sub rax, rbx\n");
+            } else if (node->value && strcmp(node->value, "*") == 0) {
+                sb_append(sb, "    imul rax, rbx\n");
+            } else if (node->value && strcmp(node->value, "/") == 0) {
+                sb_append(sb, "    cqo\n    idiv rbx\n");
+            } else if (node->value && strcmp(node->value, "%") == 0) {
+                sb_append(sb, "    cqo\n    idiv rbx\n    mov rax, rdx\n");
+            } else {
+                sb_append(sb, "    add rax, rbx\n");
+            }
+            break;
+        case AST_UNARY_EXPR:
+            generate_asm_expr(sb, node->right ? node->right : node->left, str_lbl, data_sb);
+            if (node->value && strcmp(node->value, "-") == 0) sb_append(sb, "    neg rax\n");
+            else if (node->value && strcmp(node->value, "~") == 0) sb_append(sb, "    not rax\n");
+            break;
+        case AST_CALL_EXPR:
+            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "println") == 0 || strcmp(node->value, "show") == 0)) {
+                if (node->child_count > 0) {
+                    ASTNode *arg = node->children[0];
+                    generate_asm_expr(sb, arg, str_lbl, data_sb);
+                    if (arg->data_type == TYPE_STRING) {
+                        sb_append(sb, "    mov rsi, rax\n");
+                        sb_append(sb, "    lea rdi, [rel fmt_str]\n");
+                    } else {
+                        sb_append(sb, "    mov rsi, rax\n");
+                        sb_append(sb, "    lea rdi, [rel fmt_int]\n");
+                    }
+                    sb_append(sb, "    xor eax, eax\n");
+                    sb_append(sb, "    call printf\n");
+                }
+            } else if (node->value) {
+                sb_append(sb, "    call func_%s\n", node->value);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+static void generate_asm_node(StringBuilder *sb, ASTNode *node, int *str_lbl, StringBuilder *data_sb, StringBuilder *bss_sb) {
+    if (!node) return;
+    switch (node->type) {
+        case AST_PROGRAM:
+        case AST_BLOCK:
+            for (ASTNode *stmt = block_first(node); stmt; stmt = stmt->next) {
+                generate_asm_node(sb, stmt, str_lbl, data_sb, bss_sb);
+            }
+            break;
+        case AST_VAR_DECL:
+        case AST_CONST_DECL:
+            sb_append(bss_sb, "    var_%s: resq 1\n", node->value ? node->value : "v");
+            if (node->right) {
+                generate_asm_expr(sb, node->right, str_lbl, data_sb);
+                sb_append(sb, "    mov [rel var_%s], rax\n", node->value ? node->value : "v");
+            }
+            break;
+        case AST_ASSIGN_STMT:
+            if (node->left && node->left->type == AST_IDENTIFIER) {
+                generate_asm_expr(sb, node->right, str_lbl, data_sb);
+                sb_append(sb, "    mov [rel var_%s], rax\n", node->left->value ? node->left->value : "v");
+            }
+            break;
+        case AST_CALL_EXPR:
+            generate_asm_expr(sb, node, str_lbl, data_sb);
+            break;
+        case AST_RETURN_STMT:
+            if (node->right) generate_asm_expr(sb, node->right, str_lbl, data_sb);
+            sb_append(sb, "    ret\n");
+            break;
+        default:
+            break;
+    }
+}
+
+char* codegen_assembly(ASTNode *ast, const char *source) {
+    (void)source;
+    StringBuilder *sb = sb_create();
+    StringBuilder *data_sb = sb_create();
+    StringBuilder *bss_sb = sb_create();
+    if (!sb || !data_sb || !bss_sb) return NULL;
+    
+    int str_lbl = 0;
+    sb_append(data_sb, "section .data\n");
+    sb_append(data_sb, "    fmt_int: db \"%%ld\", 10, 0\n");
+    sb_append(data_sb, "    fmt_str: db \"%%s\", 10, 0\n");
+    
+    sb_append(bss_sb, "\nsection .bss\n");
+    
+    sb_append(sb, "\nsection .text\n");
+    sb_append(sb, "    extern printf\n");
+    sb_append(sb, "    global main\n");
+    sb_append(sb, "main:\n");
+    sb_append(sb, "    push rbp\n");
+    sb_append(sb, "    mov rbp, rsp\n");
+    
+    generate_asm_node(sb, ast, &str_lbl, data_sb, bss_sb);
+    
+    sb_append(sb, "    xor eax, eax\n");
+    sb_append(sb, "    leave\n");
+    sb_append(sb, "    ret\n");
+    
+    StringBuilder *out = sb_create();
+    sb_append(out, "; Generated x86-64 NASM Assembly by SUB Compiler\n");
+    sb_append(out, "%s", data_sb->buffer);
+    sb_append(out, "%s", bss_sb->buffer);
+    sb_append(out, "%s", sb->buffer);
+    
+    sb_free(sb);
+    sb_free(data_sb);
+    sb_free(bss_sb);
+    return sb_to_string(out);
+}
 
 /* Ruby code generator continues from previous implementation... */
 static void indent_ruby(StringBuilder *sb, int level) {

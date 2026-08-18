@@ -114,6 +114,8 @@ static const KWEntry kw_table[] = {
     {"const",       TOKEN_CONST},
     {"let",         TOKEN_LET},
     {"function",    TOKEN_FUNCTION},
+    {"fn",          TOKEN_FUNCTION},
+    {"def",         TOKEN_FUNCTION},
     {"return",      TOKEN_RETURN},
     {"if",          TOKEN_IF},
     {"elif",        TOKEN_ELIF},
@@ -174,6 +176,7 @@ static const KWEntry kw_table[] = {
     {"true",        TOKEN_TRUE},
     {"false",       TOKEN_FALSE},
     {"null",        TOKEN_NULL},
+    {"nil",         TOKEN_NULL},
 
     {NULL, 0}
 };
@@ -199,8 +202,16 @@ static void skip_whitespace_and_comments(Lexer *L) {
             continue;
         }
 
-        /* Single-line comment: // ... or # ... */
-        if ((c == '/' && peek_next(L) == '/') || c == '#') {
+        /* Single-line comment: // ... or # ... (except #embed / #endembed) */
+        if (c == '/' && peek_next(L) == '/') {
+            while (peek(L) && peek(L) != '\n')
+                advance(L);
+            continue;
+        }
+        if (c == '#') {
+            if (strncmp(L->ptr, "#embed", 6) == 0 || strncmp(L->ptr, "#endembed", 9) == 0) {
+                break;
+            }
             while (peek(L) && peek(L) != '\n')
                 advance(L);
             continue;
@@ -538,6 +549,19 @@ Token* lexer_tokenize(const char *source, int *token_count) {
         /* ── Leading-dot float: .5 ── */
         if (c == '.' && isdigit((unsigned char)peek_next(&L))) {
             token_array_push(&arr, scan_number(&L));
+            continue;
+        }
+
+        /* ── #embed and #endembed ── */
+        if (c == '#' && (strncmp(L.ptr, "#embed", 6) == 0 || strncmp(L.ptr, "#endembed", 9) == 0)) {
+            int start_col = L.column;
+            if (strncmp(L.ptr, "#embed", 6) == 0) {
+                for (int k = 0; k < 6; k++) advance(&L);
+                token_array_push(&arr, make_token(TOKEN_EMBED, "embed", L.line, start_col));
+            } else {
+                for (int k = 0; k < 9; k++) advance(&L);
+                token_array_push(&arr, make_token(TOKEN_ENDEMBED, "endembed", L.line, start_col));
+            }
             continue;
         }
 

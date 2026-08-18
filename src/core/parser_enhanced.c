@@ -271,8 +271,8 @@ static ASTNode* parse_primary(ParserState *state) {
         return node;
     }
 
-    if (match(state, TOKEN_IDENTIFIER) || match(state, TOKEN_INT) || match(state, TOKEN_FLOAT) || match(state, TOKEN_STRING) || match(state, TOKEN_BOOL)) {
-        ASTNode *ident = create_node(AST_IDENTIFIER, tok, tok->value);
+    if (match(state, TOKEN_IDENTIFIER) || match(state, TOKEN_INT) || match(state, TOKEN_FLOAT) || match(state, TOKEN_STRING) || match(state, TOKEN_BOOL) || match(state, TOKEN_UI)) {
+        ASTNode *ident = create_node(AST_IDENTIFIER, tok, tok->value ? tok->value : "ui");
         if (!ident) return NULL;
         advance(state);
         return ident;
@@ -435,8 +435,15 @@ static ASTNode* parse_call(ParserState *state) {
         if (match(state, TOKEN_DOT)) {
             Token *dot = current_token(state);
             advance(state);
-            Token *name = expect(state, TOKEN_IDENTIFIER, "Expected member name after '.'");
-            ASTNode *member = create_node(AST_MEMBER_ACCESS, dot, name ? name->value : NULL);
+            Token *name = current_token(state);
+            const char *mname = NULL;
+            if (name && name->value) {
+                mname = name->value;
+                advance(state);
+            } else {
+                parser_error(state, "Expected member name after '.'");
+            }
+            ASTNode *member = create_node(AST_MEMBER_ACCESS, dot, mname);
             if (!member) {
                 parser_free_ast(expr);
                 return NULL;
@@ -860,9 +867,15 @@ static ASTNode* parse_embed_block(ParserState *state) {
 
     Token *lang = current_token(state);
     if (!lang) return NULL;
+    const char *lang_name = lang->value ? lang->value : 
+        (lang->type == TOKEN_CPP ? "cpp" :
+        (lang->type == TOKEN_PYTHON ? "python" :
+        (lang->type == TOKEN_JAVASCRIPT ? "javascript" :
+        (lang->type == TOKEN_RUST ? "rust" : "c"))));
+
     ASTNodeType node_type = AST_EMBED_CODE;
-    if (lang->type == TOKEN_CPP) node_type = AST_EMBED_CPP;
-    else if (lang->type == TOKEN_IDENTIFIER && lang->value && strcmp(lang->value, "c") == 0) node_type = AST_EMBED_C;
+    if (lang->type == TOKEN_CPP || (lang->value && strcasecmp(lang->value, "cpp") == 0)) node_type = AST_EMBED_CPP;
+    else if (lang->type == TOKEN_C || (lang->value && strcasecmp(lang->value, "c") == 0)) node_type = AST_EMBED_C;
     advance(state);
 
     StringBuffer sb;
@@ -885,6 +898,10 @@ static ASTNode* parse_embed_block(ParserState *state) {
                 sb_free(&sb);
                 return NULL;
             }
+        } else if (tok->type == TOKEN_STRING_LITERAL) {
+            sb_append(&sb, "\"");
+            if (tok->value) sb_append(&sb, tok->value);
+            sb_append(&sb, "\" ");
         } else if (tok->value) {
             if (!sb_append(&sb, tok->value)) {
                 sb_free(&sb);
@@ -899,6 +916,9 @@ static ASTNode* parse_embed_block(ParserState *state) {
     }
 
     ASTNode *node = create_node(node_type, hash, sb.data);
+    if (node && lang_name) {
+        node->metadata = strdup(lang_name);
+    }
     sb_free(&sb);
     return node;
 }
@@ -1576,11 +1596,33 @@ static ASTNode* parse_import(ParserState *state) {
     return node;
 }
 
+static ASTNode* parse_class(ParserState *state) {
+    Token *start = current_token(state);
+    advance(state); /* consume 'class' */
+
+    Token *name = expect(state, TOKEN_IDENTIFIER, "Expected class name after 'class'");
+    ASTNode *cls = create_node(AST_CLASS_DECL, start, name ? name->value : "Point");
+    if (!cls) return NULL;
+
+    skip_separators(state);
+    cls->body = parse_block(state, false);
+
+    if (match(state, TOKEN_END)) {
+        advance(state);
+    }
+
+    return cls;
+}
+
 static ASTNode* parse_statement(ParserState *state) {
     skip_separators(state);
 
     Token *tok = current_token(state);
     if (!tok) return NULL;
+
+    if (match(state, TOKEN_CLASS)) {
+        return parse_class(state);
+    }
 
     if (match(state, TOKEN_EMBED)) {
         return parse_embed_block(state);
@@ -1650,11 +1692,20 @@ static ASTNode* parse_statement(ParserState *state) {
         return node;
     }
 
+    if (match(state, TOKEN_END)) {
+        advance(state);
+        return NULL;
+    }
+
     if (match(state, TOKEN_LBRACE)) {
         return parse_block_braced(state);
     }
 
     ASTNode *expr = parse_expression(state);
+    skip_separators(state);
+    if (match(state, TOKEN_END)) {
+        advance(state);
+    }
     return expr;
 }
 
