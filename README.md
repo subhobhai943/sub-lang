@@ -5,7 +5,7 @@
 <h1 align="center">SUB Programming Language</h1>
 
 <p align="center">
-  <em>Simple Universal Builder — A modern, easy-to-learn compiled language</em>
+  <em>Simple Universal Builder — A modern, unified multi-paradigm compiled & transpiled language</em>
 </p>
 
 <p align="center">
@@ -16,157 +16,148 @@
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" />
   </a>
   <img src="https://img.shields.io/badge/version-2.0.0-brightgreen" alt="Version 2.0.0" />
-  <img src="https://img.shields.io/badge/transpiles%20to-14%20languages-orange" alt="Transpiles to 14 languages" />
+  <img src="https://img.shields.io/badge/transpiles%20to-13%20languages-orange" alt="Transpiles to 13 languages" />
 </p>
 
 ---
 
-> **v2.0.0** — Native compiler via C-backend, working interpreter, fixed transpiler naming, simplified syntax, professional features
+> **v2.0.0** — Native compiler via optimized C backend, direct AST interpreter (`subi`), multi-target transpiler (`sub`), classes, UI component declarations, and embed blocks.
+
+---
+
+## Table of Contents
+
+- [What is SUB?](#what-is-sub)
+- [Key Highlights](#key-highlights)
+- [Quick Start](#quick-start)
+- [The Three Tools](#the-three-tools)
+- [Language Syntax Guide](#language-syntax-guide)
+  - [Variables & Types](#variables--types)
+  - [Functions](#functions)
+  - [Classes & Objects](#classes--objects)
+  - [Control Flow](#control-flow)
+  - [Loops & Iteration](#loops--iteration)
+  - [Pattern Matching](#pattern-matching)
+  - [Exception Handling](#exception-handling)
+  - [String & Array Methods](#string--array-methods)
+  - [Embedded Code Blocks](#embedded-code-blocks)
+  - [Cross-Platform UI Declarations](#cross-platform-ui-declarations)
+- [Built-in Functions](#built-in-functions)
+- [Supported Transpilation Targets](#supported-transpilation-targets)
+- [Testing](#testing)
+- [Architecture](#architecture)
+- [Contributing & License](#license)
 
 ---
 
 ## What is SUB?
 
-SUB (Simple Universal Builder) is a modern, easy-to-learn compiled programming language that:
+**SUB (Simple Universal Builder)** is a clean, versatile programming language designed for developer productivity and maximum portability:
 
-- **Compiles to native machine code** via a C backend (GCC/Clang)
-- **Transpiles** to Python, C, C++, JavaScript, TypeScript, Rust, Go, Java, Kotlin, Swift, Assembly, CSS, and Ruby
-- **Interprets** code directly with the built-in `subi` interpreter
-- Has a **clean, minimal syntax** — no semicolons required, optional `{}` or `end` blocks
-
----
-
-## Features
-
-### Core Language
-
-- **Typed values** — integers, floats, strings, booleans, null, arrays, objects
-- **Variables** — `var` (mutable), `const` (immutable), type inference
-- **Functions** — `function` / `fn` / `def` with recursion and closures
-- **Control flow** — `if` / `elif` / `else`, `for` / `while`, `do-while`
-- **Pattern matching** — `switch` / `match` with `case` and `default`
-- **Error handling** — `try` / `catch` / `finally` / `throw`
-- **Loop control** — `break` and `continue` in all loop types
-
-### Operators
-
-- **Arithmetic** — `+`, `-`, `*`, `/`, `%`, `**` (power, right-associative)
-- **Comparison** — `==`, `!=`, `<`, `>`, `<=`, `>=`
-- **Logical** — `&&`, `||`, `!`
-- **Bitwise** — `&`, `|`, `^`, `~`, `<<`, `>>`
-- **Assignment** — `=`, `+=`, `-=`, `*=`, `/=`, `%=`, `**=`, `&=`, `|=`, `^=`, `<<=`, `>>=`
-- **Increment/Decrement** — `++`, `--` (prefix and postfix)
-- **Ternary** — `condition ? then : else`
-- **Float modulo** — `%` works on floats via `fmod()`
-
-### String Methods
-
-`.length`, `.upper()`, `.lower()`, `.substring(start, end)`, `.split(delimiter)`,
-`.contains(substring)`, `.replace(old, new)`, `.trim()`, `.char_at(index)`
-
-### Array Operations
-
-Literal syntax `[1, 2, 3]`, indexing `arr[0]`, assignment `arr[1] = 99`,
-`.length`, `.push(val)`, `.pop()`, `.join(sep)`, `for item in arr` iteration
-
-### Other
-
-- **For-in string iteration** — `for ch in "abc"` iterates characters
-- **Object literals** — `{"key": "value"}`
-- **Embed foreign code** — `embed c ... endembed`
-- **`type()` function** — returns type name as string (`"int"`, `"float"`, `"string"`, `"bool"`, `"null"`, `"array"`)
-- **22+ built-in functions** — `print`, `show`, `input`, `str`, `int`, `float`, `len`, `range`, `abs`, `min`, `max`, `floor`, `ceil`, `round`, `sqrt`, `trim`, `char_at`, `push`, `pop`, `join`, `to_string`, `println`
-- **Dual block style** — brace-delimited `{ }` or `end`-delimited
+- 🚀 **Native Compilation**: Compiles `.sb` code directly to native machine binaries via an optimized C backend.
+- 🔄 **Multi-Target Transpilation**: Generates idiomatic code in Python, JavaScript, TypeScript, C, C++, Rust, Go, Java, Kotlin, Swift, Ruby, x86-64 Assembly, and CSS.
+- ⚡ **Direct AST Interpretation**: Run `.sb` programs instantly or interactively in REPL mode via `subi`.
+- 🎨 **Minimal, Expressive Syntax**: Clean syntax with optional semicolons, supporting both brace-delimited `{}` and keyword-delimited `end` blocks.
 
 ---
 
-## Quick Install
+## Key Highlights
+
+- **Dynamic & Static Flexibility**: Type inference with runtime safety.
+- **Rich Standard Library**: 25+ built-in utility functions, string methods, math wrappers, and dynamic array operations.
+- **Embedded Foreign Code**: Seamlessly mix foreign C, Go, or Python directly inside `.sb` files using `#embed` blocks.
+- **Cross-Platform UI Tree**: First-class declarative syntax for UI windows, labels, buttons, and inputs.
+
+---
+
+## Quick Start
+
+### Build from Source
 
 ```bash
-git clone https://github.com/subhobhai943/sub-lang
+git clone https://github.com/subhobhai943/sub-lang.git
 cd sub-lang
 make
 ```
 
-This builds three tools:
-
-| Tool | Description | Usage |
-|------|-------------|-------|
-| `sub` | **Transpiler** — converts `.sb` to another language | `./sub hello.sb python` |
-| `subc` | **Native compiler** — produces a native binary | `./subc hello.sb` |
-| `subi` | **Interpreter** — runs `.sb` files directly | `./subi hello.sb` |
+This builds the three primary CLI tools:
+- `./subc` — Native compiler
+- `./subi` — Direct AST interpreter & REPL
+- `./sub` — Multi-language transpiler
 
 ---
 
-## Usage
+## The Three Tools
 
-### Compile to native binary
+### 1. Native Compiler (`subc`)
+
+Compiles SUB source code directly to a standalone native machine executable:
 
 ```bash
-./subc hello.sb              # produces ./hello
-./subc hello.sb -o myapp     # produces ./myapp
+# Compile and create executable (default: ./hello)
+./subc examples/hello_native.sb
+
+# Specify custom executable name
+./subc calculator.sb -o calc
+
+# Run native binary
+./calc
 ```
 
-### Transpile to another language
+### 2. Direct Interpreter (`subi`)
+
+Executes SUB source code on the fly:
 
 ```bash
-./sub hello.sb python         # produces hello.py
-./sub hello.sb c              # produces hello.c
-./sub hello.sb cpp            # produces hello.cpp
-./sub hello.sb js             # produces hello.js
-./sub hello.sb ts             # produces hello.ts
-./sub hello.sb rust           # produces hello.rs
-./sub hello.sb go             # produces hello.go
-./sub hello.sb java           # produces hello.java
-./sub hello.sb kotlin         # produces hello.kt
-./sub hello.sb swift          # produces hello.swift
-./sub hello.sb ruby           # produces hello.rb
-./sub hello.sb asm            # produces hello.asm
-./sub hello.sb css            # produces hello.css
+# Execute a script
+./subi examples/fizzbuzz.sb
 
-# Custom output name:
-./sub first.sb python first   # produces first.py
-```
-
-### Interpret directly
-
-```bash
-./subi hello.sb
-```
-
-### REPL mode
-
-```bash
+# Run the interactive REPL
 ./subi
-# Interactive SUB interpreter — type expressions and statements line by line
+```
+
+### 3. Multi-Target Transpiler (`sub`)
+
+Translates `.sb` code into the target programming language of your choice:
+
+```bash
+./sub examples/fibonacci.sb python      # -> fibonacci.py
+./sub examples/fibonacci.sb js          # -> fibonacci.js
+./sub examples/fibonacci.sb ts          # -> fibonacci.ts
+./sub examples/fibonacci.sb c           # -> fibonacci.c
+./sub examples/fibonacci.sb cpp         # -> fibonacci.cpp
+./sub examples/fibonacci.sb rust        # -> fibonacci.rs
+./sub examples/fibonacci.sb go          # -> fibonacci.go
+./sub examples/fibonacci.sb java        # -> fibonacci.java
+./sub examples/fibonacci.sb kotlin      # -> fibonacci.kt
+./sub examples/fibonacci.sb swift       # -> fibonacci.swift
+./sub examples/fibonacci.sb ruby        # -> fibonacci.rb
+./sub examples/fibonacci.sb asm         # -> fibonacci.asm
+./sub examples/fibonacci.sb css         # -> fibonacci.css
 ```
 
 ---
 
 ## Language Syntax Guide
 
-### Hello World
-
-```sub
-println("Hello, World!")
-```
-
 ### Variables & Types
 
 ```sub
-var name  = "SUB"       # string
-var count = 42           # integer
-var pi    = 3.14         # float
+var name  = "SUB"        # string
+var age   = 25           # integer
+var pi    = 3.14159      # float
 var ok    = true         # boolean
-var empty = null         # null
+var empty = null         # null / nil
 const MAX = 100          # constant
 ```
 
 ### Functions
 
+Functions can be declared using `function`, `fn`, or `def`:
+
 ```sub
 function greet(name) {
-    return "Hello, " + name
+    return "Hello, " + name + "!"
 }
 
 fn add(a, b) {
@@ -177,46 +168,59 @@ def multiply(a, b) {
     return a * b
 }
 
-println(greet("World"))   # Hello, World
-println(add(3, 4))         # 7
+println(greet("World"))   # Hello, World!
+println(add(10, 20))      # 30
+println(multiply(6, 7))   # 42
 ```
 
-### If / Elif / Else
-
-Both brace and `end`-delimited styles are supported:
+### Classes & Objects
 
 ```sub
-var x = 10
+class Point {
+    var x = 0
+    var y = 0
+}
+
+var p = Point.new
+p.x = 10
+p.y = 20
+
+println(p.x)  # 10
+println(p.y)  # 20
+```
+
+### Control Flow
+
+Supports both `{}` brace syntax and `end` blocks:
+
+```sub
+var score = 85
 
 # Brace style
-if x > 5 {
-    println("big")
-} elif x > 0 {
-    println("small positive")
+if score >= 90 {
+    println("Grade: A")
+} elif score >= 80 {
+    println("Grade: B")
 } else {
-    println("non-positive")
+    println("Grade: C")
 }
 
 # End-delimited style
-if x > 5
-    println("big")
-elif x > 0
-    println("small positive")
+if score >= 90
+    println("Grade: A")
+elif score >= 80
+    println("Grade: B")
 else
-    println("non-positive")
+    println("Grade: C")
 end
 ```
 
-### For Loop
+### Loops & Iteration
 
 ```sub
-# Range iteration
-for i in range(5) {
-    println(i)           # 0, 1, 2, 3, 4
-}
-
-for i in range(1, 10) {
-    println(i)           # 1 through 9
+# Numeric range iteration
+for i in range(1, 6) {
+    println(i)          # 1, 2, 3, 4, 5
 }
 
 # Array iteration
@@ -227,269 +231,159 @@ for item in items {
 
 # String character iteration
 for ch in "hello" {
-    println(ch)          # h, e, l, l, o
+    println(ch)         # h, e, l, l, o
 }
-```
 
-### While Loop
-
-```sub
-var i = 0
-while i < 5 {
-    println(i)
-    i += 1
+# While loop
+var n = 3
+while n > 0 {
+    println(n)
+    n -= 1
 }
-```
 
-### Do-While Loop
-
-```sub
-var x = 0
-
-# Brace style
-do {
-    x += 1
-} while (x < 3)
-
-# End-delimited style
-var y = 0
-do
-    y += 10
-end while y < 50
-```
-
-### Break & Continue
-
-```sub
-# Break — stop loop early
-for i in range(100) {
-    if i == 5 {
-        break
-    }
-}
-# i is 5
-
-# Continue — skip iteration
+# Break and Continue
 for i in range(10) {
-    if i % 2 == 1 {
-        continue
-    }
-    println(i)           # 0, 2, 4, 6, 8
+    if i % 2 == 1 { continue }
+    if i == 6 { break }
+    println(i)          # 0, 2, 4
 }
 ```
 
-### Switch / Match
+### Pattern Matching
 
 ```sub
-var x = 2
+var choice = 2
 
-# Brace style
-switch x {
+switch choice {
     case 1:
-        println("one")
+        println("First choice")
     case 2:
-        println("two")
-    case 3:
-        println("three")
+        println("Second choice")
     default:
-        println("other")
+        println("Other choice")
 }
-
-# End-delimited style
-match x
-    case 1
-        println("one")
-    case 2
-        println("two")
-    default
-        println("other")
-end
 ```
 
-### Try / Catch / Throw
+### Exception Handling
 
 ```sub
-# With exception variable
 try {
-    throw "something went wrong"
-} catch (e) {
-    println("Caught:", e)
-}
-
-# Without exception variable
-try {
-    throw 42
-} catch {
-    println("An error occurred")
-}
-
-# With finally
-try {
-    println("trying")
+    throw "Fatal operation error"
 } catch (err) {
-    println("caught:", err)
+    println("Caught exception:", err)
 } finally {
-    println("cleanup")
+    println("Cleanup completed")
 }
 ```
 
-### Ternary Expressions
+### String & Array Methods
 
-```sub
-var age = 20
-var label = age >= 18 ? "adult" : "minor"
-println(label)            # adult
-
-var max = a > b ? a : b
-```
-
-### Operators
-
-```sub
-# Arithmetic
-println(2 + 3)           # 5
-println(10 - 4)           # 6
-println(3 * 7)            # 21
-println(10 / 3)           # 3
-println(10 % 3)           # 1
-println(2 ** 10)          # 1024  (power, right-associative)
-
-# Comparison
-println(1 < 2)            # true
-println(2 > 1)            # true
-println(1 == 1)           # true
-println(1 != 2)           # true
-
-# Logical
-println(true && false)    # false
-println(true || false)    # true
-println(!true)            # false
-
-# Bitwise
-println(10 & 3)           # 2
-println(10 | 3)           # 11
-println(10 ^ 3)           # 9
-println(~10)              # -11
-println(10 << 2)          # 40
-println(10 >> 2)          # 2
-
-# Compound assignment
-var n = 10
-n += 5                    # 15
-n -= 3                    # 12
-n *= 2                    # 24
-n /= 4                    # 6
-n %= 4                    # 2
-n **= 3                   # 8
-
-# Increment / Decrement
-var a = 5
-println(++a)               # 6  (pre-increment)
-println(a--)               # 6  (post-increment, returns old value)
-
-# Float modulo
-println(7.5 % 2.0)        # 1.5
-```
-
-### String Methods
-
+#### Strings
 ```sub
 var s = "Hello World"
-
 println(s.length)              # 11
 println(s.upper())             # HELLO WORLD
 println(s.lower())             # hello world
 println(s.substring(0, 5))     # Hello
-println(s.contains("World"))   # true
-println(s.replace("World", "SUB"))  # Hello SUB
+println(s.contains("World"))   # 1 (true)
+println(s.replace("World", "SUB")) # Hello SUB
 println(s.trim())              # trims whitespace
+println(s.char_at(0))          # H
 
 var parts = "a,b,c".split(",")
 println(parts[0])              # a
-println(parts.length)          # 3
-
-println(s.char_at(0))          # H
-println(s.char_at(6))          # W
 ```
 
-### Array Operations
-
+#### Arrays
 ```sub
-# Literal
-var arr = [10, 20, 30]
-
-# Indexing
-println(arr[0])                # 10
-println(arr[2])                # 30
-
-# Assignment
-arr[1] = 99
-println(arr[1])                # 99
-
-# Length
-println(arr.length)            # 3
-
-# Push and pop
-arr.push(40)
-println(arr.length)            # 4
-arr.pop()
-println(arr.length)            # 3
-
-# Join
-println(arr.join(", "))        # 10, 99, 30
-
-# Empty array
-var empty = []
-println(empty.length)          # 0
+var list = [1, 2, 3]
+list.push(4)
+println(list.length)           # 4
+println(list.pop())            # 4
+println(list.join(" - "))      # 1 - 2 - 3
 ```
 
-### Type Function
+### Embedded Code Blocks
+
+Embed foreign target languages directly in SUB source:
 
 ```sub
-println(type(42))               # int
-println(type(3.14))            # float
-println(type("hello"))         # string
-println(type(true))            # bool
-println(type(null))            # null
-println(type([1, 2, 3]))      # array
+#embed c
+int custom_c_add(int a, int b) {
+    return a + b;
+}
+#endembed
+
+println("Embedded C code compiled seamlessly!")
 ```
 
-### Comments
+### Cross-Platform UI Declarations
 
 ```sub
-# This is a single-line comment
+function handleClick() {
+    println("Button clicked!")
+}
+
+ui.window(title="SUB App", width=800, height=600)
+    ui.label(text="Welcome to SUB!", size=24)
+    ui.button(text="Click Me", onclick=handleClick)
+    ui.input(placeholder="Enter name", id="nameInput")
+end
 ```
 
 ---
 
 ## Built-in Functions
 
-| Function | Description |
-|----------|-------------|
-| `print(x)` | Print value with newline |
-| `show(x)` | Alias for `print()` |
-| `println(args...)` | Print all args space-separated with newline |
-| `input(prompt)` | Read a line from stdin |
-| `str(x)` | Convert to string |
-| `int(x)` | Convert to integer |
-| `float(x)` | Convert to float |
-| `to_string(x)` | Convert to string (alias) |
-| `len(s)` | String / array length |
-| `range(n)` | Generate range `[0, n)` |
-| `range(a, b)` | Generate range `[a, b)` |
-| `type(x)` | Return type name as string |
-| `abs(x)` | Absolute value |
-| `min(a, b)` | Minimum of two values |
-| `max(a, b)` | Maximum of two values |
-| `floor(x)` | Floor of float |
-| `ceil(x)` | Ceiling of float |
-| `round(x)` | Round to nearest integer |
-| `sqrt(x)` | Square root |
-| `push(arr, val)` | Push item onto array |
-| `pop(arr)` | Pop item from array |
-| `join(arr, sep)` | Join array elements with separator |
-| `trim(s)` | Trim whitespace from string |
-| `char_at(s, i)` | Get character at index |
+| Function | Description | Example |
+|---|---|---|
+| `print(x)` / `show(x)` | Prints expression with newline | `print("hi")` |
+| `println(a, b...)` | Prints space-separated arguments | `println("val:", 42)` |
+| `input(prompt)` | Reads string input from stdin | `var s = input("Enter: ")` |
+| `str(x)` / `to_string(x)` | Converts value to string | `str(123)` |
+| `int(x)` | Converts value to integer | `int("42")` |
+| `float(x)` | Converts value to float | `float("3.14")` |
+| `type(x)` | Returns type string (`"int"`, `"string"`, etc.) | `type(42)` -> `"int"` |
+| `len(x)` | Length of string or array | `len([1, 2])` |
+| `range(end)` / `range(start, end)` | Generates iteration range | `range(1, 5)` |
+| `abs(x)` / `sqrt(x)` | Absolute value / square root | `sqrt(16)` -> `4.0` |
+| `min(a, b)` / `max(a, b)` | Minimum / Maximum of two values | `max(10, 20)` |
+| `floor(x)` / `ceil(x)` / `round(x)` | Rounding operations | `floor(3.7)` -> `3` |
+| `push(arr, val)` / `pop(arr)` | Array operations | `push(arr, 10)` |
+| `join(arr, sep)` | Join array to string | `join(arr, ", ")` |
+| `trim(s)` / `char_at(s, i)` | String operations | `trim(" hi ")` |
+
+---
+
+## Supported Transpilation Targets
+
+| Target | Command | Output File |
+|---|---|---|
+| **Python** | `./sub file.sb python` | `file.py` |
+| **JavaScript** | `./sub file.sb js` | `file.js` |
+| **TypeScript** | `./sub file.sb ts` | `file.ts` |
+| **C** | `./sub file.sb c` | `file.c` |
+| **C++** | `./sub file.sb cpp` | `file.cpp` |
+| **Rust** | `./sub file.sb rust` | `file.rs` |
+| **Go** | `./sub file.sb go` | `file.go` |
+| **Java** | `./sub file.sb java` | `file.java` |
+| **Kotlin** | `./sub file.sb kotlin` | `file.kt` |
+| **Swift** | `./sub file.sb swift` | `file.swift` |
+| **Ruby** | `./sub file.sb ruby` | `file.rb` |
+| **Assembly (x86-64)** | `./sub file.sb asm` | `file.asm` |
+| **CSS** | `./sub file.sb css` | `file.css` |
+
+---
+
+## Testing
+
+Run the automated regression test suite:
+
+```bash
+python3 tests/run_tests.py
+```
+
+This validates `subi`, `subc` (native binary execution), `sub python`, `sub js`, and `sub cpp` (compiled via `g++`) across all standard test suites.
 
 ---
 
@@ -497,114 +391,26 @@ println(type([1, 2, 3]))      # array
 
 ```
 source.sb
-    |
-    +-- Lexer       (src/core/lexer.c)
-    +-- Parser      (src/core/parser_enhanced.c)
-    +-- Semantic    (src/core/semantic.c)
-    +-- Type System (src/core/type_system.c)
-    |
-    +-- subc -- native compiler (src/compilers/sub_native.c)
-    |       +-- C backend (src/codegen/codegen.c) -> gcc/clang -> native binary
-    |
-    +-- sub  -- transpiler (src/compilers/sub.c)
-    |       +-- src/codegen/codegen_multilang.c + codegen_rust.c + codegen_cpp.c
-    |       +-- generates <input-stem>.<ext> automatically
-    |
-    +-- subi -- interpreter (src/compilers/subi.c)
-            +-- tree-walk evaluator (src/core/interpreter.c) with all built-ins
+    │
+    ├── Lexer         (src/core/lexer.c)
+    ├── Parser        (src/core/parser_enhanced.c)
+    ├── Semantic      (src/core/semantic.c)
+    └── Type System   (src/core/type_system.c)
+         │
+         ├── subc  ─ Native Compiler  (src/compilers/sub_native.c + src/codegen/codegen.c)
+         │         └── Emits optimized C99 + runtime library -> GCC/Clang -> Native Binary
+         │
+         ├── subi  ─ Tree-Walk Interpreter (src/compilers/subi.c + src/core/interpreter.c)
+         │         └── Direct AST evaluation & interactive REPL
+         │
+         └── sub   ─ Multi-Target Transpiler (src/compilers/sub.c + src/codegen/)
+                   └── Codegen modules for Python, JS, TS, C, C++, Rust, Go, Java, Swift, Kotlin, Ruby, ASM, CSS
 ```
-
----
-
-## Supported Transpilation Targets
-
-| Target | Flag | Output Extension |
-|--------|------|-----------------|
-| Python | `python` | `.py` |
-| C | `c` | `.c` |
-| C++ | `cpp` | `.cpp` |
-| JavaScript | `js` | `.js` |
-| TypeScript | `ts` | `.ts` |
-| Rust | `rust` | `.rs` |
-| Go | `go` | `.go` |
-| Java | `java` | `.java` |
-| Kotlin | `kotlin` | `.kt` |
-| Swift | `swift` | `.swift` |
-| Assembly | `asm` | `.asm` |
-| CSS | `css` | `.css` |
-| Ruby | `ruby` | `.rb` |
-
----
-
-## Requirements
-
-- **GCC or Clang** (for native compilation)
-- **GNU Make**
-- **Linux / macOS / Windows** (via MSYS2/MinGW or Git Bash — see CI config; WSL also works)
-
----
-
-## Documentation
-
-Comprehensive guides and specs are available in the [`docs/`](docs/) directory:
-
-- [Language Specification](docs/LANGUAGE_SPEC.md)
-- [Quick Start Guide](docs/guides/QUICKSTART.md)
-- [Build Guide](docs/BUILD_GUIDE.md)
-- [Installation Guide](docs/INSTALLATION_GUIDE.md)
-- [Native Compilation Guide](docs/guides/NATIVE_COMPILATION.md)
-- [Native Compiler Guide](docs/guides/NATIVE_COMPILER_GUIDE.md)
-- [Multilang Transpilation Guide](docs/guides/MULTILANG_GUIDE.md)
-- [Standard Library Guide](docs/guides/STDLIB_GUIDE.md)
-- [Syntax Highlighting](docs/SYNTAX_HIGHLIGHTING.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Contributing](docs/CONTRIBUTING.md)
-- [Release Notes](docs/RELEASE_NOTES.md)
-
----
-
-## Examples
-
-### FizzBuzz
-
-```sub
-for i in range(1, 31) {
-    if i % 15 == 0 {
-        println("FizzBuzz")
-    } elif i % 3 == 0 {
-        println("Fizz")
-    } elif i % 5 == 0 {
-        println("Buzz")
-    } else {
-        println(i)
-    }
-}
-```
-
-### Fibonacci
-
-```sub
-function fib(n) {
-    if n <= 1 {
-        return n
-    }
-    return fib(n - 1) + fib(n - 2)
-}
-
-for i in range(10) {
-    println(fib(i))
-}
-```
-
----
-
-## Contributing
-
-Contributions, bug reports, and feature requests are welcome!
-Please open an issue or pull request at [github.com/subhobhai943/sub-lang](https://github.com/subhobhai943/sub-lang).
 
 ---
 
 ## License
 
-MIT &copy; [Subhadip Sarkar](https://github.com/subhobhai943)
+Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
+
+Copyright &copy; [Subhadip Sarkar](https://github.com/subhobhai943).
