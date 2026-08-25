@@ -1,6 +1,12 @@
 #ifndef SUB_LOGO_H
 #define SUB_LOGO_H
 
+/* SUB_VERSION is defined in sub_compiler.h, which every includer of this
+   header pulls in first; fall back to a literal if included standalone. */
+#ifndef SUB_VERSION
+#define SUB_VERSION "2.0.0"
+#endif
+
 #define SUB_LOGO \
 "\n" \
 "  \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \n" \
@@ -10,7 +16,7 @@
 "  \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\n" \
 "  \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d \n" \
 "\n" \
-"  Simple Universal Builder  v1.0.7-beta\n" \
+"  Simple Universal Builder  v" SUB_VERSION "\n" \
 "  compile \u2022 transpile \u2022 interpret\n\n"
 
 #endif

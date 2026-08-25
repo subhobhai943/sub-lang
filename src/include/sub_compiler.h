@@ -8,6 +8,14 @@
 #ifndef SUB_COMPILER_H
 #define SUB_COMPILER_H
 
+/* Single source of truth for the toolchain's version number. The banner
+   (src/include/logo.h) and the REPL (subi.c) both print this string, so
+   there's exactly one place to bump on release instead of several
+   independently-drifting copies. The MSI installer's version is set
+   separately from the release tag at build time (see .github/workflows/
+   release.yml), independent of this macro. */
+#define SUB_VERSION "2.0.0"
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>

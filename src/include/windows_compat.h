@@ -7,6 +7,20 @@
 #ifndef WINDOWS_COMPAT_H
 #define WINDOWS_COMPAT_H
 
+/* Force the console to UTF-8 output on Windows. Without this, the box-drawing
+   characters in the SUB banner (src/include/logo.h) render as mojibake
+   (e.g. "ΓûêΓûê...") because cmd.exe / PowerShell / VS Code's default terminal
+   start in a legacy codepage (CP437/850), not UTF-8. Call once at the very
+   top of main(), before anything is printed. */
+#ifdef _WIN32
+#include <windows.h>
+static inline void sub_console_init_utf8(void) {
+    SetConsoleOutputCP(CP_UTF8);
+}
+#else
+static inline void sub_console_init_utf8(void) {}
+#endif
+
 #ifdef _WIN32
     #ifdef _MSC_VER
         // MSVC-specific: include <string.h> instead of <strings.h>

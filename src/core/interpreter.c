@@ -28,6 +28,10 @@
 #include <string.h>
 #include <math.h>
 #include <ctype.h>
+#include <stdarg.h>
+#ifndef _WIN32
+#include <sys/resource.h>
+#endif
 
 /* ================================================================
    Global State
@@ -38,6 +42,78 @@ static SubVal NULL_VAL = {VAL_NULL, {.iv = 0}};
 /* Exception handling state (checked at every eval entry) */
 static SubVal g_exception    = {VAL_NULL, {.iv = 0}};
 static int    g_exception_thrown = 0;
+
+/* ---- Runtime error policy ----
+   Continuing after a runtime error with a null placeholder is the worst of
+   both worlds: the user sees a warning scroll past and still gets wrong
+   results, from a process that exits 0. So an error is fatal (exit 70).
+
+   A REPL is the one place where that is too harsh — killing the process over
+   a typo would discard everything defined in the session — so it aborts just
+   the line under evaluation. g_runtime_aborted unwinds the evaluator the same
+   way the return/break flags do; it is deliberately separate from the
+   try/catch exception state so that runtime errors stay uncatchable in both
+   modes rather than behaving differently depending on how you ran the code. */
+static int g_repl_mode       = 0;
+static int g_runtime_aborted = 0;
+
+void interp_set_repl_mode(int enabled) { g_repl_mode = enabled ? 1 : 0; }
+void interp_clear_abort(void)          { g_runtime_aborted = 0; }
+int  interp_aborted(void)              { return g_runtime_aborted; }
+
+static void runtime_error(const char *fmt, ...) {
+    /* Once an abort is pending every enclosing eval() is bailing out, so any
+       follow-on complaint is noise about a value the error itself created. */
+    if (g_runtime_aborted) return;
+
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "RuntimeError: ");
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    va_end(ap);
+
+    if (!g_repl_mode) exit(70);
+    g_runtime_aborted = 1;
+}
+
+/* ---- Recursion guard ----
+   A SUB-level call nests many C-level eval() frames, so runaway recursion
+   overflows the C stack and the OS kills the process with no diagnostic.
+   We measure how much stack the evaluator has actually consumed rather than
+   counting calls: a fixed call limit can't be right on both an 8 MiB Linux
+   stack and a 1 MiB Windows one, and it silently stops guarding whenever a
+   frame grows. */
+static char  *g_stack_base   = NULL;
+static size_t g_stack_budget = 0;
+
+static void interp_stack_guard_init(void) {
+    char probe;
+    g_stack_base = &probe;
+
+    size_t limit = (size_t)1 << 20;  /* Windows default thread stack: 1 MiB */
+#ifndef _WIN32
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_STACK, &rl) == 0 &&
+        rl.rlim_cur != RLIM_INFINITY && rl.rlim_cur > 0)
+        limit = (size_t)rl.rlim_cur;
+    else
+        limit = (size_t)8 << 20;
+#endif
+    /* Spend at most half the stack so the error is reported well before the
+       real overflow, leaving room for the frames below us. */
+    g_stack_budget = limit / 2;
+}
+
+static void interp_check_stack(void) {
+    char probe;
+    if (!g_stack_base) interp_stack_guard_init();
+    size_t used = (size_t)(g_stack_base > &probe
+                           ? g_stack_base - &probe
+                           : &probe - g_stack_base);
+    if (used > g_stack_budget)
+        runtime_error("max recursion depth exceeded");
+}
 
 /* ================================================================
    Forward Declarations
@@ -136,7 +212,7 @@ static void array_push(SubArray *arr, SubVal item) {
 
 static SubVal array_pop(SubArray *arr) {
     if (!arr || arr->count <= 0) {
-        fprintf(stderr, "Runtime error: pop from empty array\n");
+        runtime_error("pop from empty array");
         return NULL_VAL;
     }
     return arr->items[--arr->count];
@@ -168,14 +244,14 @@ static void object_set(SubObject *obj, const char *key, SubVal val) {
 
 static SubVal object_get(SubObject *obj, const char *key) {
     if (!obj) {
-        fprintf(stderr, "Runtime error: cannot access property '%s' of null\n", key);
+        runtime_error("cannot access property '%s' of null", key);
         return NULL_VAL;
     }
     for (int i = 0; i < obj->count; i++) {
         if (strcmp(obj->keys[i], key) == 0)
             return obj->values[i];
     }
-    fprintf(stderr, "Runtime error: undefined object property '%s'\n", key);
+    runtime_error("undefined object property '%s'", key);
     return NULL_VAL;
 }
 
@@ -374,7 +450,7 @@ SubVal env_get(Env *env, const char *name) {
         for (EnvEntry *e = s->vars; e; e = e->next)
             if (strcmp(e->name, name) == 0)
                 return e->val;
-    fprintf(stderr, "Runtime error: undefined variable '%s'\n", name);
+    runtime_error("undefined variable '%s'", name);
     return NULL_VAL;
 }
 
@@ -440,7 +516,7 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
         if (L.type != VAL_STRING || R.type != VAL_STRING) {
             if (strcmp(op, "==") == 0) return make_bool(0);
             if (strcmp(op, "!=") == 0) return make_bool(1);
-            fprintf(stderr, "Runtime error: cannot compare string with %s using '%s'\n",
+            runtime_error("cannot compare string with %s using '%s'",
                     type_name(L.type == VAL_STRING ? R.type : L.type), op);
             return NULL_VAL;
         }
@@ -453,7 +529,7 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
         if (strcmp(op, "<=") == 0) return make_bool(cmp <= 0);
         if (strcmp(op, ">")  == 0) return make_bool(cmp >  0);
         if (strcmp(op, ">=") == 0) return make_bool(cmp >= 0);
-        fprintf(stderr, "Runtime error: operator '%s' not supported for strings\n", op);
+        runtime_error("operator '%s' not supported for strings", op);
         return NULL_VAL;
     }
 
@@ -463,7 +539,7 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
         case VAL_NULL:
             if (strcmp(op, "==") == 0) return make_bool(1);
             if (strcmp(op, "!=") == 0) return make_bool(0);
-            fprintf(stderr, "Runtime error: cannot use '%s' on null\n", op);
+            runtime_error("cannot use '%s' on null", op);
             return NULL_VAL;
         case VAL_BOOL:
             if (strcmp(op, "==") == 0) return make_bool(L.bv == R.bv);
@@ -472,17 +548,17 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
         case VAL_FUNC:
             if (strcmp(op, "==") == 0) return make_bool(L.fn == R.fn);
             if (strcmp(op, "!=") == 0) return make_bool(L.fn != R.fn);
-            fprintf(stderr, "Runtime error: cannot use '%s' on functions\n", op);
+            runtime_error("cannot use '%s' on functions", op);
             return NULL_VAL;
         case VAL_ARRAY:
             if (strcmp(op, "==") == 0) return make_bool(L.arr == R.arr);
             if (strcmp(op, "!=") == 0) return make_bool(L.arr != R.arr);
-            fprintf(stderr, "Runtime error: cannot use '%s' on arrays\n", op);
+            runtime_error("cannot use '%s' on arrays", op);
             return NULL_VAL;
         case VAL_OBJECT:
             if (strcmp(op, "==") == 0) return make_bool(L.obj == R.obj);
             if (strcmp(op, "!=") == 0) return make_bool(L.obj != R.obj);
-            fprintf(stderr, "Runtime error: cannot use '%s' on objects\n", op);
+            runtime_error("cannot use '%s' on objects", op);
             return NULL_VAL;
         default:
             break;
@@ -495,7 +571,7 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     if (!both_numeric) {
         if (strcmp(op, "==") == 0) return make_bool(0);
         if (strcmp(op, "!=") == 0) return make_bool(1);
-        fprintf(stderr, "Runtime error: cannot use '%s' on %s and %s\n",
+        runtime_error("cannot use '%s' on %s and %s",
                 op, type_name(L.type), type_name(R.type));
         return NULL_VAL;
     }
@@ -511,12 +587,12 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     if (strcmp(op, "*") == 0)  return use_float ? make_float(a * b)    : make_int((long long)(a * b));
 
     if (strcmp(op, "/") == 0) {
-        if (b == 0.0) { fprintf(stderr, "Runtime error: division by zero\n"); return NULL_VAL; }
+        if (b == 0.0) { runtime_error("division by zero"); return NULL_VAL; }
         return use_float ? make_float(a / b) : make_int((long long)(a / b));
     }
 
     if (strcmp(op, "%") == 0) {
-        if (b == 0.0) { fprintf(stderr, "Runtime error: modulo by zero\n"); return NULL_VAL; }
+        if (b == 0.0) { runtime_error("modulo by zero"); return NULL_VAL; }
         return use_float ? make_float(fmod(a, b)) : make_int((long long)a % (long long)b);
     }
 
@@ -540,20 +616,20 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     if (strcmp(op, "^")  == 0) return make_int(ia ^ ib);
     if (strcmp(op, "<<") == 0) {
         if (ib < 0 || ib >= (long long)(sizeof(long long) * 8)) {
-            fprintf(stderr, "Runtime error: left shift by %lld out of range\n", ib);
+            runtime_error("left shift by %lld out of range", ib);
             return NULL_VAL;
         }
         return make_int(ia << ib);
     }
     if (strcmp(op, ">>") == 0) {
         if (ib < 0 || ib >= (long long)(sizeof(long long) * 8)) {
-            fprintf(stderr, "Runtime error: right shift by %lld out of range\n", ib);
+            runtime_error("right shift by %lld out of range", ib);
             return NULL_VAL;
         }
         return make_int(ia >> ib);
     }
 
-    fprintf(stderr, "Runtime error: unknown binary operator '%s'\n", op);
+    runtime_error("unknown binary operator '%s'", op);
     return NULL_VAL;
 }
 
@@ -562,7 +638,8 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
    ================================================================ */
 
 static int should_stop(Env *env) {
-    return env->returning || env->breaking || env->continuing || g_exception_thrown;
+    return env->returning || env->breaking || env->continuing ||
+           g_exception_thrown || g_runtime_aborted;
 }
 
 /* ================================================================
@@ -750,14 +827,14 @@ static SubVal eval_string_method(const char *str, const char *method,
         long long slen = (long long)strlen(str);
         if (idx < 0) idx += slen; /* support negative indices */
         if (idx < 0 || idx >= slen) {
-            fprintf(stderr, "Runtime error: char_at(%lld) out of range [0, %lld)\n", idx, slen);
+            runtime_error("char_at(%lld) out of range [0, %lld)", idx, slen);
             return NULL_VAL;
         }
         char ch[2] = {str[idx], '\0'};
         return make_str(ch);
     }
 
-    fprintf(stderr, "Runtime error: string has no method '%s'\n", method);
+    runtime_error("string has no method '%s'", method);
     return NULL_VAL;
 }
 
@@ -768,7 +845,7 @@ static SubVal eval_string_method(const char *str, const char *method,
 static SubVal eval_array_method(SubArray *arr, const char *method,
                                 ASTNode *call_node, Env *env) {
     if (!arr) {
-        fprintf(stderr, "Runtime error: cannot call method on null array\n");
+        runtime_error("cannot call method on null array");
         return NULL_VAL;
     }
 
@@ -819,7 +896,7 @@ static SubVal eval_array_method(SubArray *arr, const char *method,
         return v;
     }
 
-    fprintf(stderr, "Runtime error: array has no method '%s'\n", method);
+    runtime_error("array has no method '%s'", method);
     return NULL_VAL;
 }
 
@@ -829,7 +906,8 @@ static SubVal eval_array_method(SubArray *arr, const char *method,
 
 SubVal eval(ASTNode *node, Env *env) {
     /* Early exit on any flow-control signal */
-    if (!node || env->returning || env->breaking || env->continuing || g_exception_thrown)
+    if (!node || env->returning || env->breaking || env->continuing ||
+        g_exception_thrown || g_runtime_aborted)
         return NULL_VAL;
 
     switch (node->type) {
@@ -900,11 +978,11 @@ SubVal eval(ASTNode *node, Env *env) {
             else if (strcmp(op, "-=") == 0) result = use_float ? make_float(a - b) : make_int((long long)(a - b));
             else if (strcmp(op, "*=") == 0) result = use_float ? make_float(a * b) : make_int((long long)(a * b));
             else if (strcmp(op, "/=") == 0) {
-                if (b == 0.0) { fprintf(stderr, "Runtime error: division by zero\n"); return NULL_VAL; }
+                if (b == 0.0) { runtime_error("division by zero"); return NULL_VAL; }
                 result = use_float ? make_float(a / b) : make_int((long long)(a / b));
             }
             else if (strcmp(op, "%=") == 0) {
-                if (b == 0.0) { fprintf(stderr, "Runtime error: modulo by zero\n"); return NULL_VAL; }
+                if (b == 0.0) { runtime_error("modulo by zero"); return NULL_VAL; }
                 result = use_float ? make_float(fmod(a, b)) : make_int((long long)a % (long long)b);
             }
             else if (strcmp(op, "**=") == 0) {
@@ -916,7 +994,7 @@ SubVal eval(ASTNode *node, Env *env) {
             else if (strcmp(op, "<<=") == 0) result = make_int((long long)a << (long long)b);
             else if (strcmp(op, ">>=") == 0) result = make_int((long long)a >> (long long)b);
             else {
-                fprintf(stderr, "Runtime error: unknown assignment operator '%s'\n", op);
+                runtime_error("unknown assignment operator '%s'", op);
                 return NULL_VAL;
             }
 
@@ -936,14 +1014,14 @@ SubVal eval(ASTNode *node, Env *env) {
         if (node->left && node->left->type == AST_ARRAY_ACCESS) {
             SubVal arr_val = eval(node->left->left, env);
             if (arr_val.type != VAL_ARRAY || !arr_val.arr) {
-                fprintf(stderr, "Runtime error: compound assignment on non-array\n");
+                runtime_error("compound assignment on non-array");
                 return NULL_VAL;
             }
             SubVal idx_val = eval(node->left->right, env);
             long long idx = idx_val.iv;
             if (idx < 0) idx += (long long)arr_val.arr->count;
             if (idx < 0 || idx >= arr_val.arr->count) {
-                fprintf(stderr, "Runtime error: array index %lld out of bounds\n", idx);
+                runtime_error("array index %lld out of bounds", idx);
                 return NULL_VAL;
             }
             SubVal *item = &arr_val.arr->items[idx];
@@ -954,8 +1032,14 @@ SubVal eval(ASTNode *node, Env *env) {
             if      (strcmp(op, "+=") == 0) result = uf ? make_float(a + b) : make_int((long long)(a + b));
             else if (strcmp(op, "-=") == 0) result = uf ? make_float(a - b) : make_int((long long)(a - b));
             else if (strcmp(op, "*=") == 0) result = uf ? make_float(a * b) : make_int((long long)(a * b));
-            else if (strcmp(op, "/=") == 0) result = b == 0.0 ? NULL_VAL : (uf ? make_float(a / b) : make_int((long long)(a / b)));
-            else if (strcmp(op, "%=") == 0) result = b == 0.0 ? NULL_VAL : (uf ? make_float(fmod(a, b)) : make_int((long long)a % (long long)b));
+            else if (strcmp(op, "/=") == 0) {
+                if (b == 0.0) { runtime_error("division by zero"); return NULL_VAL; }
+                result = uf ? make_float(a / b) : make_int((long long)(a / b));
+            }
+            else if (strcmp(op, "%=") == 0) {
+                if (b == 0.0) { runtime_error("modulo by zero"); return NULL_VAL; }
+                result = uf ? make_float(fmod(a, b)) : make_int((long long)a % (long long)b);
+            }
             else result = rhs;
             val_free(*item);
             *item = result;
@@ -1054,7 +1138,7 @@ SubVal eval(ASTNode *node, Env *env) {
        ============================================================ */
     case AST_WHILE_STMT: {
         SubVal r = NULL_VAL;
-        while (!env->returning && !g_exception_thrown) {
+        while (!env->returning && !g_exception_thrown && !g_runtime_aborted) {
             SubVal c = eval(node->condition, env);
             if (!is_truthy(c)) break;
 
@@ -1087,7 +1171,7 @@ SubVal eval(ASTNode *node, Env *env) {
             } else if (range_node->left) {
                 end_v = eval(range_node->left, env).iv;
             }
-            for (long long i = start; i < end_v && !env->returning && !g_exception_thrown; i++) {
+            for (long long i = start; i < end_v && !env->returning && !g_exception_thrown && !g_runtime_aborted; i++) {
                 Env *loop = env_new(env);
                 env_define(loop, node->value, make_int(i));
                 r = eval(node->body, loop);
@@ -1105,7 +1189,7 @@ SubVal eval(ASTNode *node, Env *env) {
                 /* String iteration: each character */
                 const char *str = collection.sv ? collection.sv : "";
                 int slen = (int)strlen(str);
-                for (int i = 0; i < slen && !env->returning && !g_exception_thrown; i++) {
+                for (int i = 0; i < slen && !env->returning && !g_exception_thrown && !g_runtime_aborted; i++) {
                     Env *loop = env_new(env);
                     char ch[2] = {str[i], '\0'};
                     env_define(loop, node->value, make_str(ch));
@@ -1118,7 +1202,7 @@ SubVal eval(ASTNode *node, Env *env) {
                 }
             } else if (collection.type == VAL_ARRAY && collection.arr) {
                 /* Array iteration */
-                for (int i = 0; i < collection.arr->count && !env->returning && !g_exception_thrown; i++) {
+                for (int i = 0; i < collection.arr->count && !env->returning && !g_exception_thrown && !g_runtime_aborted; i++) {
                     Env *loop = env_new(env);
                     env_define(loop, node->value, collection.arr->items[i]);
                     r = eval(node->body, loop);
@@ -1129,7 +1213,7 @@ SubVal eval(ASTNode *node, Env *env) {
                     env_free(loop);
                 }
             } else {
-                fprintf(stderr, "Runtime error: cannot iterate over %s\n", type_name(collection.type));
+                runtime_error("cannot iterate over %s", type_name(collection.type));
             }
         }
         return r;
@@ -1148,7 +1232,7 @@ SubVal eval(ASTNode *node, Env *env) {
                 break;
             }
             env_free(loop);
-        } while (!env->returning && !g_exception_thrown &&
+        } while (!env->returning && !g_exception_thrown && !g_runtime_aborted &&
                  is_truthy(eval(node->condition, env)));
         return r;
     }
@@ -1309,7 +1393,7 @@ SubVal eval(ASTNode *node, Env *env) {
             return object_get(obj.obj, member);
         }
 
-        fprintf(stderr, "Runtime error: cannot access property '%s' on %s\n",
+        runtime_error("cannot access property '%s' on %s",
                 member, type_name(obj.type));
         return NULL_VAL;
     }
@@ -1325,7 +1409,7 @@ SubVal eval(ASTNode *node, Env *env) {
         if (container.type == VAL_ARRAY && container.arr) {
             if (i < 0) i += (long long)container.arr->count;
             if (i < 0 || i >= container.arr->count) {
-                fprintf(stderr, "Runtime error: array index %lld out of bounds [0, %d)\n",
+                runtime_error("array index %lld out of bounds [0, %d)",
                         i, container.arr->count);
                 return NULL_VAL;
             }
@@ -1337,7 +1421,7 @@ SubVal eval(ASTNode *node, Env *env) {
             long long slen = (long long)strlen(str);
             if (i < 0) i += slen;
             if (i < 0 || i >= slen) {
-                fprintf(stderr, "Runtime error: string index %lld out of bounds\n", i);
+                runtime_error("string index %lld out of bounds", i);
                 return NULL_VAL;
             }
             char ch[2] = {str[i], '\0'};
@@ -1352,7 +1436,7 @@ SubVal eval(ASTNode *node, Env *env) {
             return result;
         }
 
-        fprintf(stderr, "Runtime error: cannot index into %s\n", type_name(container.type));
+        runtime_error("cannot index into %s", type_name(container.type));
         return NULL_VAL;
     }
 
@@ -1383,7 +1467,7 @@ SubVal eval(ASTNode *node, Env *env) {
             if (obj.type == VAL_ARRAY && obj.arr)
                 return eval_array_method(obj.arr, method, node, env);
 
-            fprintf(stderr, "Runtime error: cannot call method '%s' on %s\n",
+            runtime_error("cannot call method '%s' on %s",
                     method ? method : "(null)", type_name(obj.type));
             return NULL_VAL;
         }
@@ -1393,10 +1477,14 @@ SubVal eval(ASTNode *node, Env *env) {
 
         /* ==== Builtins ==== */
 
-        /* print / show: each arg on its own line */
+        /* print / show: each arg on its own line.
+           An argument that failed to evaluate has no value worth showing —
+           printing it would put a bare "null" under the error message. */
         if (fn && (strcmp(fn, "print") == 0 || strcmp(fn, "show") == 0)) {
             for (int i = 0; i < node->child_count; i++) {
-                print_val(eval(node->children[i], env));
+                SubVal arg = eval(node->children[i], env);
+                if (g_runtime_aborted) return NULL_VAL;
+                print_val(arg);
                 printf("\n");
             }
             return NULL_VAL;
@@ -1405,8 +1493,10 @@ SubVal eval(ASTNode *node, Env *env) {
         /* println: all args on one line, space-separated, then newline */
         if (fn && strcmp(fn, "println") == 0) {
             for (int i = 0; i < node->child_count; i++) {
+                SubVal arg = eval(node->children[i], env);
+                if (g_runtime_aborted) return NULL_VAL;
                 if (i > 0) printf(" ");
-                print_val(eval(node->children[i], env));
+                print_val(arg);
             }
             printf("\n");
             return NULL_VAL;
@@ -1654,6 +1744,9 @@ SubVal eval(ASTNode *node, Env *env) {
             SubVal fv = env_get(env, fn);
             if (fv.type == VAL_FUNC && fv.fn) {
                 ASTNode *fn_decl = fv.fn;
+
+                interp_check_stack();
+
                 Env *fn_env = env_new(env);
                 /* Bind parameters from function's children to call's children */
                 if (fn_decl->children) {
@@ -1667,10 +1760,10 @@ SubVal eval(ASTNode *node, Env *env) {
                 env_free(fn_env);
                 return ret;
             }
-            fprintf(stderr, "Runtime error: '%s' is not a function (type: %s)\n",
+            runtime_error("'%s' is not a function (type: %s)",
                     fn, type_name(fv.type));
         } else {
-            fprintf(stderr, "Runtime error: call to unnamed expression\n");
+            runtime_error("call to unnamed expression");
         }
         return NULL_VAL;
     }
@@ -1740,6 +1833,9 @@ SubVal eval(ASTNode *node, Env *env) {
 int interpret_source(const char *source, Env *env) {
     if (!source || !env) return 1;
 
+    interp_stack_guard_init();
+    interp_clear_abort();
+
     int ntok;
     Token *toks = lexer_tokenize(source, &ntok);
     if (!toks) return 1;
@@ -1756,13 +1852,16 @@ int interpret_source(const char *source, Env *env) {
     }
 
     eval(ast, env);
+    int aborted = g_runtime_aborted;
 
     parser_free_ast(ast);
     lexer_free_tokens(toks, ntok);
-    return 0;
+    return aborted ? 1 : 0;
 }
 
 int interpret_file(const char *path) {
+    interp_stack_guard_init();
+
     FILE *f = fopen(path, "rb");
     if (!f) {
         fprintf(stderr, "Error: cannot open file '%s'\n", path);

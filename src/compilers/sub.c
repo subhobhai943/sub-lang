@@ -108,6 +108,27 @@ typedef struct {
     const char *run_hint;   // "next steps" hint for the user
 } TargetDescriptor;
 
+// Every run_hint below uses the literal word "output" as a placeholder for
+// the actual generated filename (e.g. "python3 output.py"). Substitute it
+// with the real basename so the hint matches what was actually written
+// instead of always claiming the file is named "output.*" (see BUG 7).
+static void format_run_hint(const char *hint, const char *real_base, char *out, size_t outsz) {
+    size_t oi = 0;
+    const size_t base_len = strlen(real_base);
+    for (const char *p = hint; *p && oi + 1 < outsz; ) {
+        if (strncmp(p, "output", 6) == 0) {
+            size_t copy = base_len;
+            if (copy > outsz - 1 - oi) copy = outsz - 1 - oi;
+            memcpy(out + oi, real_base, copy);
+            oi += copy;
+            p += 6;
+        } else {
+            out[oi++] = *p++;
+        }
+    }
+    out[oi] = '\0';
+}
+
 // Look up a target by name (case-insensitive). Returns NULL if not found.
 static const TargetDescriptor* lookup_target(const char *name) {
     static const TargetDescriptor targets[] = {
@@ -226,6 +247,7 @@ static void print_help(const char *prog) {
 
 // Main function
 int main(int argc, char *argv[]) {
+    sub_console_init_utf8();
     printf(SUB_LOGO);
 
     // Check for --help anywhere in argv
@@ -357,9 +379,22 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Warning: gcc compilation failed. Make sure gcc is installed.\n");
         }
     } else {
-        // Print next steps for other targets
+        // Print next steps for other targets, using the actual output
+        // filename rather than the hardcoded literal in run_hint (BUG 7).
+        char hint_base[256];
+        size_t ext_len = strlen(target->extension);
+        size_t of_len  = strlen(output_file);
+        if (ext_len > 0 && of_len > ext_len &&
+            strcmp(output_file + of_len - ext_len, target->extension) == 0) {
+            snprintf(hint_base, sizeof(hint_base), "%.*s",
+                     (int)(of_len - ext_len), output_file);
+        } else {
+            snprintf(hint_base, sizeof(hint_base), "%s", output_file);
+        }
+        char hint[1024];
+        format_run_hint(target->run_hint, hint_base, hint, sizeof(hint));
         printf("\nNext steps:\n");
-        printf("  %s\n", target->run_hint);
+        printf("  %s\n", hint);
     }
     
     // Cleanup

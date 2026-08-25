@@ -89,4 +89,14 @@ SubVal eval(ASTNode *node, Env *env);
 int    interpret_file(const char *path);
 int    interpret_source(const char *source, Env *env);
 
+/* ---------- Runtime Error Policy ---------- */
+
+/* A runtime error aborts the program with exit code 70 by default. A REPL
+   should enable REPL mode instead, so that an error abandons only the line
+   being evaluated and the session (and everything defined in it) survives.
+   Call interp_clear_abort() before evaluating each REPL line. */
+void interp_set_repl_mode(int enabled);
+void interp_clear_abort(void);
+int  interp_aborted(void);
+
 #endif /* INTERPRETER_H */

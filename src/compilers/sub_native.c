@@ -288,6 +288,7 @@ static void get_output_basename_native(const char *input_file, char *out, size_t
 }
 
 int main(int argc, char *argv[]) {
+    sub_console_init_utf8();
     printf(SUB_LOGO);
 
     if (argc < 2) {

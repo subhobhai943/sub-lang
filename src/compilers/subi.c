@@ -3,6 +3,7 @@
 #include "interpreter.h"
 #include "common.h"
 #include "logo.h"
+#include "windows_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,6 +66,9 @@ static char* read_line(const char *prompt) {
 /* ── Evaluate a single REPL line and print the result ──────── */
 
 static void repl_eval_line(const char *line, Env *env) {
+    /* Drop any abort left over from the previous line's runtime error. */
+    interp_clear_abort();
+
     int ntok = 0;
     Token *toks = lexer_tokenize(line, &ntok);
     if (!toks || ntok == 0) return;
@@ -84,8 +88,10 @@ static void repl_eval_line(const char *line, Env *env) {
     /* Evaluate */
     SubVal result = eval(ast, env);
 
-    /* Print result for expression-like top-level nodes */
-    if (result.type != VAL_NULL) {
+    /* Print result for expression-like top-level nodes. A line that hit a
+       runtime error has no meaningful value — printing one would just add a
+       bare "null" under the error message. */
+    if (result.type != VAL_NULL && !interp_aborted()) {
         ASTNode *last = ast->body;
         if (!last) {
             repl_print_val(result);
@@ -123,6 +129,10 @@ static int repl_load_file(const char *filename, Env *env) {
 /* ── Main REPL loop ─────────────────────────────────────────── */
 
 static int run_repl(void) {
+    /* A runtime error should cost the user the current line, not the whole
+       session and everything defined in it. */
+    interp_set_repl_mode(1);
+
     Env *global_env = env_new(NULL);
     if (!global_env) {
         fprintf(stderr, "Error: failed to create REPL environment\n");
@@ -136,7 +146,7 @@ static int run_repl(void) {
     int brace_depth = 0;
 
     printf(SUB_LOGO);
-    printf("SUB Interactive REPL v1.0\n");
+    printf("SUB Interactive REPL v" SUB_VERSION "\n");
     printf("Type :help for available commands.\n");
     printf("Type :quit or :exit to leave.\n\n");
 
@@ -237,6 +247,7 @@ static int run_repl(void) {
 /* ── Entry Point ────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
+    sub_console_init_utf8();
     if (argc < 2) {
         return run_repl();
     }
