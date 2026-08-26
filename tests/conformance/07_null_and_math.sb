@@ -1,0 +1,19 @@
+fn safe_div(a, b) {
+    if b == 0 {
+        return null
+    }
+    return a / b
+}
+
+let r = safe_div(10.0, 4.0)
+if r != null {
+    println(r)
+}
+
+let bad = safe_div(1.0, 0)
+if bad == null {
+    println("divide by zero handled")
+}
+
+println(sqrt(81.0))
+println(abs(-3.5))

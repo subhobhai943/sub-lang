@@ -38,6 +38,19 @@ DataType infer_expr_type(ASTNode *expr);
    TYPE_VOID when the body never returns a value. */
 DataType infer_return_type(ASTNode *body);
 
+/* True when `expr` is the literal null (or its deprecated spelling nil). */
+int expr_is_null_literal(ASTNode *expr);
+
+/* Inferred type of parameter `index` of user function `fn_name`, or
+   TYPE_UNKNOWN when the function or parameter is not known. Backends use it
+   to emit an argument in the form the callee's signature expects. */
+DataType param_type_of(const char *fn_name, int index);
+
+/* True when `fn_name` names a user function that can return null as well as
+   a real value. Backends for statically typed targets use this to pick a
+   representation that has room for "no value". */
+int function_is_nullable(const char *fn_name);
+
 /* `print`, `println` and `show` all mean "write a line to stdout" in SUB.
    Backends used to test only for print/show, so `println(...)` fell through
    and was emitted as a call to a function that does not exist in the target

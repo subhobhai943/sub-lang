@@ -297,6 +297,23 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
     }
 }
 
+static void generate_expr_rust(StringBuilder *sb, ASTNode *node);
+
+/* Rust does not coerce an integer literal to f64, so `b == 0` against an f64
+   and `safe_div(1.0, 0)` both fail to compile. Emit such a literal as a float
+   when the surrounding context wants one. */
+static int is_int_literal(ASTNode *n) {
+    return n && n->type == AST_LITERAL && n->data_type == TYPE_INT && n->value;
+}
+
+static void generate_expr_rust_as(StringBuilder *sb, ASTNode *node, DataType want) {
+    if (want == TYPE_FLOAT && is_int_literal(node)) {
+        sb_append(sb, "%s.0", node->value);
+        return;
+    }
+    generate_expr_rust(sb, node);
+}
+
 static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
     if (!node) return;
     
@@ -306,6 +323,9 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                 char *escaped = escape_string_for_rust(node->value ? node->value : "");
                 sb_append(sb, "String::from(\"%s\")", escaped ? escaped : "");
                 free(escaped);
+            } else if (expr_is_null_literal(node)) {
+                /* Rust has no `null`; SUB's null in a numeric slot is NaN. */
+                sb_append(sb, "f64::NAN");
             } else {
                 sb_append(sb, "%s", node->value ? node->value : "0");
             }
@@ -314,6 +334,17 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, "%s", node->value);
             break;
         case AST_BINARY_EXPR:
+            /* `x == null` / `x != null` become NaN tests, matching how the
+               null sentinel is represented above. */
+            if (node->value && (strcmp(node->value, "==") == 0 ||
+                                strcmp(node->value, "!=") == 0) &&
+                (expr_is_null_literal(node->left) || expr_is_null_literal(node->right))) {
+                ASTNode *val = expr_is_null_literal(node->left) ? node->right : node->left;
+                sb_append(sb, "%s(", strcmp(node->value, "!=") == 0 ? "!" : "");
+                generate_expr_rust(sb, val);
+                sb_append(sb, ").is_nan()");
+                break;
+            }
             /* Rust has no ** operator, and integer literals need an explicit
                type before a method like .pow()/.abs() can be resolved. */
             if (node->value && strcmp(node->value, "**") == 0) {
@@ -346,10 +377,16 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                 generate_expr_rust(sb, node->right);
                 sb_append(sb, ")");
             } else {
+                /* Rust will not coerce an integer literal to f64, so widen it
+                   when the other operand is a float. */
+                DataType lt = infer_expr_type(node->left);
+                DataType rt = infer_expr_type(node->right);
+                DataType want = (lt == TYPE_FLOAT || rt == TYPE_FLOAT)
+                                    ? TYPE_FLOAT : TYPE_UNKNOWN;
                 sb_append(sb, "(");
-                generate_expr_rust(sb, node->left);
+                generate_expr_rust_as(sb, node->left, want);
                 sb_append(sb, " %s ", node->value ? node->value : "+");
-                generate_expr_rust(sb, node->right);
+                generate_expr_rust_as(sb, node->right, want);
                 sb_append(sb, ")");
             }
             break;
@@ -389,7 +426,8 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                 }
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
-                    generate_expr_rust(sb, node->children[i]);
+                    generate_expr_rust_as(sb, node->children[i],
+                                          param_type_of(node->value, i));
                 }
                 sb_append(sb, ")");
             }

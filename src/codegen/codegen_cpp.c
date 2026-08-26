@@ -209,6 +209,10 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
                 char *escaped = escape_string_for_cpp(node->value ? node->value : "");
                 sb_append(sb, "std::string(\"%s\")", escaped ? escaped : "");
                 free(escaped);
+            } else if (expr_is_null_literal(node)) {
+                /* C++ has no `null`; SUB's null in a numeric slot is NaN,
+                   a value real arithmetic never produces. */
+                sb_append(sb, "std::nan(\"\")");
             } else if (node->value) {
                 sb_append(sb, "%s", node->value);
             } else {
@@ -221,6 +225,17 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
             break;
 
         case AST_BINARY_EXPR:
+            /* `x == null` / `x != null` become NaN tests, matching how the
+               null sentinel is represented above. */
+            if (node->value && (strcmp(node->value, "==") == 0 ||
+                                strcmp(node->value, "!=") == 0) &&
+                (expr_is_null_literal(node->left) || expr_is_null_literal(node->right))) {
+                ASTNode *val = expr_is_null_literal(node->left) ? node->right : node->left;
+                sb_append(sb, "%sstd::isnan(", strcmp(node->value, "!=") == 0 ? "!" : "");
+                generate_expr_cpp(sb, val);
+                sb_append(sb, ")");
+                break;
+            }
             /* C++ has no ** operator; emitting it verbatim parsed as a double
                dereference and failed to compile. */
             if (node->value && strcmp(node->value, "**") == 0) {

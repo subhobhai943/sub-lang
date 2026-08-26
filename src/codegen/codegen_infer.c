@@ -105,6 +105,53 @@ static int builtin_return_type(const char *name, DataType *out) {
 }
 
 /* ----------------------------------------------------------------
+   Variable registry
+
+   An identifier node carries no type of its own; the type lives on the
+   declaration. Without somewhere to look it up, `println(r)` could not tell
+   that r was a double, and the C backend picked the %ld format for it -
+   printing the double's bit pattern instead of the number.
+
+   Scope is deliberately flat: SUB programs are small and this only has to
+   pick a printf format and a declaration type, so a whole-program map of
+   name -> type is enough. A name declared twice with different types falls
+   back to the merged type, which is the conservative answer.
+   ---------------------------------------------------------------- */
+
+#define MAX_TRACKED_VARS 1024
+
+typedef struct {
+    const char *name;
+    DataType    type;
+} VarEntry;
+
+static struct {
+    VarEntry items[MAX_TRACKED_VARS];
+    int count;
+} g_vars;
+
+static void var_record(const char *name, DataType t) {
+    if (!name || t == TYPE_UNKNOWN) return;
+    for (int i = 0; i < g_vars.count; i++) {
+        if (strcmp(g_vars.items[i].name, name) == 0) {
+            g_vars.items[i].type = type_merge(g_vars.items[i].type, t);
+            return;
+        }
+    }
+    if (g_vars.count >= MAX_TRACKED_VARS) return;
+    g_vars.items[g_vars.count].name = name;
+    g_vars.items[g_vars.count].type = t;
+    g_vars.count++;
+}
+
+static DataType var_lookup(const char *name) {
+    if (!name) return TYPE_UNKNOWN;
+    for (int i = 0; i < g_vars.count; i++)
+        if (strcmp(g_vars.items[i].name, name) == 0) return g_vars.items[i].type;
+    return TYPE_UNKNOWN;
+}
+
+/* ----------------------------------------------------------------
    Expression typing
    ---------------------------------------------------------------- */
 
@@ -185,9 +232,12 @@ DataType infer_expr_type(ASTNode *expr) {
                 result = TYPE_STRING;
                 break;
             }
-            /* True division always yields a float in SUB. */
+            /* Division is integer division when both operands are integers
+               (9 / 2 is 4, as the interpreter computes it) and float
+               otherwise. Typing it as always-float contradicted the code
+               the backends actually emit. */
             if (expr->value && strcmp(expr->value, "/") == 0) {
-                result = TYPE_FLOAT;
+                result = (l == TYPE_INT && r == TYPE_INT) ? TYPE_INT : TYPE_FLOAT;
                 break;
             }
             result = type_merge(l, r);
@@ -224,6 +274,8 @@ DataType infer_expr_type(ASTNode *expr) {
             result = expr->data_type;
             if (type_is_unresolved(result))
                 result = param_type_in_current_fn(expr->value);
+            if (type_is_unresolved(result))
+                result = var_lookup(expr->value);
             break;
 
         default:
@@ -394,10 +446,177 @@ static void collect_functions(ASTNode *node) {
     collect_functions(node->next);
 }
 
+/* Variable declarations are typed from their initializer. Without this,
+   `let r = safe_div(10.0, 4.0)` stayed untyped and the C backend fell back
+   to `long`, truncating 2.5 to 2. Runs after function signatures settle so
+   a call's return type is known. */
+static void infer_var_decls(ASTNode *node) {
+    if (!node) return;
+
+    if ((node->type == AST_VAR_DECL || node->type == AST_CONST_DECL) &&
+        node->right && !node->metadata) {
+        /* The semantic pass defaults an un-annotated declaration to int when
+           it cannot see the initializer's type - which is every call to a
+           user function, since those signatures are only resolved here. A
+           NULL metadata means the source wrote no type, so the inferred type
+           is the better answer and replaces the default. */
+        DataType t = infer_expr_type(node->right);
+        if (!type_is_unresolved(t) && t != TYPE_VOID && t != TYPE_NULL)
+            node->data_type = t;
+    }
+    if (node->type == AST_VAR_DECL || node->type == AST_CONST_DECL)
+        var_record(node->value, node->data_type);
+
+    /* Track the enclosing function so initializers that mention parameters
+       resolve the same way return expressions do. */
+    ASTNode *saved = g_current_fn;
+    if (node->type == AST_FUNCTION_DECL) g_current_fn = node;
+
+    infer_var_decls(node->left);
+    infer_var_decls(node->right);
+    infer_var_decls(node->condition);
+    infer_var_decls(node->body);
+    for (int i = 0; i < node->child_count; i++)
+        infer_var_decls(node->children[i]);
+
+    g_current_fn = saved;
+    infer_var_decls(node->next);
+}
+
+/* Second pass: stamp the declaration's type onto every identifier that refers
+   to it. The semantic pass leaves identifier nodes carrying its own int
+   default, which short-circuits any later lookup - so the type has to be
+   written onto the node itself, not just made available for lookup. */
+static void propagate_var_types_to_identifiers(ASTNode *node) {
+    if (!node) return;
+
+    if (node->type == AST_IDENTIFIER && node->value) {
+        DataType t = var_lookup(node->value);
+        if (!type_is_unresolved(t) && t != TYPE_NULL) node->data_type = t;
+    }
+
+    propagate_var_types_to_identifiers(node->left);
+    propagate_var_types_to_identifiers(node->right);
+    propagate_var_types_to_identifiers(node->condition);
+    propagate_var_types_to_identifiers(node->body);
+    for (int i = 0; i < node->child_count; i++)
+        propagate_var_types_to_identifiers(node->children[i]);
+    propagate_var_types_to_identifiers(node->next);
+}
+
+/* ----------------------------------------------------------------
+   Nullable functions
+
+   `fn safe_div(a, b) { if b == 0 { return null } return a / b }` returns
+   either a number or null. Statically typed targets cannot put null in a
+   double, so `return null` was emitted verbatim and failed to compile in
+   C++, Rust and Java.
+
+   Such a function is recorded here as nullable and widened to float, and the
+   backends represent its null as NaN - a value real arithmetic never
+   produces, so `r != null` becomes an isnan test. This is why the widening
+   matters: an int-returning nullable function has no spare value to use as
+   the sentinel, a float one does.
+   ---------------------------------------------------------------- */
+
+static struct {
+    const char *names[MAX_TRACKED_FUNCTIONS];
+    int count;
+} g_nullable;
+
+int expr_is_null_literal(ASTNode *expr) {
+    if (!expr) return 0;
+    if (expr->data_type == TYPE_NULL) return 1;
+    return expr->type == AST_LITERAL && expr->value &&
+           (strcmp(expr->value, "null") == 0 || strcmp(expr->value, "nil") == 0);
+}
+
+DataType param_type_of(const char *fn_name, int index) {
+    ASTNode *fn = fn_lookup(fn_name);
+    if (!fn || index < 0 || index >= fn->child_count) return TYPE_UNKNOWN;
+    return fn->children[index] ? fn->children[index]->data_type : TYPE_UNKNOWN;
+}
+
+int function_is_nullable(const char *fn_name) {
+    if (!fn_name) return 0;
+    for (int i = 0; i < g_nullable.count; i++)
+        if (strcmp(g_nullable.names[i], fn_name) == 0) return 1;
+    return 0;
+}
+
+static int body_returns_null(ASTNode *node) {
+    if (!node) return 0;
+    if (node->type == AST_FUNCTION_DECL || node->type == AST_ARROW_FUNCTION)
+        return 0;
+    if (node->type == AST_RETURN_STMT && expr_is_null_literal(node->right))
+        return 1;
+    return body_returns_null(node->left)      ||
+           body_returns_null(node->right)     ||
+           body_returns_null(node->condition) ||
+           body_returns_null(node->body)      ||
+           body_returns_null(node->next);
+}
+
+static int body_returns_value(ASTNode *node) {
+    if (!node) return 0;
+    if (node->type == AST_FUNCTION_DECL || node->type == AST_ARROW_FUNCTION)
+        return 0;
+    if (node->type == AST_RETURN_STMT && node->right &&
+        !expr_is_null_literal(node->right))
+        return 1;
+    return body_returns_value(node->left)      ||
+           body_returns_value(node->right)     ||
+           body_returns_value(node->condition) ||
+           body_returns_value(node->body)      ||
+           body_returns_value(node->next);
+}
+
+static void mark_nullable_functions(void) {
+    g_nullable.count = 0;
+    for (int i = 0; i < g_fns.count; i++) {
+        ASTNode *fn = g_fns.items[i].decl;
+        if (!body_returns_null(fn->body) || !body_returns_value(fn->body))
+            continue;
+        if (g_nullable.count < MAX_TRACKED_FUNCTIONS)
+            g_nullable.names[g_nullable.count++] = g_fns.items[i].name;
+        /* Widen so the NaN sentinel has somewhere to live. */
+        if (fn->data_type == TYPE_INT) fn->data_type = TYPE_FLOAT;
+    }
+}
+
+/* Stamp each function's parameter types onto the identifier nodes inside its
+   body. Backends look at the node in front of them, not at the enclosing
+   signature, so without this `b == 0` inside safe_div looked untyped and the
+   Rust backend could not tell it needed a float literal on the right. */
+static void propagate_param_types_to_identifiers(ASTNode *fn, ASTNode *node) {
+    if (!node) return;
+    /* An inner function has its own parameters; do not reach into it. */
+    if (node != fn && node->type == AST_FUNCTION_DECL) return;
+
+    if (node->type == AST_IDENTIFIER && node->value) {
+        for (int i = 0; i < fn->child_count; i++) {
+            ASTNode *p = fn->children[i];
+            if (p && p->value && strcmp(p->value, node->value) == 0) {
+                if (!type_is_unresolved(p->data_type)) node->data_type = p->data_type;
+                break;
+            }
+        }
+    }
+
+    propagate_param_types_to_identifiers(fn, node->left);
+    propagate_param_types_to_identifiers(fn, node->right);
+    propagate_param_types_to_identifiers(fn, node->condition);
+    propagate_param_types_to_identifiers(fn, node->body);
+    for (int i = 0; i < node->child_count; i++)
+        propagate_param_types_to_identifiers(fn, node->children[i]);
+    propagate_param_types_to_identifiers(fn, node->next);
+}
+
 void infer_function_signatures(ASTNode *program) {
     if (!program) return;
 
     g_fns.count = 0;
+    g_vars.count = 0;
     g_expr_depth = 0;
     collect_functions(program);
     if (g_fns.count == 0) return;
@@ -459,6 +678,14 @@ void infer_function_signatures(ASTNode *program) {
             g_current_fn = NULL;
         }
     }
+
+    mark_nullable_functions();
+    for (int i = 0; i < g_fns.count; i++) {
+        ASTNode *fn = g_fns.items[i].decl;
+        propagate_param_types_to_identifiers(fn, fn->body);
+    }
+    infer_var_decls(program);
+    propagate_var_types_to_identifiers(program);
 
     if (getenv("SUB_INFER_DEBUG")) {
         for (int i = 0; i < g_fns.count; i++) {

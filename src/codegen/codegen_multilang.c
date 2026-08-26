@@ -95,6 +95,8 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
     };
     static const BuiltinSpelling go[] = {
         {"str","fmt.Sprint(",")"},     {"to_string","fmt.Sprint(",")"},
+        {"int","int64(math.Trunc(float64(",")))"},
+        {"float","float64(",")"},
         {"len","int64(len(","))"},     {"length","int64(len(","))"},
         {"abs","math.Abs(",")"},       {"sqrt","math.Sqrt(",")"},
         {"floor","math.Floor(",")"},   {"ceil","math.Ceil(",")"},
@@ -102,7 +104,7 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
         {"trim","strings.TrimSpace(",")"}, {NULL,NULL,NULL}
     };
     static const BuiltinSpelling ruby[] = {
-        {"str","(",").to_s"},          {"to_string","(",").to_s"},
+        {"str","_sub_str(",")"},       {"to_string","_sub_str(",")"},
         {"int","(",").to_i"},          {"float","(",").to_f"},
         {"len","(",").length"},        {"length","(",").length"},
         {"abs","(",").abs"},           {"sqrt","Math.sqrt(",")"},
@@ -130,6 +132,10 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
     return NULL;
 }
 
+/* Return type of the Java function currently being emitted, so a bare
+   `return null` can be rendered as the numeric NaN sentinel. */
+static DataType g_java_fn_type = TYPE_UNKNOWN;
+
 static const char* java_type(DataType t) {
     switch (t) {
         case TYPE_INT:    return "long";
@@ -141,6 +147,11 @@ static const char* java_type(DataType t) {
         default:          return "Object";
     }
 }
+
+/* Return type of the Swift/Kotlin function currently being emitted, so
+   `return null` can be rendered as the numeric NaN sentinel. */
+static DataType g_swift_fn_type  = TYPE_UNKNOWN;
+static DataType g_kotlin_fn_type = TYPE_UNKNOWN;
 
 static const char* swift_type(DataType t) {
     switch (t) {
@@ -165,6 +176,10 @@ static const char* kotlin_type(DataType t) {
         default:          return "Any";
     }
 }
+
+/* Return type of the Go function currently being emitted, so `return null`
+   can be rendered as the numeric NaN sentinel. */
+static DataType g_go_fn_type = TYPE_UNKNOWN;
 
 static const char* go_type(DataType t) {
     switch (t) {
@@ -344,12 +359,39 @@ static char* escape_string_for_codegen(const char *raw) {
    ======================================== */
 
 static void generate_expr_python(StringBuilder *sb, ASTNode *node);
+
 static void generate_expr_js(StringBuilder *sb, ASTNode *node);
 static void generate_expr_java(StringBuilder *sb, ASTNode *node);
 static void generate_expr_swift(StringBuilder *sb, ASTNode *node);
 static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node);
 static void generate_expr_go(StringBuilder *sb, ASTNode *node);
 static void generate_expr_ruby(StringBuilder *sb, ASTNode *node);
+
+/* Kotlin and Swift will not coerce an integer literal into a Double, and the
+   Kotlin backend additionally suffixes integer literals with L for Long. In a
+   float slot both of those are wrong, so the literal is emitted as a float
+   when the surrounding context expects one. */
+static int is_int_literal_node(ASTNode *n) {
+    return n && n->type == AST_LITERAL && n->data_type == TYPE_INT && n->value;
+}
+
+static void generate_expr_swift_as(StringBuilder *sb, ASTNode *node, DataType want) {
+    if (want == TYPE_FLOAT && is_int_literal_node(node)) {
+        sb_append(sb, "%s.0", node->value);
+        return;
+    }
+    generate_expr_swift(sb, node);
+}
+
+static void generate_expr_kotlin_as(StringBuilder *sb, ASTNode *node, DataType want) {
+    if (want == TYPE_FLOAT && is_int_literal_node(node)) {
+        sb_append(sb, "%s.0", node->value);
+        return;
+    }
+    generate_expr_kotlin(sb, node);
+}
+
+
 
 /* ----------------------------------------------------------------
    Operators that do not survive a verbatim copy into the target.
@@ -1229,6 +1271,20 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, "%s", node->value ? node->value : "var");
             break;
         case AST_BINARY_EXPR:
+            /* `x == null` / `x != null` become NaN tests to match how a
+               nullable numeric is represented (see the literal case). */
+            if (node->value && (strcmp(node->value, "==") == 0 ||
+                                strcmp(node->value, "!=") == 0) &&
+                (expr_is_null_literal(node->left) || expr_is_null_literal(node->right))) {
+                ASTNode *val = expr_is_null_literal(node->left) ? node->right : node->left;
+                DataType vt = infer_expr_type(val);
+                if (vt == TYPE_FLOAT || vt == TYPE_INT) {
+                    sb_append(sb, "%sDouble.isNaN(", strcmp(node->value, "!=") == 0 ? "!" : "");
+                    generate_expr_java(sb, val);
+                    sb_append(sb, ")");
+                    break;
+                }
+            }
             if (emit_special_binop(sb, node, LANG_JAVA, generate_expr_java)) break;
             sb_append(sb, "(");
             generate_expr_java(sb, node->left);
@@ -1343,6 +1399,7 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_FUNCTION_DECL:
             sb_append(sb, "\n");
             indent_code(sb, indent);
+            g_java_fn_type = node->data_type;
             sb_append(sb, "public static %s %s(", java_type(node->data_type),
                       node->value ? node->value : "func");
             if (node->children && node->child_count > 0) {
@@ -1434,7 +1491,14 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "return");
             if (node->right) {
                 sb_append(sb, " ");
-                generate_expr_java(sb, node->right);
+                /* Java cannot put null in a double. A function that returns
+                   both null and a number is represented with NaN as the
+                   "no value" sentinel (see codegen_infer.c). */
+                if (expr_is_null_literal(node->right) &&
+                    (g_java_fn_type == TYPE_FLOAT || g_java_fn_type == TYPE_INT))
+                    sb_append(sb, "Double.NaN");
+                else
+                    generate_expr_java(sb, node->right);
             }
             sb_append(sb, ";\n");
             break;
@@ -1542,10 +1606,37 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
             break;
         case AST_IDENTIFIER: sb_append(sb, "%s", node->value ? node->value : "var"); break;
         case AST_BINARY_EXPR:
+            /* `x == null` / `x != null` become NaN tests (see the return
+               statement, where null is emitted as the NaN sentinel). */
+            if (node->value && (strcmp(node->value, "==") == 0 ||
+                                strcmp(node->value, "!=") == 0) &&
+                (expr_is_null_literal(node->left) || expr_is_null_literal(node->right))) {
+                ASTNode *val = expr_is_null_literal(node->left) ? node->right : node->left;
+                DataType vt = infer_expr_type(val);
+                if (vt == TYPE_FLOAT || vt == TYPE_INT) {
+                    sb_append(sb, "%s(", strcmp(node->value, "!=") == 0 ? "!" : "");
+                    generate_expr_swift(sb, val);
+                    sb_append(sb, ").isNaN");
+                    break;
+                }
+            }
             if (emit_special_binop(sb, node, LANG_SWIFT, generate_expr_swift)) break;
-            sb_append(sb, "("); generate_expr_swift(sb, node->left);
-            sb_append(sb, " %s ", node->value ? node->value : "+");
-            generate_expr_swift(sb, node->right); sb_append(sb, ")"); break;
+            {
+                DataType lt = infer_expr_type(node->left);
+                DataType rt = infer_expr_type(node->right);
+                DataType want = (lt == TYPE_FLOAT || rt == TYPE_FLOAT)
+                                    ? TYPE_FLOAT : TYPE_UNKNOWN;
+                sb_append(sb, "("); generate_expr_swift_as(sb, node->left, want);
+                sb_append(sb, " %s ", node->value ? node->value : "+");
+                generate_expr_swift_as(sb, node->right, want); sb_append(sb, ")");
+            }
+            break;
+        case AST_UNARY_EXPR:
+            /* Without this case the operand vanished entirely, so abs(-7)
+               generated an empty argument list. */
+            sb_append(sb, "%s", node->value ? node->value : "");
+            generate_expr_swift(sb, node->right ? node->right : node->left);
+            break;
         case AST_CALL_EXPR:
             {
                 const BuiltinSpelling *bs = builtin_spelling(LANG_SWIFT, node->value);
@@ -1561,7 +1652,10 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
             else { generate_expr_swift(sb, node->left); sb_append(sb, "("); }
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
-                generate_expr_swift(sb, node->children[i]);
+                /* Match the callee's parameter type so an integer literal
+                   lands in a Double slot as a float literal. */
+                generate_expr_swift_as(sb, node->children[i],
+                                       param_type_of(node->value, i));
             }
             sb_append(sb, ")"); break;
         default: break;
@@ -1582,6 +1676,7 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->right) generate_expr_swift(sb, node->right); else sb_append(sb, "nil");
             sb_append(sb, "\n"); break;
         case AST_FUNCTION_DECL:
+            g_swift_fn_type = node->data_type;
             sb_append(sb, "\nfunc %s(", node->value ? node->value : "func");
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
@@ -1677,7 +1772,13 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "return");
             if (node->right) {
                 sb_append(sb, " ");
-                generate_expr_swift(sb, node->right);
+                /* A numeric type has no room for null; a function returning
+                   both null and a number uses NaN as the sentinel. */
+                if (expr_is_null_literal(node->right) &&
+                    (g_swift_fn_type == TYPE_FLOAT || g_swift_fn_type == TYPE_INT))
+                    sb_append(sb, "Double.nan");
+                else
+                    generate_expr_swift(sb, node->right);
             }
             sb_append(sb, "\n");
             break;
@@ -1735,10 +1836,37 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
             break;
         case AST_IDENTIFIER: sb_append(sb, "%s", node->value ? node->value : "var"); break;
         case AST_BINARY_EXPR:
+            /* `x == null` / `x != null` become NaN tests (see the return
+               statement, where null is emitted as the NaN sentinel). */
+            if (node->value && (strcmp(node->value, "==") == 0 ||
+                                strcmp(node->value, "!=") == 0) &&
+                (expr_is_null_literal(node->left) || expr_is_null_literal(node->right))) {
+                ASTNode *val = expr_is_null_literal(node->left) ? node->right : node->left;
+                DataType vt = infer_expr_type(val);
+                if (vt == TYPE_FLOAT || vt == TYPE_INT) {
+                    sb_append(sb, "%s(", strcmp(node->value, "!=") == 0 ? "!" : "");
+                    generate_expr_kotlin(sb, val);
+                    sb_append(sb, ").isNaN()");
+                    break;
+                }
+            }
             if (emit_special_binop(sb, node, LANG_KOTLIN, generate_expr_kotlin)) break;
-            sb_append(sb, "("); generate_expr_kotlin(sb, node->left);
-            sb_append(sb, " %s ", node->value ? node->value : "+");
-            generate_expr_kotlin(sb, node->right); sb_append(sb, ")"); break;
+            {
+                DataType lt = infer_expr_type(node->left);
+                DataType rt = infer_expr_type(node->right);
+                DataType want = (lt == TYPE_FLOAT || rt == TYPE_FLOAT)
+                                    ? TYPE_FLOAT : TYPE_UNKNOWN;
+                sb_append(sb, "("); generate_expr_kotlin_as(sb, node->left, want);
+                sb_append(sb, " %s ", node->value ? node->value : "+");
+                generate_expr_kotlin_as(sb, node->right, want); sb_append(sb, ")");
+            }
+            break;
+        case AST_UNARY_EXPR:
+            /* Without this case the operand vanished entirely, so abs(-7)
+               generated an empty argument list. */
+            sb_append(sb, "%s", node->value ? node->value : "");
+            generate_expr_kotlin(sb, node->right ? node->right : node->left);
+            break;
         case AST_CALL_EXPR:
             {
                 const BuiltinSpelling *bs = builtin_spelling(LANG_KOTLIN, node->value);
@@ -1754,7 +1882,10 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
             else { generate_expr_kotlin(sb, node->left); sb_append(sb, "("); }
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
-                generate_expr_kotlin(sb, node->children[i]);
+                /* Match the callee's parameter type so an integer literal
+                   lands in a Double slot as a float literal, not as `0L`. */
+                generate_expr_kotlin_as(sb, node->children[i],
+                                        param_type_of(node->value, i));
             }
             sb_append(sb, ")"); break;
         default: break;
@@ -1775,6 +1906,7 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->right) generate_expr_kotlin(sb, node->right); else sb_append(sb, "null");
             sb_append(sb, "\n"); break;
         case AST_FUNCTION_DECL:
+            g_kotlin_fn_type = node->data_type;
             sb_append(sb, "\nfun %s(", node->value ? node->value : "func");
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
@@ -1870,7 +2002,13 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "return");
             if (node->right) {
                 sb_append(sb, " ");
-                generate_expr_kotlin(sb, node->right);
+                /* A numeric type has no room for null; a function returning
+                   both null and a number uses NaN as the sentinel. */
+                if (expr_is_null_literal(node->right) &&
+                    (g_kotlin_fn_type == TYPE_FLOAT || g_kotlin_fn_type == TYPE_INT))
+                    sb_append(sb, "Double.NaN");
+                else
+                    generate_expr_kotlin(sb, node->right);
             }
             sb_append(sb, "\n");
             break;
@@ -2147,6 +2285,9 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
                 char *escaped = escape_string_for_codegen(node->value ? node->value : "");
                 sb_append(sb, "\"%s\"", escaped ? escaped : "");
                 free(escaped);
+            } else if (expr_is_null_literal(node)) {
+                /* Ruby spells the empty value nil. */
+                sb_append(sb, "nil");
             } else if (node->value) {
                 sb_append(sb, "%s", node->value);
             } else {
@@ -2179,7 +2320,7 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
                 }
             }
             if (is_print_builtin(func_name)) {
-                sb_append(sb, "puts");
+                sb_append(sb, "_sub_puts");
                 if (node->child_count > 0) {
                     sb_append(sb, " ");
                     generate_expr_ruby(sb, node->children[0]);
@@ -2199,6 +2340,12 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
             }
             break;
         }
+        case AST_UNARY_EXPR:
+            /* Without this case the operand vanished entirely: abs(-7)
+               generated `().abs` and classify(-5) generated `classify()`. */
+            sb_append(sb, "%s", node->value ? node->value : "");
+            generate_expr_ruby(sb, node->right ? node->right : node->left);
+            break;
         case AST_ARRAY_LITERAL:
             sb_append(sb, "[");
             for (int i = 0; i < node->child_count; i++) {
@@ -2435,6 +2582,14 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
     if (!sb) return NULL;
 
     sb_append(sb, "#!/usr/bin/env ruby\n");
+    /* SUB prints a float with no fractional part as an integer (sqrt(81.0)
+       is 9, not 9.0) and spells booleans true/false, which Ruby already
+       does. Route printing through a helper for the float case. */
+    sb_append(sb, "\ndef _sub_str(v)\n");
+    sb_append(sb, "  return \"null\" if v.nil?\n");
+    sb_append(sb, "  return v.to_i.to_s if v.is_a?(Float) && v.finite? && v == v.to_i\n");
+    sb_append(sb, "  v.to_s\nend\n");
+    sb_append(sb, "\ndef _sub_puts(v)\n  puts _sub_str(v)\nend\n\n");
     sb_append(sb, "# Generated by SUB Language Compiler\n\n");
 
     char *embedded = extract_embedded_code(source, "ruby");
@@ -2456,6 +2611,40 @@ static void indent_go(StringBuilder *sb, int level) {
     for (int i = 0; i < level; i++) {
         sb_append(sb, "\t");
     }
+}
+
+/* Go refuses to build with an unused import and equally refuses to build with
+   a missing one, so the import block has to match what the body actually
+   emits. The math/strings helpers come from the builtin table and the power
+   operator. */
+static bool ast_uses_go_pkg(ASTNode *node, const char *pkg) {
+    if (!node) return false;
+
+    if (node->type == AST_CALL_EXPR && node->value) {
+        const BuiltinSpelling *bs = builtin_spelling(LANG_GO, node->value);
+        if (bs && strstr(bs->prefix, pkg) != NULL) return true;
+    }
+    /* `return null` from a numeric function becomes math.NaN() */
+    if (strcmp(pkg, "math") == 0 && node->type == AST_RETURN_STMT &&
+        expr_is_null_literal(node->right)) return true;
+    /* a ** b becomes math.Pow(...) */
+    if (strcmp(pkg, "math") == 0 && node->type == AST_BINARY_EXPR &&
+        node->value && (strcmp(node->value, "**") == 0 ||
+                        strcmp(node->value, "%") == 0)) {
+        if (strcmp(node->value, "**") == 0) return true;
+        /* % on floats becomes math.Mod */
+        if (infer_expr_type(node->left)  == TYPE_FLOAT ||
+            infer_expr_type(node->right) == TYPE_FLOAT) return true;
+    }
+
+    if (ast_uses_go_pkg(node->left, pkg))      return true;
+    if (ast_uses_go_pkg(node->right, pkg))     return true;
+    if (ast_uses_go_pkg(node->condition, pkg)) return true;
+    if (ast_uses_go_pkg(node->body, pkg))      return true;
+    if (ast_uses_go_pkg(node->next, pkg))      return true;
+    for (int i = 0; i < node->child_count; i++)
+        if (node->children && ast_uses_go_pkg(node->children[i], pkg)) return true;
+    return false;
 }
 
 static bool ast_needs_fmt(ASTNode *node) {
@@ -2516,6 +2705,31 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
             break;
 
         case AST_BINARY_EXPR:
+            /* `x == null` / `x != null` become NaN tests, matching how a
+               nullable numeric is represented. */
+            if (node->value && (strcmp(node->value, "==") == 0 ||
+                                strcmp(node->value, "!=") == 0) &&
+                (expr_is_null_literal(node->left) || expr_is_null_literal(node->right))) {
+                ASTNode *val = expr_is_null_literal(node->left) ? node->right : node->left;
+                DataType vt = infer_expr_type(val);
+                if (vt == TYPE_FLOAT || vt == TYPE_INT) {
+                    sb_append(sb, "%smath.IsNaN(", strcmp(node->value, "!=") == 0 ? "!" : "");
+                    generate_expr_go(sb, val);
+                    sb_append(sb, ")");
+                    break;
+                }
+            }
+            /* Go's % is integer-only. */
+            if (node->value && strcmp(node->value, "%") == 0 &&
+                (infer_expr_type(node->left)  == TYPE_FLOAT ||
+                 infer_expr_type(node->right) == TYPE_FLOAT)) {
+                sb_append(sb, "math.Mod(");
+                generate_expr_go(sb, node->left);
+                sb_append(sb, ", ");
+                generate_expr_go(sb, node->right);
+                sb_append(sb, ")");
+                break;
+            }
             if (emit_special_binop(sb, node, LANG_GO, generate_expr_go)) break;
             sb_append(sb, "(");
             generate_expr_go(sb, node->left);
@@ -2656,6 +2870,7 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_FUNCTION_DECL:
             sb_append(sb, "\n");
             indent_go(sb, indent);
+            g_go_fn_type = node->data_type;
             sb_append(sb, "func %s(", node->value ? node->value : "fn");
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
@@ -2724,18 +2939,21 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
                 ASTNode *range = node->children[0];
                 if (range && range->type == AST_RANGE_EXPR) {
                     const char *var = node->value ? node->value : "i";
-                    sb_append(sb, "for %s := ", var);
+                    /* Declare the loop variable int64: SUB integers are
+                       64-bit, and Go will not pass its default `int` to a
+                       function whose parameter is int64. */
+                    sb_append(sb, "for %s := int64(", var);
                     if (range->right) {
                         /* range(start, end) */
                         generate_expr_go(sb, range->left);
-                        sb_append(sb, "; %s < ", var);
+                        sb_append(sb, "); %s < ", var);
                         generate_expr_go(sb, range->right);
                     } else if (range->left) {
                         /* range(n) → 0..n */
-                        sb_append(sb, "0; %s < ", var);
+                        sb_append(sb, "0); %s < ", var);
                         generate_expr_go(sb, range->left);
                     } else {
-                        sb_append(sb, "0; %s < 10", var);
+                        sb_append(sb, "0); %s < 10", var);
                     }
                     sb_append(sb, "; %s++ {\n", var);
                 } else {
@@ -2750,7 +2968,7 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
                 generate_expr_go(sb, node->condition);
                 sb_append(sb, " {\n");
             } else {
-                sb_append(sb, "for %s := 0; %s < 10; %s++ {\n",
+                sb_append(sb, "for %s := int64(0); %s < 10; %s++ {\n",
                           node->value ? node->value : "i",
                           node->value ? node->value : "i",
                           node->value ? node->value : "i");
@@ -2791,7 +3009,13 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "return");
             if (node->right) {
                 sb_append(sb, " ");
-                generate_expr_go(sb, node->right);
+                /* Go cannot put nil in a float64; a function returning both
+                   null and a number uses NaN as the "no value" sentinel. */
+                if (expr_is_null_literal(node->right) &&
+                    (g_go_fn_type == TYPE_FLOAT || g_go_fn_type == TYPE_INT))
+                    sb_append(sb, "math.NaN()");
+                else
+                    generate_expr_go(sb, node->right);
             }
             sb_append(sb, "\n");
             break;
@@ -2890,9 +3114,20 @@ char* codegen_go(ASTNode *ast, const char *source) {
 
     sb_append(sb, "package main\n\n");
 
-    bool needs_fmt = ast_needs_fmt(ast);
-    if (needs_fmt) {
-        sb_append(sb, "import \"fmt\"\n\n");
+    bool needs_fmt     = ast_needs_fmt(ast);
+    bool needs_math     = ast_uses_go_pkg(ast, "math");
+    bool needs_strings  = ast_uses_go_pkg(ast, "strings");
+    int  import_count   = (needs_fmt ? 1 : 0) + (needs_math ? 1 : 0) +
+                          (needs_strings ? 1 : 0);
+    if (import_count == 1) {
+        sb_append(sb, "import \"%s\"\n\n",
+                  needs_fmt ? "fmt" : needs_math ? "math" : "strings");
+    } else if (import_count > 1) {
+        sb_append(sb, "import (\n");
+        if (needs_fmt)     sb_append(sb, "\t\"fmt\"\n");
+        if (needs_math)    sb_append(sb, "\t\"math\"\n");
+        if (needs_strings) sb_append(sb, "\t\"strings\"\n");
+        sb_append(sb, ")\n\n");
     }
 
     char *embedded = extract_embedded_code(source, "go");

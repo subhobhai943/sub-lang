@@ -33,3 +33,13 @@ missing toolchain can never look green.
 
 Adding a case is just dropping a `.sb` file into `tests/conformance/`; whatever
 the interpreter prints becomes the expected output.
+
+### Target status
+
+| Target | Verified by |
+|--------|-------------|
+| Python, JavaScript, Ruby, C, C++, Rust, Go, Java | executed against the interpreter by this harness |
+| Swift, Kotlin | generated code reviewed by hand - no toolchain available in the dev container |
+
+Install `swiftc` / `kotlinc` and re-run to cover the last two; the harness
+picks up whatever is on `PATH`.
