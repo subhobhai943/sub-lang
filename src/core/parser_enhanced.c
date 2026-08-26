@@ -459,13 +459,20 @@ static ASTNode* parse_call(ParserState *state) {
     return expr;
 }
 
+static ASTNode* parse_unary(ParserState *state);
+
 /* Power (**) - right-associative, higher precedence than *,/,% */
 static ASTNode* parse_power(ParserState *state) {
     ASTNode *expr = parse_call(state);
     if (check_operator(state, "**")) {
         Token *op = current_token(state);
         advance(state);
-        ASTNode *right = parse_power(state); /* right-associative: recurse into parse_power */
+        /* Parse the exponent through parse_unary, not parse_power: the
+           exponent may carry a sign, and parse_power bottoms out at
+           parse_call, which cannot start with '-'. That is why `2 ** -1`
+           was a parse error while `2 * -1` was fine. parse_unary falls
+           through to parse_power, so right-associativity is unchanged. */
+        ASTNode *right = parse_unary(state);
         ASTNode *node = create_node(AST_BINARY_EXPR, op, op->value);
         if (!node) {
             parser_free_ast(expr);

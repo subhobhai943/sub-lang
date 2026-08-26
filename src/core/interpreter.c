@@ -39,6 +39,23 @@
 
 static SubVal NULL_VAL = {VAL_NULL, {.iv = 0}};
 
+/* Read an integer out of a value whatever numeric form it arrived in.
+
+   iv and fv share a union, so reading iv directly from a float value
+   reinterprets the double's bit pattern as an integer. That is what made
+   range(3.0) iterate ten times instead of three, and it is the same fault
+   that made int(3.9) return 4615964438073389875. Every place that needs an
+   integer out of a user-supplied value goes through this. */
+static long long val_as_int(SubVal v) {
+    switch (v.type) {
+        case VAL_INT:   return v.iv;
+        case VAL_FLOAT: return (long long)v.fv;
+        case VAL_BOOL:  return v.bv ? 1 : 0;
+        default:        return 0;
+    }
+}
+
+
 /* Exception handling state (checked at every eval entry) */
 static SubVal g_exception    = {VAL_NULL, {.iv = 0}};
 static int    g_exception_thrown = 0;
@@ -598,6 +615,10 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
 
     if (strcmp(op, "**") == 0) {
         double r = pow(a, b);
+        /* A negative exponent produces a fraction, so truncating it to an
+           integer turns 2 ** -1 into 0 rather than 0.5. Two integers still
+           give an integer for non-negative exponents (2 ** 10 is 1024). */
+        if (!use_float && b < 0) return make_float(r);
         return use_float ? make_float(r) : make_int((long long)r);
     }
 
@@ -714,8 +735,8 @@ static SubVal eval_string_method(const char *str, const char *method,
         long long start = 0;
         long long end   = (long long)strlen(str);
         int nargs = call_node ? call_node->child_count : 0;
-        if (nargs > 0) start = eval(call_node->children[0], env).iv;
-        if (nargs > 1) end   = eval(call_node->children[1], env).iv;
+        if (nargs > 0) start = val_as_int(eval(call_node->children[0], env));
+        if (nargs > 1) end   = val_as_int(eval(call_node->children[1], env));
         long long slen = (long long)strlen(str);
         if (start < 0) start = 0;
         if (end   < 0) end   = 0;
@@ -823,7 +844,7 @@ static SubVal eval_string_method(const char *str, const char *method,
     if (strcmp(method, "char_at") == 0) {
         long long idx = 0;
         if (call_node && call_node->child_count > 0)
-            idx = eval(call_node->children[0], env).iv;
+            idx = val_as_int(eval(call_node->children[0], env));
         long long slen = (long long)strlen(str);
         if (idx < 0) idx += slen; /* support negative indices */
         if (idx < 0 || idx >= slen) {
@@ -1018,7 +1039,7 @@ SubVal eval(ASTNode *node, Env *env) {
                 return NULL_VAL;
             }
             SubVal idx_val = eval(node->left->right, env);
-            long long idx = idx_val.iv;
+            long long idx = val_as_int(idx_val);
             if (idx < 0) idx += (long long)arr_val.arr->count;
             if (idx < 0 || idx >= arr_val.arr->count) {
                 runtime_error("array index %lld out of bounds", idx);
@@ -1166,10 +1187,10 @@ SubVal eval(ASTNode *node, Env *env) {
             /* ---- Range iteration ---- */
             long long start = 0, end_v = 10;
             if (range_node->left && range_node->right) {
-                start = eval(range_node->left, env).iv;
-                end_v = eval(range_node->right, env).iv;
+                start = val_as_int(eval(range_node->left, env));
+                end_v = val_as_int(eval(range_node->right, env));
             } else if (range_node->left) {
-                end_v = eval(range_node->left, env).iv;
+                end_v = val_as_int(eval(range_node->left, env));
             }
             for (long long i = start; i < end_v && !env->returning && !g_exception_thrown && !g_runtime_aborted; i++) {
                 Env *loop = env_new(env);
@@ -1404,7 +1425,7 @@ SubVal eval(ASTNode *node, Env *env) {
     case AST_ARRAY_ACCESS: {
         SubVal container = eval(node->left, env);
         SubVal idx       = eval(node->right, env);
-        long long i = idx.iv;
+        long long i = val_as_int(idx);
 
         if (container.type == VAL_ARRAY && container.arr) {
             if (i < 0) i += (long long)container.arr->count;

@@ -232,6 +232,14 @@ DataType infer_expr_type(ASTNode *expr) {
                 result = TYPE_STRING;
                 break;
             }
+            /* A negative exponent yields a fraction, so the expression is
+               float even when both operands are integers. Without this the
+               C backend picked the %ld format for 2 ** -1. */
+            if (expr->value && strcmp(expr->value, "**") == 0) {
+                if (exponent_is_negative(expr->right)) { result = TYPE_FLOAT; break; }
+                result = type_merge(l, r);
+                break;
+            }
             /* Division is integer division when both operands are integers
                (9 / 2 is 4, as the interpreter computes it) and float
                otherwise. Typing it as always-float contradicted the code
@@ -523,6 +531,15 @@ static struct {
     const char *names[MAX_TRACKED_FUNCTIONS];
     int count;
 } g_nullable;
+
+int exponent_is_negative(ASTNode *expr) {
+    if (!expr) return 0;
+    if (expr->type == AST_UNARY_EXPR && expr->value &&
+        strcmp(expr->value, "-") == 0) return 1;
+    if (expr->type == AST_LITERAL && expr->value && expr->value[0] == '-')
+        return 1;
+    return 0;
+}
 
 int expr_is_null_literal(ASTNode *expr) {
     if (!expr) return 0;

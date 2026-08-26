@@ -350,6 +350,9 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
             if (node->value && strcmp(node->value, "**") == 0) {
                 int as_int = (infer_expr_type(node->left)  == TYPE_INT &&
                               infer_expr_type(node->right) == TYPE_INT);
+                /* i64::pow takes a u32, so a negative exponent cannot use it
+                   at all - and the result is a fraction anyway. */
+                if (as_int && exponent_is_negative(node->right)) as_int = 0;
                 if (as_int) {
                     sb_append(sb, "((");
                     generate_expr_rust(sb, node->left);

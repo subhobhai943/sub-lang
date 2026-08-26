@@ -25,6 +25,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CASES = os.path.join(ROOT, "tests", "conformance")
 SUB = os.path.join(ROOT, "sub")
 SUBI = os.path.join(ROOT, "subi")
+SUBC = os.path.join(ROOT, "subc")
 
 TIMEOUT = 30
 
@@ -35,7 +36,13 @@ def have(tool):
 
 # target -> (generated file extension, how to build, how to run)
 # `build` is a list of argv templates run in order; {src} and {exe} are filled in.
+# `subc` is not a transpile target - it compiles straight to a native binary -
+# but it is a third implementation of the language and deserves the same
+# check, so it is handled specially in check() below.
+NATIVE = "native"
+
 TARGETS = {
+    NATIVE:       dict(ext=None,    need="gcc",     build=[], run=[]),
     "python":     dict(ext="py",    need="python3", build=[], run=["python3", "{src}"]),
     "javascript": dict(ext="js",    need="node",    build=[], run=["node", "{src}"]),
     "ruby":       dict(ext="rb",    need="ruby",    build=[], run=["ruby", "{src}"]),
@@ -87,6 +94,19 @@ def check(case, target, spec, workdir):
     if rc != 0:
         return "skip", "interpreter failed: %s" % (err.strip() or rc)
 
+    if target == NATIVE:
+        exe = os.path.join(workdir, name + "_native")
+        rc, out, err = run([SUBC, case, "-o", exe], workdir)
+        if rc != 0:
+            return "fail", "subc failed: %s" % (err.strip() or out.strip())[:300]
+        rc, got, err = run([exe], workdir)
+        if rc != 0:
+            return "fail", "runtime error: %s" % (err.strip() or rc)[:300]
+        if normalize(got) != normalize(want):
+            return "fail", "output differs\n    expected: %r\n    actual:   %r" % (
+                normalize(want)[:6], normalize(got)[:6])
+        return "pass", ""
+
     rc, _, err = run([SUB, case, target], workdir)
     if rc != 0:
         return "fail", "transpile failed: %s" % err.strip()[:200]
@@ -123,7 +143,7 @@ def main():
         print("unknown target(s): %s" % ", ".join(unknown))
         return 2
 
-    for binary in (SUB, SUBI):
+    for binary in (SUB, SUBI, SUBC):
         if not os.path.exists(binary):
             print("missing %s - run `make` first" % binary)
             return 2

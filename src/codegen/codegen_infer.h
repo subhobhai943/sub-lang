@@ -38,6 +38,11 @@ DataType infer_expr_type(ASTNode *expr);
    TYPE_VOID when the body never returns a value. */
 DataType infer_return_type(ASTNode *body);
 
+/* True when an exponent is written as a negative value, e.g. `2 ** -1`.
+   Such a power yields a fraction, so backends must use the floating-point
+   form - the interpreter returns 0.5, and an integer power would give 0. */
+int exponent_is_negative(ASTNode *expr);
+
 /* True when `expr` is the literal null (or its deprecated spelling nil). */
 int expr_is_null_literal(ASTNode *expr);
 

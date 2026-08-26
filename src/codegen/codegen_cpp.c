@@ -240,7 +240,8 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
                dereference and failed to compile. */
             if (node->value && strcmp(node->value, "**") == 0) {
                 int as_int = (infer_expr_type(node->left)  == TYPE_INT &&
-                              infer_expr_type(node->right) == TYPE_INT);
+                              infer_expr_type(node->right) == TYPE_INT &&
+                              !exponent_is_negative(node->right));
                 sb_append(sb, as_int ? "(long long)std::pow(" : "std::pow(");
                 generate_expr_cpp(sb, node->left);
                 sb_append(sb, ", ");

@@ -380,7 +380,8 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                        double, so an integer power has to be cast back or the
                        %ld used to print it reads the double's bit pattern. */
                     int as_int = (infer_expr_type(node->left)  == TYPE_INT &&
-                                  infer_expr_type(node->right) == TYPE_INT);
+                                  infer_expr_type(node->right) == TYPE_INT &&
+                                  !exponent_is_negative(node->right));
                     sb_append(sb, as_int ? "(long long)pow(" : "pow(");
                     generate_expression(sb, node->left);
                     sb_append(sb, ", ");
@@ -652,9 +653,19 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                             ASTNode *arg = node->children[i];
                             int is_bool = (arg->data_type == TYPE_BOOL ||
                                            infer_expr_type(arg) == TYPE_BOOL);
-                            if (is_bool) sb_append(sb, "((");
+                            DataType at = infer_expr_type(arg);
+                            /* printf is variadic: an `int` expression passed
+                               where %ld expects a `long` leaves the upper
+                               word undefined, which is why -7 %% 3 printed
+                               4294967295. Cast to the format's exact type. */
+                            int cast_long   = !is_bool && (at == TYPE_INT);
+                            int cast_double = !is_bool && (at == TYPE_FLOAT);
+                            if (is_bool)          sb_append(sb, "((");
+                            else if (cast_long)   sb_append(sb, "(long)(");
+                            else if (cast_double) sb_append(sb, "(double)(");
                             generate_expression(sb, arg);
                             if (is_bool) sb_append(sb, ") ? \"true\" : \"false\")");
+                            else if (cast_long || cast_double) sb_append(sb, ")");
                             if (i + 1 < node->child_count) {
                                 sb_append(sb, ", ");
                             }

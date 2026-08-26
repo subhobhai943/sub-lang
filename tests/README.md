@@ -19,7 +19,17 @@ backend.
 The interpreter (`subi`) is the reference. For each program in
 `tests/conformance/`, the harness runs it under the interpreter, then
 transpiles it to every target whose toolchain is installed, builds and runs
-the result, and diffs the output against the reference.
+the result, and diffs the output against the reference. The `native` target
+is the odd one out: it compiles with `subc` straight to a binary rather than
+transpiling, so the native compiler is covered here too.
+
+### What this harness cannot catch
+
+The interpreter is the reference, so a bug **in the interpreter** makes every
+backend agree on the wrong answer and the suite still passes. Interpreter
+behaviour has to be checked against independently known-correct values -
+that is how `int(3.9)`, `range(3.0)` and `2 ** -1` were found. Treat a green
+run as "the implementations agree", not as "the language is correct".
 
 ```bash
 make                              # build first
@@ -38,7 +48,7 @@ the interpreter prints becomes the expected output.
 
 | Target | Verified by |
 |--------|-------------|
-| Python, JavaScript, Ruby, C, C++, Rust, Go, Java | executed against the interpreter by this harness |
+| `native` (`subc`), Python, JavaScript, Ruby, C, C++, Rust, Go, Java | executed against the interpreter by this harness |
 | Swift, Kotlin | generated code reviewed by hand - no toolchain available in the dev container |
 
 Install `swiftc` / `kotlinc` and re-run to cover the last two; the harness
