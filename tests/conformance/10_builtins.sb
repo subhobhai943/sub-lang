@@ -1,0 +1,25 @@
+# Numeric and string builtins that every backend must agree on
+println(min(3, 9))
+println(max(3, 9))
+println(min(2.5, 1.5))
+println(max(2.5, 1.5))
+println(floor(2.7))
+println(ceil(2.1))
+println(round(2.5))
+println(floor(-2.7))
+println(ceil(-2.1))
+println(round(-2.5))
+println(trim("  spaced  ") + "|")
+println(len(trim("  ab  ")))
+
+let a = "apple"
+let b = "banana"
+if a < b {
+    println("apple sorts first")
+}
+if a != b {
+    println("different")
+}
+println(true && false)
+println(true || false)
+println(!true)

@@ -62,7 +62,7 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
         {"bool","Boolean(",")"},      {"len","(",").length"},
         {"length","(",").length"},    {"abs","Math.abs(",")"},
         {"sqrt","Math.sqrt(",")"},    {"floor","Math.floor(",")"},
-        {"ceil","Math.ceil(",")"},    {"round","Math.round(",")"},
+        {"ceil","Math.ceil(",")"},    {"round","_subRound(",")"},
         {"upper","(",").toUpperCase()"}, {"lower","(",").toLowerCase()"},
         {"trim","(",").trim()"},      {NULL,NULL,NULL}
     };
@@ -71,35 +71,44 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
         {"int","(long)(",")"},         {"float","(double)(",")"},
         {"bool","(boolean)(",")"},     {"len","(",").length()"},
         {"length","(",").length()"},   {"abs","Math.abs(",")"},
-        {"sqrt","Math.sqrt(",")"},     {"floor","Math.floor(",")"},
-        {"ceil","Math.ceil(",")"},     {"round","Math.round(",")"},
+        {"sqrt","Math.sqrt(",")"},     {"floor","(long)Math.floor(",")"},
+        {"ceil","(long)Math.ceil(",")"}, {"round","_subRound(",")"},
         {"upper","(",").toUpperCase()"},{"lower","(",").toLowerCase()"},
         {"trim","(",").trim()"},       {NULL,NULL,NULL}
     };
     static const BuiltinSpelling swift[] = {
-        {"str","String(describing: ",")"}, {"to_string","String(describing: ",")"},
+        {"str","_subStr(",")"},        {"to_string","_subStr(",")"},
         {"int","Int(",")"},            {"float","Double(",")"},
         {"bool","Bool(",")"},          {"len","(",").count"},
         {"length","(",").count"},      {"abs","abs(",")"},
         {"sqrt","(Double(",")).squareRoot()"},
         {"upper","(",").uppercased()"},{"lower","(",").lowercased()"},
+        {"trim","(",").trimmingCharacters(in: .whitespacesAndNewlines)"},
+        {"floor","Int(Double(",").rounded(.down))"},
+        {"ceil","Int(Double(",").rounded(.up))"},
+        {"round","Int(Double(",").rounded())"},
         {NULL,NULL,NULL}
     };
     static const BuiltinSpelling kotlin[] = {
-        {"str","(",").toString()"},    {"to_string","(",").toString()"},
+        {"str","_subStr(",")"},        {"to_string","_subStr(",")"},
         {"int","(",").toLong()"},      {"float","(",").toDouble()"},
         {"len","(",").length"},        {"length","(",").length"},
         {"abs","kotlin.math.abs(",")"},{"sqrt","kotlin.math.sqrt((",").toDouble())"},
         {"upper","(",").uppercase()"}, {"lower","(",").lowercase()"},
-        {"trim","(",").trim()"},       {NULL,NULL,NULL}
+        {"trim","(",").trim()"},
+        {"floor","kotlin.math.floor((",").toDouble()).toLong()"},
+        {"ceil","kotlin.math.ceil((",").toDouble()).toLong()"},
+        {"round","_subRound((",").toDouble())"},
+        {NULL,NULL,NULL}
     };
     static const BuiltinSpelling go[] = {
-        {"str","fmt.Sprint(",")"},     {"to_string","fmt.Sprint(",")"},
+        {"str","_sub_str(",")"},       {"to_string","_sub_str(",")"},
         {"int","int64(math.Trunc(float64(",")))"},
         {"float","float64(",")"},
         {"len","int64(len(","))"},     {"length","int64(len(","))"},
         {"abs","math.Abs(",")"},       {"sqrt","math.Sqrt(",")"},
-        {"floor","math.Floor(",")"},   {"ceil","math.Ceil(",")"},
+        {"floor","int64(math.Floor(","))"}, {"ceil","int64(math.Ceil(","))"},
+        {"round","int64(math.Round(","))"},
         {"upper","strings.ToUpper(",")"}, {"lower","strings.ToLower(",")"},
         {"trim","strings.TrimSpace(",")"}, {NULL,NULL,NULL}
     };
@@ -109,7 +118,9 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
         {"len","(",").length"},        {"length","(",").length"},
         {"abs","(",").abs"},           {"sqrt","Math.sqrt(",")"},
         {"upper","(",").upcase"},      {"lower","(",").downcase"},
-        {"trim","(",").strip"},        {NULL,NULL,NULL}
+        {"trim","(",").strip"},
+        {"floor","(",").floor"},       {"ceil","(",").ceil"},
+        {"round","(",").round"},       {NULL,NULL,NULL}
     };
     static const BuiltinSpelling py[] = {
         {"println","print(",")"},      {"show","print(",")"},
@@ -131,6 +142,51 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
         if (strcmp(table[i].sub_name, name) == 0) return &table[i];
     return NULL;
 }
+
+/* Builtins that take more than one argument.
+   The table above wraps a single argument in a prefix and a suffix, which
+   cannot express min(a, b); these entries wrap the whole comma-separated
+   argument list instead. Without them min() and max() were emitted verbatim
+   and every target that has no function by that name failed to build. */
+static const BuiltinSpelling* builtin_spelling_multi(TargetLang lang, const char *name) {
+    static const BuiltinSpelling js[] = {
+        {"min","Math.min(",")"},   {"max","Math.max(",")"},   {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling java[] = {
+        {"min","Math.min(",")"},   {"max","Math.max(",")"},   {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling swift[] = {
+        {"min","min(",")"},        {"max","max(",")"},        {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling kotlin[] = {
+        {"min","kotlin.math.min(",")"}, {"max","kotlin.math.max(",")"},
+        {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling go[] = {
+        /* min and max are predeclared functions in Go 1.21 and later. */
+        {"min","min(",")"},        {"max","max(",")"},        {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling ruby[] = {
+        {"min","[","].min"},       {"max","[","].max"},       {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling py[] = { {NULL,NULL,NULL} };
+
+    const BuiltinSpelling *table;
+    switch (lang) {
+        case LANG_JS:     table = js;     break;
+        case LANG_JAVA:   table = java;   break;
+        case LANG_SWIFT:  table = swift;  break;
+        case LANG_KOTLIN: table = kotlin; break;
+        case LANG_GO:     table = go;     break;
+        case LANG_RUBY:   table = ruby;   break;
+        default:          table = py;     break;
+    }
+    if (!name) return NULL;
+    for (int i = 0; table[i].sub_name; i++)
+        if (strcmp(table[i].sub_name, name) == 0) return &table[i];
+    return NULL;
+}
+
 
 /* Return type of the Java function currently being emitted, so a bare
    `return null` can be rendered as the numeric NaN sentinel. */
@@ -408,9 +464,34 @@ static void generate_expr_kotlin_as(StringBuilder *sb, ASTNode *node, DataType w
 
 typedef void (*ExprGen)(StringBuilder *, ASTNode *);
 
+static int is_comparison_operator(const char *op) {
+    return op && (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
+                  strcmp(op, "<")  == 0 || strcmp(op, ">")  == 0 ||
+                  strcmp(op, "<=") == 0 || strcmp(op, ">=") == 0);
+}
+
 static int both_int_operands(ASTNode *node) {
     return infer_expr_type(node->left)  == TYPE_INT &&
            infer_expr_type(node->right) == TYPE_INT;
+}
+
+/* Emit `arg` wrapped in the target's %g formatter when it is statically a
+   float, and plainly otherwise. Languages with one numeric type (JavaScript)
+   or with no runtime type to dispatch on (Go, Rust) cannot decide this at
+   run time, so it is decided here, from the same inferred type every other
+   backend uses. */
+static void gen_float_aware(StringBuilder *sb, ASTNode *arg,
+                            const char *fmt_fn, ExprGen gen) {
+    int is_float = (infer_expr_type(arg) == TYPE_FLOAT);
+    if (is_float) sb_append(sb, "%s(", fmt_fn);
+    gen(sb, arg);
+    if (is_float) sb_append(sb, ")");
+}
+
+/* True when either side of an arithmetic operator is known to be a float. */
+static int any_float_operand(ASTNode *node) {
+    return infer_expr_type(node->left)  == TYPE_FLOAT ||
+           infer_expr_type(node->right) == TYPE_FLOAT;
 }
 
 /* Emits a special form and returns 1, or returns 0 to let the caller emit the
@@ -419,6 +500,26 @@ static int emit_special_binop(StringBuilder *sb, ASTNode *node,
                               TargetLang lang, ExprGen gen) {
     const char *op = node->value;
     if (!op) return 0;
+
+    /* Java is the one target where comparing strings with the operators
+       does the wrong thing: == compares references rather than contents,
+       and <, > and friends do not compile at all. Every other target
+       compares string values with the plain operators. */
+    if (lang == LANG_JAVA && is_comparison_operator(op) &&
+        (infer_expr_type(node->left)  == TYPE_STRING ||
+         infer_expr_type(node->right) == TYPE_STRING)) {
+        if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) {
+            sb_append(sb, "%s", strcmp(op, "!=") == 0 ? "!" : "");
+            sb_append(sb, "java.util.Objects.equals(");
+            gen(sb, node->left); sb_append(sb, ", ");
+            gen(sb, node->right); sb_append(sb, ")");
+        } else {
+            sb_append(sb, "((");
+            gen(sb, node->left); sb_append(sb, ").compareTo(");
+            gen(sb, node->right); sb_append(sb, ") %s 0)", op);
+        }
+        return 1;
+    }
 
     if (strcmp(op, "**") == 0) {
         /* A negative exponent gives a fraction, so it must stay floating
@@ -460,33 +561,42 @@ static int emit_special_binop(StringBuilder *sb, ASTNode *node,
         return 0;
     }
 
-    if (strcmp(op, "%") == 0 && both_int_operands(node) &&
-        (lang == LANG_PY || lang == LANG_RUBY)) {
-        sb_append(sb, "_sub_mod(");
+    /* Division and remainder go through a helper in every target.
+       Three things have to be the same everywhere and are not the same
+       natively: integer division truncates toward zero (Python and Ruby
+       floor), float remainder follows fmod (Python and Ruby floor that too,
+       and C++ will not compile `%` on doubles at all), and dividing by zero
+       is a runtime error. Left to each language, `7 / 0` aborted with SIGFPE
+       in C, printed Infinity in JavaScript, threw in Python and quietly
+       produced 0 in the native backend - five behaviours for one
+       expression. The helpers make it one: the interpreter's error message
+       and exit status 70.
+
+       An operand whose type is not known stays on the integer helper, since
+       that is what the rest of the toolchain assumes for an unresolved
+       numeric type; sending it to the float helper would turn 9 / 2 into
+       4.5. */
+    if (strcmp(op, "/") == 0 || strcmp(op, "%") == 0) {
+        int is_div = (strcmp(op, "/") == 0);
+        int is_flt = any_float_operand(node);
+        const char *fn;
+        switch (lang) {
+            case LANG_JS:
+            case LANG_JAVA:
+            case LANG_KOTLIN:
+            case LANG_SWIFT:
+                fn = is_flt ? (is_div ? "_subFdiv"  : "_subFmod")
+                            : (is_div ? "_subIdiv"  : "_subMod");
+                break;
+            default:
+                fn = is_flt ? (is_div ? "_sub_fdiv" : "_sub_fmod")
+                            : (is_div ? "_sub_idiv" : "_sub_mod");
+                break;
+        }
+        sb_append(sb, "%s(", fn);
         gen(sb, node->left); sb_append(sb, ", ");
         gen(sb, node->right); sb_append(sb, ")");
         return 1;
-    }
-
-    if (strcmp(op, "/") == 0 && both_int_operands(node)) {
-        if (lang == LANG_PY) {
-            sb_append(sb, "_sub_idiv(");
-            gen(sb, node->left); sb_append(sb, ", ");
-            gen(sb, node->right); sb_append(sb, ")");
-            return 1;
-        }
-        if (lang == LANG_RUBY) {
-            sb_append(sb, "_sub_idiv(");
-            gen(sb, node->left); sb_append(sb, ", ");
-            gen(sb, node->right); sb_append(sb, ")");
-            return 1;
-        }
-        if (lang == LANG_JS) {
-            sb_append(sb, "Math.trunc(");
-            gen(sb, node->left); sb_append(sb, " / ");
-            gen(sb, node->right); sb_append(sb, ")");
-            return 1;
-        }
     }
     return 0;
 }
@@ -672,6 +782,9 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, "math.floor(");
                 } else if (strcmp(fn, "ceil") == 0) {
                     sb_append(sb, "math.ceil(");
+                } else if (strcmp(fn, "round") == 0) {
+                    /* not Python's round(): see _sub_round in the preamble */
+                    sb_append(sb, "_sub_round(");
                 } else if (strcmp(fn, "type") == 0) {
                     sb_append(sb, "(lambda x: 'int' if isinstance(x, int) and not isinstance(x, bool) else ('float' if isinstance(x, float) else ('string' if isinstance(x, str) else ('bool' if isinstance(x, bool) else ('array' if isinstance(x, list) else ('null' if x is None else type(x).__name__))))))(");
                 } else {
@@ -935,6 +1048,7 @@ char* codegen_python(ASTNode *ast, const char *source) {
     if (!sb) return NULL;
     
     sb_append(sb, "#!/usr/bin/env python3\n");
+    sb_append(sb, "import sys\n");
     sb_append(sb, "# Generated by SUB Language Compiler\n");
     sb_append(sb, "import math\n");
     /* SUB writes booleans as true/false. Python's str() writes True/False, so
@@ -945,28 +1059,47 @@ char* codegen_python(ASTNode *ast, const char *source) {
     sb_append(sb, "        return \"true\" if v else \"false\"\n");
     sb_append(sb, "    if v is None:\n");
     sb_append(sb, "        return \"null\"\n");
-    /* SUB prints a float with no fractional part as an integer (sqrt(16.0)
-       is 4, not 4.0), so Python has to drop the trailing .0 to agree. */
-    sb_append(sb, "    if isinstance(v, float) and v.is_integer():\n");
-    sb_append(sb, "        return str(int(v))\n");
+    /* The interpreter prints floats with printf's %g: six significant
+       digits, trailing zeros dropped. Python's str() prints all seventeen,
+       so 1.0 / 3.0 came out 0.3333333333333333 where every other backend
+       said 0.333333. */
+    sb_append(sb, "    if isinstance(v, float):\n");
+    sb_append(sb, "        return \"%%g\" %% v\n");
     sb_append(sb, "    return str(v)\n");
     /* SUB divides and takes the remainder the way C, Java, Go and the
        interpreter do: truncated toward zero, so -7 / 2 is -3 and -7 % 3 is
        -1. Python's // and % floor instead, giving -4 and 2. */
+    sb_append(sb, "\n\ndef _sub_die(msg):\n");   /* see the note above */
+    sb_append(sb, "    print('RuntimeError: ' + msg, file=sys.stderr)\n");
+    sb_append(sb, "    sys.exit(70)\n");
     sb_append(sb, "\n\ndef _sub_idiv(a, b):\n");
+    sb_append(sb, "    if b == 0: _sub_die('division by zero')\n");
     sb_append(sb, "    q = abs(a) // abs(b)\n");
     sb_append(sb, "    return -q if (a < 0) != (b < 0) else q\n");
     sb_append(sb, "\n\ndef _sub_mod(a, b):\n");
+    sb_append(sb, "    if b == 0: _sub_die('modulo by zero')\n");
     sb_append(sb, "    return a - _sub_idiv(a, b) * b\n");
+    sb_append(sb, "\n\ndef _sub_fdiv(a, b):\n");
+    sb_append(sb, "    if b == 0: _sub_die('division by zero')\n");
+    sb_append(sb, "    return a / b\n");
+    sb_append(sb, "\n\ndef _sub_fmod(a, b):\n");
+    sb_append(sb, "    if b == 0: _sub_die('modulo by zero')\n");
+    sb_append(sb, "    return math.fmod(a, b)");
     sb_append(sb, "\n\ndef _sub_print(*a):\n");
     sb_append(sb, "    print(*[_sub_str(x) for x in a])\n\n");
-    sb_append(sb, "import sys\n\n");
     sb_append(sb, "def _sub_add(a, b):\n");
     sb_append(sb, "    # SUB's '+' concatenates when either side is a string,\n");
     sb_append(sb, "    # otherwise adds numerically (mirrors the SUB interpreter).\n");
     sb_append(sb, "    if isinstance(a, str) or isinstance(b, str):\n");
     sb_append(sb, "        return str(a) + str(b)\n");
     sb_append(sb, "    return a + b\n\n");
+
+    sb_append(sb, "def _sub_round(x):\n");
+    sb_append(sb, "    # Python's round() is banker's rounding: round(2.5)\n");
+    sb_append(sb, "    # is 2 and round(-2.5) is -2. SUB rounds halves away\n");
+    sb_append(sb, "    # from zero, as C's round() does.\n");
+    sb_append(sb, "    return int(math.floor(x + 0.5)) if x >= 0 "
+                  "else int(math.ceil(x - 0.5))\n\n");
 
     char *embedded = extract_embedded_code(source, "python");
     if (embedded) {
@@ -1033,9 +1166,28 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, "%s", bs->suffix);
                     break;
                 }
+                bs = builtin_spelling_multi(LANG_JS, node->value);
+                if (bs && node->child_count >= 2) {
+                    sb_append(sb, "%s", bs->prefix);
+                    for (int i = 0; i < node->child_count; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_js(sb, node->children[i]);
+                    }
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
             }
-            if (node->value && strcmp(node->value, "show") == 0) {
-                sb_append(sb, "console.log(");
+            if (node->value && (strcmp(node->value, "show") == 0 ||
+                                strcmp(node->value, "str") == 0 ||
+                                strcmp(node->value, "to_string") == 0)) {
+                int as_str = (node->value[0] == 's' && node->value[1] == 't');
+                sb_append(sb, as_str ? "String(" : "console.log(");
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    gen_float_aware(sb, node->children[i], "_subFmt", generate_expr_js);
+                }
+                sb_append(sb, ")");
+                break;
             } else if (node->value) {
                 sb_append(sb, "%s(", node->value);
             } else {
@@ -1086,6 +1238,18 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     
     switch (node->type) {
+        /*  A dropped `break` turns a loop that terminates into one
+           that does not, so this must never fall through to the default. */
+        case AST_BREAK_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "break;\n");
+            break;
+
+        case AST_CONTINUE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "continue;\n");
+            break;
+
         case AST_PROGRAM:
             for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node_js(sb, stmt, indent);
@@ -1227,7 +1391,8 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
             // Map print to console.log
             if (is_print_builtin(node->value)) {
                 sb_append(sb, "console.log(");
-                if (node->child_count > 0) generate_expr_js(sb, node->children[0]);
+                if (node->child_count > 0)
+                    gen_float_aware(sb, node->children[0], "_subFmt", generate_expr_js);
                 sb_append(sb, ")");
             } else {
                 generate_expr_js(sb, node);
@@ -1266,7 +1431,54 @@ char* codegen_javascript(ASTNode *ast, const char *source) {
     if (!sb) return NULL;
     
     sb_append(sb, "// Generated by SUB Language Compiler\n\n");
-    
+
+    /* SUB's round() breaks ties away from zero, following C's round().
+       Math.round() breaks them toward +Infinity, so round(-2.5) came out
+       -2 where every other SUB backend says -3. */
+    /* Integer / and % must truncate toward zero and must fail at zero the
+       way the interpreter does, rather than yielding Infinity and NaN. */
+    /* printf's %g, as the interpreter prints floats. JavaScript has one
+       number type, so which values get this treatment is decided at
+       transpile time from the inferred type, not at runtime. */
+    sb_append(sb, "function _subFmt(d) {\n");
+    sb_append(sb, "    if (Number.isNaN(d)) return 'nan';\n");
+    sb_append(sb, "    if (!Number.isFinite(d)) return d < 0 ? '-inf' : 'inf';\n");
+    sb_append(sb, "    if (d === 0) return Object.is(d, -0) ? '-0' : '0';\n");
+    sb_append(sb, "    let s = d.toPrecision(6);\n");
+    sb_append(sb, "    if (s.indexOf('e') >= 0) {\n");
+    sb_append(sb, "        let [m, e] = s.split('e');\n");
+    sb_append(sb, "        if (m.indexOf('.') >= 0) m = m.replace(/0+$/, '').replace(/\\.$/, '');\n");
+    sb_append(sb, "        const sign = e[0] === '-' ? '-' : '+';\n");
+    sb_append(sb, "        const dig = e.replace(/^[+-]/, '').padStart(2, '0');\n");
+    sb_append(sb, "        return m + 'e' + sign + dig;\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\\.$/, '');\n");
+    sb_append(sb, "    return s;\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subDie(msg) {\n");
+    sb_append(sb, "    console.error('RuntimeError: ' + msg);\n");
+    sb_append(sb, "    process.exit(70);\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subIdiv(a, b) {\n");
+    sb_append(sb, "    if (b === 0) _subDie('division by zero');\n");
+    sb_append(sb, "    return Math.trunc(a / b);\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subMod(a, b) {\n");
+    sb_append(sb, "    if (b === 0) _subDie('modulo by zero');\n");
+    sb_append(sb, "    return a %% b;\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subFdiv(a, b) {\n");
+    sb_append(sb, "    if (b === 0) _subDie('division by zero');\n");
+    sb_append(sb, "    return a / b;\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subFmod(a, b) {\n");
+    sb_append(sb, "    if (b === 0) _subDie('modulo by zero');\n");
+    sb_append(sb, "    return a %% b;\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subRound(x) {\n");
+    sb_append(sb, "    return x < 0 ? -Math.round(-x) : Math.round(x);\n");
+    sb_append(sb, "}\n\n");
+
     // Check for embedded JavaScript
     char *embedded = extract_embedded_code(source, "javascript");
     if (embedded) {
@@ -1345,6 +1557,16 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, "%s", bs->suffix);
                     break;
                 }
+                bs = builtin_spelling_multi(LANG_JAVA, node->value);
+                if (bs && node->child_count >= 2) {
+                    sb_append(sb, "%s", bs->prefix);
+                    for (int i = 0; i < node->child_count; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_java(sb, node->children[i]);
+                    }
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
             }
             if (is_print_builtin(fn)) {
                 sb_append(sb, "_subPrint(");
@@ -1404,6 +1626,18 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     
     switch (node->type) {
+        /*  A dropped `break` turns a loop that terminates into one
+           that does not, so this must never fall through to the default. */
+        case AST_BREAK_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "break;\n");
+            break;
+
+        case AST_CONTINUE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "continue;\n");
+            break;
+
         case AST_PROGRAM:
             for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node_java(sb, stmt, indent);
@@ -1575,16 +1809,61 @@ char* codegen_java(ASTNode *ast, const char *source) {
     /* SUB prints booleans as true/false and drops the trailing .0 on a float
        with no fractional part. Java's println does neither, so route printing
        through a helper to keep output identical to the interpreter's. */
-    sb_append(sb, "\n    static String _subStr(Object v) {\n");
-    sb_append(sb, "        if (v instanceof Double) {\n");
-    sb_append(sb, "            double d = (Double) v;\n");
-    sb_append(sb, "            if (d == Math.floor(d) && !Double.isInfinite(d))\n");
-    sb_append(sb, "                return String.valueOf((long) d);\n");
+    /* printf's %g: six significant digits, trailing zeros dropped, and
+       exponent form outside 1e-4 .. 1e+6. Java's String.format("%g") keeps
+       the trailing zeros and picks the notation by different rules, so the
+       shape has to be built by hand to agree with the interpreter. */
+    sb_append(sb, "\n    static String _subFmt(double d) {\n");
+    sb_append(sb, "        if (Double.isNaN(d)) return \"nan\";\n");
+    sb_append(sb, "        if (Double.isInfinite(d)) return d < 0 ? \"-inf\" : \"inf\";\n");
+    sb_append(sb, "        if (d == 0) return (1 / d < 0) ? \"-0\" : \"0\";\n");
+    sb_append(sb, "        java.math.BigDecimal b = new java.math.BigDecimal(d)\n");
+    sb_append(sb, "            .round(new java.math.MathContext(6));\n");
+    sb_append(sb, "        int exp = b.precision() - b.scale() - 1;\n");
+    sb_append(sb, "        if (exp < -4 || exp >= 6) {\n");
+    sb_append(sb, "            String m = b.movePointLeft(exp).stripTrailingZeros().toPlainString();\n");
+    sb_append(sb, "            int a = Math.abs(exp);\n");
+    sb_append(sb, "            return m + \"e\" + (exp < 0 ? \"-\" : \"+\")\n");
+    sb_append(sb, "                     + (a < 10 ? \"0\" : \"\") + a;\n");
     sb_append(sb, "        }\n");
+    sb_append(sb, "        return b.stripTrailingZeros().toPlainString();\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "\n    static String _subStr(Object v) {\n");
+    sb_append(sb, "        if (v instanceof Double) return _subFmt((Double) v);\n");
+    sb_append(sb, "        if (v instanceof Float) return _subFmt((Float) v);\n");
     sb_append(sb, "        return String.valueOf(v);\n");
     sb_append(sb, "    }\n");
     sb_append(sb, "\n    static void _subPrint(Object v) {\n");
     sb_append(sb, "        System.out.println(_subStr(v));\n");
+    sb_append(sb, "    }\n");
+
+    /* Integer division by zero throws ArithmeticException in Java; SUB
+       reports a runtime error and exits 70, the same as the interpreter. */
+    sb_append(sb, "\n    static void _subDie(String msg) {\n");
+    sb_append(sb, "        System.err.println(\"RuntimeError: \" + msg);\n");
+    sb_append(sb, "        System.exit(70);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "\n    static long _subIdiv(long a, long b) {\n");
+    sb_append(sb, "        if (b == 0) _subDie(\"division by zero\");\n");
+    sb_append(sb, "        return a / b;\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "\n    static long _subMod(long a, long b) {\n");
+    sb_append(sb, "        if (b == 0) _subDie(\"modulo by zero\");\n");
+    sb_append(sb, "        return a %% b;\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "\n    static double _subFdiv(double a, double b) {\n");
+    sb_append(sb, "        if (b == 0) _subDie(\"division by zero\");\n");
+    sb_append(sb, "        return a / b;\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "\n    static double _subFmod(double a, double b) {\n");
+    sb_append(sb, "        if (b == 0) _subDie(\"modulo by zero\");\n");
+    sb_append(sb, "        return a %% b;\n");
+    sb_append(sb, "    }\n");
+
+    /* Math.round() breaks ties toward +Infinity; SUB breaks them away from
+       zero, so -2.5 must round to -3 rather than -2. */
+    sb_append(sb, "\n    static long _subRound(double x) {\n");
+    sb_append(sb, "        return x < 0 ? -Math.round(-x) : Math.round(x);\n");
     sb_append(sb, "    }\n");
 
     /* Two-pass approach: functions and non-function statements separated */
@@ -1676,8 +1955,18 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, "%s", bs->suffix);
                     break;
                 }
+                bs = builtin_spelling_multi(LANG_SWIFT, node->value);
+                if (bs && node->child_count >= 2) {
+                    sb_append(sb, "%s", bs->prefix);
+                    for (int i = 0; i < node->child_count; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_swift(sb, node->children[i]);
+                    }
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
             }
-            if (is_print_builtin(node->value)) sb_append(sb, "print(");
+            if (is_print_builtin(node->value)) sb_append(sb, "_subPrint(");
             else if (node->value) sb_append(sb, "%s(", node->value);
             else { generate_expr_swift(sb, node->left); sb_append(sb, "("); }
             for (int i = 0; i < node->child_count; i++) {
@@ -1695,6 +1984,18 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
 static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     switch (node->type) {
+        /*  A dropped `break` turns a loop that terminates into one
+           that does not, so this must never fall through to the default. */
+        case AST_BREAK_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "break\n");
+            break;
+
+        case AST_CONTINUE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "continue\n");
+            break;
+
         case AST_PROGRAM: 
             for (ASTNode *s = block_first(node); s; s = s->next) {
                 generate_node_swift(sb, s, indent);
@@ -1834,6 +2135,33 @@ char* codegen_swift(ASTNode *ast, const char *source) {
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     sb_append(sb, "// Generated by SUB\n\n");
+    /* Foundation supplies exit() and trimmingCharacters(in:). Swift does not
+       complain about an import it does not end up needing. */
+    sb_append(sb, "import Foundation\n\n");
+    /* Foundation's String(format:) is C's, so %g is available directly. */
+    sb_append(sb, "func _subFmt(_ d: Double) -> String "
+                  "{ return String(format: \"%%g\", d) }\n");
+    sb_append(sb, "func _subStr(_ v: Any) -> String {\n");
+    sb_append(sb, "    if let d = v as? Double { return _subFmt(d) }\n");
+    sb_append(sb, "    if let b = v as? Bool { return b ? \"true\" : \"false\" }\n");
+    sb_append(sb, "    return String(describing: v)\n}\n");
+    sb_append(sb, "func _subPrint(_ v: Any) { print(_subStr(v)) }\n\n");
+    sb_append(sb, "func _subDie(_ msg: String) -> Never {\n");
+    sb_append(sb, "    FileHandle.standardError.write("
+                  "(\"RuntimeError: \" + msg + \"\\n\").data(using: .utf8)!)\n");
+    sb_append(sb, "    exit(70)\n}\n\n");
+    sb_append(sb, "func _subIdiv(_ a: Int, _ b: Int) -> Int {\n");
+    sb_append(sb, "    if b == 0 { _subDie(\"division by zero\") }\n");
+    sb_append(sb, "    return a / b\n}\n\n");
+    sb_append(sb, "func _subMod(_ a: Int, _ b: Int) -> Int {\n");
+    sb_append(sb, "    if b == 0 { _subDie(\"modulo by zero\") }\n");
+    sb_append(sb, "    return a %% b\n}\n\n");
+    sb_append(sb, "func _subFdiv(_ a: Double, _ b: Double) -> Double {\n");
+    sb_append(sb, "    if b == 0 { _subDie(\"division by zero\") }\n");
+    sb_append(sb, "    return a / b\n}\n\n");
+    sb_append(sb, "func _subFmod(_ a: Double, _ b: Double) -> Double {\n");
+    sb_append(sb, "    if b == 0 { _subDie(\"modulo by zero\") }\n");
+    sb_append(sb, "    return a.truncatingRemainder(dividingBy: b)\n}\n\n");
     char *e = extract_embedded_code(source, "swift");
     if (e) {
         sb_append(sb, "%s\n", e);
@@ -1906,8 +2234,18 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, "%s", bs->suffix);
                     break;
                 }
+                bs = builtin_spelling_multi(LANG_KOTLIN, node->value);
+                if (bs && node->child_count >= 2) {
+                    sb_append(sb, "%s", bs->prefix);
+                    for (int i = 0; i < node->child_count; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_kotlin(sb, node->children[i]);
+                    }
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
             }
-            if (is_print_builtin(node->value)) sb_append(sb, "println(");
+            if (is_print_builtin(node->value)) sb_append(sb, "_subPrint(");
             else if (node->value) sb_append(sb, "%s(", node->value);
             else { generate_expr_kotlin(sb, node->left); sb_append(sb, "("); }
             for (int i = 0; i < node->child_count; i++) {
@@ -1925,6 +2263,18 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
 static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     switch (node->type) {
+        /*  A dropped `break` turns a loop that terminates into one
+           that does not, so this must never fall through to the default. */
+        case AST_BREAK_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "break\n");
+            break;
+
+        case AST_CONTINUE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "continue\n");
+            break;
+
         case AST_PROGRAM: 
             for (ASTNode *s = block_first(node); s; s = s->next) {
                 generate_node_kotlin(sb, s, indent);
@@ -2064,6 +2414,47 @@ char* codegen_kotlin(ASTNode *ast, const char *source) {
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     sb_append(sb, "// Generated by SUB\n\n");
+    /* kotlin.math.round() breaks ties toward +Infinity; SUB breaks them
+       away from zero. */
+    /* printf's %g, as the interpreter prints floats. */
+    sb_append(sb, "fun _subFmt(d: Double): String {\n");
+    sb_append(sb, "    if (d.isNaN()) return \"nan\"\n");
+    sb_append(sb, "    if (d.isInfinite()) return if (d < 0) \"-inf\" else \"inf\"\n");
+    sb_append(sb, "    if (d == 0.0) return if (1 / d < 0) \"-0\" else \"0\"\n");
+    sb_append(sb, "    val b = java.math.BigDecimal(d).round(java.math.MathContext(6))\n");
+    sb_append(sb, "    val exp = b.precision() - b.scale() - 1\n");
+    sb_append(sb, "    if (exp < -4 || exp >= 6) {\n");
+    sb_append(sb, "        val m = b.movePointLeft(exp).stripTrailingZeros().toPlainString()\n");
+    sb_append(sb, "        val a = kotlin.math.abs(exp)\n");
+    sb_append(sb, "        return m + \"e\" + (if (exp < 0) \"-\" else \"+\") +\n");
+    sb_append(sb, "               (if (a < 10) \"0\" else \"\") + a\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    return b.stripTrailingZeros().toPlainString()\n}\n\n");
+    sb_append(sb, "fun _subStr(v: Any?): String = when (v) {\n");
+    sb_append(sb, "    null -> \"null\"\n");
+    sb_append(sb, "    is Double -> _subFmt(v)\n");
+    sb_append(sb, "    is Float -> _subFmt(v.toDouble())\n");
+    sb_append(sb, "    else -> v.toString()\n}\n\n");
+    sb_append(sb, "fun _subPrint(v: Any?) = println(_subStr(v))\n\n");
+    sb_append(sb, "fun _subDie(msg: String): Nothing {\n");
+    sb_append(sb, "    System.err.println(\"RuntimeError: \" + msg)\n");
+    sb_append(sb, "    kotlin.system.exitProcess(70)\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "fun _subIdiv(a: Long, b: Long): Long {\n");
+    sb_append(sb, "    if (b == 0L) _subDie(\"division by zero\")\n");
+    sb_append(sb, "    return a / b\n}\n\n");
+    sb_append(sb, "fun _subMod(a: Long, b: Long): Long {\n");
+    sb_append(sb, "    if (b == 0L) _subDie(\"modulo by zero\")\n");
+    sb_append(sb, "    return a %% b\n}\n\n");
+    sb_append(sb, "fun _subFdiv(a: Double, b: Double): Double {\n");
+    sb_append(sb, "    if (b == 0.0) _subDie(\"division by zero\")\n");
+    sb_append(sb, "    return a / b\n}\n\n");
+    sb_append(sb, "fun _subFmod(a: Double, b: Double): Double {\n");
+    sb_append(sb, "    if (b == 0.0) _subDie(\"modulo by zero\")\n");
+    sb_append(sb, "    return a %% b\n}\n\n");
+    sb_append(sb, "fun _subRound(x: Double): Long =\n");
+    sb_append(sb, "    if (x < 0) -kotlin.math.round(-x).toLong() "
+                  "else kotlin.math.round(x).toLong()\n\n");
     char *e = extract_embedded_code(source, "kotlin");
     if (e) {
         sb_append(sb, "%s\n", e);
@@ -2348,6 +2739,16 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, "%s", bs->suffix);
                     break;
                 }
+                bs = builtin_spelling_multi(LANG_RUBY, node->value);
+                if (bs && node->child_count >= 2) {
+                    sb_append(sb, "%s", bs->prefix);
+                    for (int i = 0; i < node->child_count; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_ruby(sb, node->children[i]);
+                    }
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
             }
             if (is_print_builtin(func_name)) {
                 sb_append(sb, "_sub_puts");
@@ -2415,6 +2816,18 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
 
     switch (node->type) {
+        /* Ruby spells `continue` as `next`. A dropped `break` turns a loop that terminates into one
+           that does not, so this must never fall through to the default. */
+        case AST_BREAK_STMT:
+            indent_ruby(sb, indent);
+            sb_append(sb, "break\n");
+            break;
+
+        case AST_CONTINUE_STMT:
+            indent_ruby(sb, indent);
+            sb_append(sb, "next\n");
+            break;
+
         case AST_PROGRAM:
             for (ASTNode *stmt = block_first(node); stmt != NULL; stmt = stmt->next) {
                 generate_node_ruby(sb, stmt, indent);
@@ -2617,13 +3030,27 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
        does. Route printing through a helper for the float case. */
     sb_append(sb, "\ndef _sub_str(v)\n");
     sb_append(sb, "  return \"null\" if v.nil?\n");
-    sb_append(sb, "  return v.to_i.to_s if v.is_a?(Float) && v.finite? && v == v.to_i\n");
+    /* printf's %g, matching the interpreter: six significant digits. */
+    sb_append(sb, "  return sprintf(\"%%g\", v) if v.is_a?(Float)\n");
     sb_append(sb, "  v.to_s\nend\n");
-    /* Ruby's / and % floor like Python's; SUB truncates toward zero. */
+    /* Ruby's / and % floor like Python's; SUB truncates toward zero.
+       Dividing by zero is a runtime error with status 70 in every backend. */
+    sb_append(sb, "\ndef _sub_die(msg)\n");
+    sb_append(sb, "  STDERR.puts \"RuntimeError: #{msg}\"\n  exit 70\nend\n");
     sb_append(sb, "\ndef _sub_idiv(a, b)\n");
+    sb_append(sb, "  _sub_die('division by zero') if b == 0\n");
     sb_append(sb, "  q = a.abs / b.abs\n");
     sb_append(sb, "  (a < 0) != (b < 0) ? -q : q\nend\n");
-    sb_append(sb, "\ndef _sub_mod(a, b)\n  a - _sub_idiv(a, b) * b\nend\n");
+    sb_append(sb, "\ndef _sub_mod(a, b)\n");
+    sb_append(sb, "  _sub_die('modulo by zero') if b == 0\n");
+    sb_append(sb, "  a - _sub_idiv(a, b) * b\nend\n");
+    sb_append(sb, "\ndef _sub_fdiv(a, b)\n");
+    sb_append(sb, "  _sub_die('division by zero') if b == 0\n");
+    sb_append(sb, "  a.to_f / b.to_f\nend\n");
+    /* Ruby's Float#% floors like Python's; SUB follows C's fmod. */
+    sb_append(sb, "\ndef _sub_fmod(a, b)\n");
+    sb_append(sb, "  _sub_die('modulo by zero') if b == 0\n");
+    sb_append(sb, "  a.to_f.remainder(b.to_f)\nend\n");
     sb_append(sb, "\ndef _sub_pow(a, b)\n");
     sb_append(sb, "  r = a ** b\n");
     sb_append(sb, "  r.is_a?(Rational) ? r.to_f : r\nend\n");
@@ -2655,6 +3082,25 @@ static void indent_go(StringBuilder *sb, int level) {
    a missing one, so the import block has to match what the body actually
    emits. The math/strings helpers come from the builtin table and the power
    operator. */
+/* True when the program divides or takes a remainder of two integers, and
+   so needs the _sub_idiv / _sub_mod helpers - which in turn need fmt and os.
+   Go rejects an unused import, so this has to be known before the import
+   block is written. */
+static bool ast_uses_int_divmod(ASTNode *node) {
+    if (!node) return false;
+    if (node->type == AST_BINARY_EXPR && node->value &&
+        (strcmp(node->value, "/") == 0 || strcmp(node->value, "%") == 0))
+        return true;
+    if (ast_uses_int_divmod(node->left))      return true;
+    if (ast_uses_int_divmod(node->right))     return true;
+    if (ast_uses_int_divmod(node->condition)) return true;
+    if (ast_uses_int_divmod(node->body))      return true;
+    if (ast_uses_int_divmod(node->next))      return true;
+    for (int i = 0; i < node->child_count; i++)
+        if (node->children && ast_uses_int_divmod(node->children[i])) return true;
+    return false;
+}
+
 static bool ast_uses_go_pkg(ASTNode *node, const char *pkg) {
     if (!node) return false;
 
@@ -2801,13 +3247,24 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, "%s", bs->suffix);
                     break;
                 }
+                bs = builtin_spelling_multi(LANG_GO, node->value);
+                if (bs && node->child_count >= 2) {
+                    sb_append(sb, "%s", bs->prefix);
+                    for (int i = 0; i < node->child_count; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_go(sb, node->children[i]);
+                    }
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
             }
             if (is_print_builtin(func_name)) {
                 sb_append(sb, "fmt.Println(");
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
                     if (node->children)
-                        generate_expr_go(sb, node->children[i]);
+                        gen_float_aware(sb, node->children[i], "_sub_fmt",
+                                        generate_expr_go);
                 }
                 sb_append(sb, ")");
             } else {
@@ -2877,33 +3334,36 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
             break;
 
         case AST_VAR_DECL:
+        case AST_CONST_DECL: {
+            /* Go has to be told the type. `var a = 10` infers `int`, and the
+               rest of the generated program uses int64 everywhere - so the
+               variable could not then be passed to any generated function.
+               Naming the inferred type keeps one integer width in play. */
             indent_go(sb, indent);
+            DataType dt = node->data_type;
+            if (dt == TYPE_UNKNOWN || dt == TYPE_AUTO)
+                dt = infer_expr_type(node->right);
             sb_append(sb, "var %s", node->value ? node->value : "v");
             if (node->right) {
+                if (dt == TYPE_INT || dt == TYPE_FLOAT ||
+                    dt == TYPE_BOOL || dt == TYPE_STRING)
+                    sb_append(sb, " %s", go_type(dt));
                 sb_append(sb, " = ");
-                generate_expr_go(sb, node->right);
+                if (dt == TYPE_INT || dt == TYPE_FLOAT) {
+                    /* An untyped constant needs the conversion spelled out
+                       when the expression is a bare literal. */
+                    sb_append(sb, "%s(", go_type(dt));
+                    generate_expr_go(sb, node->right);
+                    sb_append(sb, ")");
+                } else {
+                    generate_expr_go(sb, node->right);
+                }
             } else {
                 sb_append(sb, " interface{} = nil");
             }
             sb_append(sb, "\n");
             break;
-
-        case AST_CONST_DECL:
-            indent_go(sb, indent);
-            if (node->right && node->right->type == AST_LITERAL) {
-                sb_append(sb, "const %s = ", node->value ? node->value : "C");
-                generate_expr_go(sb, node->right);
-            } else {
-                sb_append(sb, "var %s", node->value ? node->value : "C");
-                if (node->right) {
-                    sb_append(sb, " = ");
-                    generate_expr_go(sb, node->right);
-                } else {
-                    sb_append(sb, " interface{} = nil");
-                }
-            }
-            sb_append(sb, "\n");
-            break;
+        }
 
         case AST_FUNCTION_DECL:
             sb_append(sb, "\n");
@@ -3152,20 +3612,57 @@ char* codegen_go(ASTNode *ast, const char *source) {
 
     sb_append(sb, "package main\n\n");
 
-    bool needs_fmt     = ast_needs_fmt(ast);
-    bool needs_math     = ast_uses_go_pkg(ast, "math");
+    bool needs_divmod   = ast_uses_int_divmod(ast);
+    bool needs_fmt      = ast_needs_fmt(ast) || needs_divmod;
+    bool needs_os       = needs_divmod;
+    bool needs_math     = ast_uses_go_pkg(ast, "math") || needs_divmod;
     bool needs_strings  = ast_uses_go_pkg(ast, "strings");
+    bool needs_strconv  = true;   /* _sub_fmt always uses it */
+    needs_fmt = true;             /* _sub_str always uses fmt.Sprint */
     int  import_count   = (needs_fmt ? 1 : 0) + (needs_math ? 1 : 0) +
-                          (needs_strings ? 1 : 0);
+                          (needs_strings ? 1 : 0) + (needs_os ? 1 : 0) +
+                          (needs_strconv ? 1 : 0);
     if (import_count == 1) {
         sb_append(sb, "import \"%s\"\n\n",
-                  needs_fmt ? "fmt" : needs_math ? "math" : "strings");
+                  needs_fmt ? "fmt" : needs_math ? "math" :
+                  needs_os ? "os" : "strings");
     } else if (import_count > 1) {
         sb_append(sb, "import (\n");
         if (needs_fmt)     sb_append(sb, "\t\"fmt\"\n");
         if (needs_math)    sb_append(sb, "\t\"math\"\n");
+        if (needs_os)      sb_append(sb, "\t\"os\"\n");
+        if (needs_strconv) sb_append(sb, "\t\"strconv\"\n");
         if (needs_strings) sb_append(sb, "\t\"strings\"\n");
         sb_append(sb, ")\n\n");
+    }
+
+    /* printf's %g, as the interpreter prints floats. Go's default float
+       formatting prints every digit it needs to round-trip, so 1.0 / 3.0
+       came out 0.3333333333333333. */
+    sb_append(sb, "func _sub_fmt(d float64) string "
+                  "{ return strconv.FormatFloat(d, 'g', 6, 64) }\n\n");
+    sb_append(sb, "func _sub_str(v interface{}) string {\n");
+    sb_append(sb, "\tif d, ok := v.(float64); ok {\n\t\treturn _sub_fmt(d)\n\t}\n");
+    sb_append(sb, "\treturn fmt.Sprint(v)\n}\n\n");
+
+    if (needs_divmod) {
+        /* Go panics on integer division by zero; SUB reports a runtime error
+           and exits 70, as the interpreter does. */
+        sb_append(sb, "func _sub_die(msg string) {\n");
+        sb_append(sb, "\tfmt.Fprintln(os.Stderr, \"RuntimeError: \"+msg)\n");
+        sb_append(sb, "\tos.Exit(70)\n}\n\n");
+        sb_append(sb, "func _sub_idiv(a int64, b int64) int64 {\n");
+        sb_append(sb, "\tif b == 0 {\n\t\t_sub_die(\"division by zero\")\n\t}\n");
+        sb_append(sb, "\treturn a / b\n}\n\n");
+        sb_append(sb, "func _sub_mod(a int64, b int64) int64 {\n");
+        sb_append(sb, "\tif b == 0 {\n\t\t_sub_die(\"modulo by zero\")\n\t}\n");
+        sb_append(sb, "\treturn a %% b\n}\n\n");
+        sb_append(sb, "func _sub_fdiv(a float64, b float64) float64 {\n");
+        sb_append(sb, "\tif b == 0 {\n\t\t_sub_die(\"division by zero\")\n\t}\n");
+        sb_append(sb, "\treturn a / b\n}\n\n");
+        sb_append(sb, "func _sub_fmod(a float64, b float64) float64 {\n");
+        sb_append(sb, "\tif b == 0 {\n\t\t_sub_die(\"modulo by zero\")\n\t}\n");
+        sb_append(sb, "\treturn math.Mod(a, b)\n}\n\n");
     }
 
     char *embedded = extract_embedded_code(source, "go");

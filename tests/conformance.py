@@ -37,7 +37,8 @@ TIMEOUT = 30
 
 
 def have(tool):
-    return shutil.which(tool) is not None
+    """A target with no `need` has no external dependency at all."""
+    return tool is None or shutil.which(tool) is not None
 
 
 # target -> (generated file extension, how to build, how to run)
@@ -45,10 +46,20 @@ def have(tool):
 # `subc` is not a transpile target - it compiles straight to a native binary -
 # but it is a third implementation of the language and deserves the same
 # check, so it is handled specially in check() below.
+#
+# subc has two backends and they are checked separately:
+#   native   - subc emits x86-64 machine code and writes the ELF itself.
+#              Nothing else is installed or invoked, which is the whole point,
+#              so this target declares no toolchain requirement.
+#   native-c - subc emits C and hands it to the host compiler. Still the
+#              supported path on hosts the machine-code backend does not
+#              target, so it stays under test.
 NATIVE = "native"
+NATIVE_C = "native-c"
 
 TARGETS = {
-    NATIVE:       dict(ext=None,    need="gcc",     build=[], run=[]),
+    NATIVE:       dict(ext=None,    need=None,      build=[], run=[]),
+    NATIVE_C:     dict(ext=None,    need="gcc",     build=[], run=[]),
     "python":     dict(ext="py",    need="python3", build=[], run=["python3", "{src}"]),
     "javascript": dict(ext="js",    need="node",    build=[], run=["node", "{src}"]),
     "ruby":       dict(ext="rb",    need="ruby",    build=[], run=["ruby", "{src}"]),
@@ -92,26 +103,42 @@ def normalize(text):
     return [ln.rstrip() for ln in text.strip().splitlines()]
 
 
+def compare(got, rc, want, want_rc, err):
+    """Both what the program printed and how it exited have to match."""
+    if normalize(got) != normalize(want):
+        return "fail", "output differs\n    expected: %r\n    actual:   %r" % (
+            normalize(want)[:6], normalize(got)[:6])
+    if rc != want_rc:
+        return "fail", "exit status %s, interpreter exits %s%s" % (
+            rc, want_rc, (": " + err.strip()[:160]) if err.strip() else "")
+    return "pass", ""
+
+
 def check(case, target, spec, workdir):
     """Returns (status, detail). status is 'pass', 'fail', or 'skip'."""
     name = os.path.splitext(os.path.basename(case))[0]
 
-    rc, want, err = run([SUBI, case], ROOT)
-    if rc != 0:
-        return "skip", "interpreter failed: %s" % (err.strip() or rc)
+    # The interpreter defines both what a program prints and how it ends, so
+    # a program that stops with a runtime error is a legitimate case: every
+    # backend has to agree on the error too, not just on the output before
+    # it. Only a failure to start at all is a reason to skip.
+    want_rc, want, err = run([SUBI, case], ROOT)
+    if want_rc < 0:
+        return "skip", "interpreter did not run: %s" % (err.strip() or want_rc)
 
-    if target == NATIVE:
-        exe = os.path.join(workdir, name + "_native")
-        rc, out, err = run([SUBC, case, "-o", exe], workdir)
+    if target in (NATIVE, NATIVE_C):
+        flag = "--native" if target == NATIVE else "--via-c"
+        exe = os.path.join(workdir, name + "_" + target.replace("-", "_"))
+        rc, out, err = run([SUBC, case, flag, "-o", exe], workdir)
         if rc != 0:
+            blob = (err or "") + (out or "")
+            # The machine-code backend targets x86-64 Linux; elsewhere there
+            # is nothing to test rather than something to fail.
+            if target == NATIVE and "not available for this host" in blob:
+                return "skip", "machine-code backend does not target this host"
             return "fail", "subc failed: %s" % (err.strip() or out.strip())[:300]
         rc, got, err = run([exe + EXE], workdir)
-        if rc != 0:
-            return "fail", "runtime error: %s" % (err.strip() or rc)[:300]
-        if normalize(got) != normalize(want):
-            return "fail", "output differs\n    expected: %r\n    actual:   %r" % (
-                normalize(want)[:6], normalize(got)[:6])
-        return "pass", ""
+        return compare(got, rc, want, want_rc, err)
 
     rc, _, err = run([SUB, case, target], workdir)
     if rc != 0:
@@ -133,14 +160,7 @@ def check(case, target, spec, workdir):
     argv = [a.format(src=src, exe=exe + EXE if a == "{exe}" else exe)
             for a in spec["run"]]
     rc, got, err = run(argv, workdir)
-    if rc != 0:
-        return "fail", "runtime error: %s" % (err.strip() or rc)[:300]
-
-    if normalize(got) != normalize(want):
-        return "fail", "output differs\n    expected: %r\n    actual:   %r" % (
-            normalize(want)[:6], normalize(got)[:6])
-
-    return "pass", ""
+    return compare(got, rc, want, want_rc, err)
 
 
 def main():

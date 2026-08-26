@@ -81,8 +81,14 @@ static int builtin_return_type(const char *name, DataType *out) {
         {"length",    TYPE_INT},
 
         {"float",     TYPE_FLOAT},  {"sqrt",      TYPE_FLOAT},
-        {"abs",       TYPE_FLOAT},  {"round",     TYPE_FLOAT},
-        {"floor",     TYPE_FLOAT},  {"ceil",      TYPE_FLOAT},
+
+        /* floor/ceil/round hand back a whole number, not a double - the
+           interpreter returns an int and so must every backend, or a
+           statically typed target declares the wrong variable type and
+           prints 2.0 where the language says 2. abs/min/max depend on
+           their arguments and are handled in infer_expr_type instead. */
+        {"round",     TYPE_INT},    {"floor",     TYPE_INT},
+        {"ceil",      TYPE_INT},
 
         {"bool",      TYPE_BOOL},   {"contains",  TYPE_BOOL},
 
@@ -267,6 +273,17 @@ DataType infer_expr_type(ASTNode *expr) {
 
         case AST_CALL_EXPR: {
             DataType bt;
+            /* abs/min/max preserve the shape of what they are given: abs of
+               an int is an int, min of two ints is an int. */
+            if (expr->value && (strcmp(expr->value, "abs") == 0 ||
+                                strcmp(expr->value, "min") == 0 ||
+                                strcmp(expr->value, "max") == 0)) {
+                result = TYPE_UNKNOWN;
+                for (int i = 0; i < expr->child_count; i++)
+                    result = type_merge(result, infer_expr_type(expr->children[i]));
+                if (type_is_unresolved(result)) result = TYPE_INT;
+                break;
+            }
             if (expr->value && builtin_return_type(expr->value, &bt)) {
                 result = bt;
                 break;

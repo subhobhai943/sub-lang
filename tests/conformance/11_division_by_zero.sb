@@ -1,0 +1,6 @@
+# Dividing by zero is a runtime error in SUB: not an infinity, not a crash,
+# and not a quiet zero. The program stops with exit status 70, so this case
+# checks the exit status as much as the output.
+println("before")
+println(7 / 0)
+println("unreachable")

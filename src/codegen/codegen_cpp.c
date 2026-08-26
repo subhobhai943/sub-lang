@@ -34,8 +34,24 @@ static const CppBuiltin* cpp_builtin(const char *name) {
         {"abs","std::abs(",")"},         {"sqrt","std::sqrt(",")"},
         {"upper","sub_upper(",")"},      {"lower","sub_lower(",")"},
         {"trim","sub_trim(",")"},
-        {"floor","std::floor(",")"},     {"ceil","std::ceil(",")"},
+        /* SUB's floor/ceil/round return an integer, and its round() breaks
+           ties away from zero - which is what std::round already does. */
+        {"floor","(long long)std::floor(",")"},
+        {"ceil","(long long)std::ceil(",")"},
+        {"round","(long long)std::round(",")"},
         {NULL,NULL,NULL}
+    };
+    if (!name) return NULL;
+    for (int i = 0; table[i].sub_name; i++)
+        if (strcmp(table[i].sub_name, name) == 0) return &table[i];
+    return NULL;
+}
+
+/* Builtins taking more than one argument; the table above wraps a single
+   argument, which cannot express min(a, b). */
+static const CppBuiltin* cpp_builtin_multi(const char *name) {
+    static const CppBuiltin table[] = {
+        {"min","std::min(",")"}, {"max","std::max(",")"}, {NULL,NULL,NULL}
     };
     if (!name) return NULL;
     for (int i = 0; table[i].sub_name; i++)
@@ -236,6 +252,19 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
                 sb_append(sb, ")");
                 break;
             }
+            if (node->value &&
+                (strcmp(node->value, "/") == 0 || strcmp(node->value, "%") == 0)) {
+                int is_div = (strcmp(node->value, "/") == 0);
+                int is_flt = (infer_expr_type(node->left)  == TYPE_FLOAT ||
+                              infer_expr_type(node->right) == TYPE_FLOAT);
+                sb_append(sb, "%s(", is_flt ? (is_div ? "sub_fdiv" : "sub_fmod")
+                                            : (is_div ? "sub_idiv" : "sub_mod"));
+                generate_expr_cpp(sb, node->left);
+                sb_append(sb, ", ");
+                generate_expr_cpp(sb, node->right);
+                sb_append(sb, ")");
+                break;
+            }
             /* C++ has no ** operator; emitting it verbatim parsed as a double
                dereference and failed to compile. */
             if (node->value && strcmp(node->value, "**") == 0) {
@@ -285,6 +314,16 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
                     }
                     sb_append(sb, "%s", cb->prefix);
                     generate_expr_cpp(sb, node->children[0]);
+                    sb_append(sb, "%s", cb->suffix);
+                    break;
+                }
+                cb = cpp_builtin_multi(node->value);
+                if (cb && node->child_count >= 2) {
+                    sb_append(sb, "%s", cb->prefix);
+                    for (int i = 0; i < node->child_count; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_cpp(sb, node->children[i]);
+                    }
                     sb_append(sb, "%s", cb->suffix);
                     break;
                 }
@@ -667,6 +706,7 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
     sb_append(sb, "#include <cmath>\n");
     sb_append(sb, "#include <algorithm>\n");
     sb_append(sb, "#include <cctype>\n");
+    sb_append(sb, "#include <cstdlib>\n");
     if (ast_needs_string(ast)) {
         sb_append(sb, "#include <string>\n");
     }
@@ -677,6 +717,27 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
         sb_append(sb, "#include <map>\n");
     }
     sb_append(sb, "\n");
+
+    /* Integer division by zero is undefined behaviour in C++ and lands as
+       SIGFPE in practice. SUB reports the interpreter's runtime error and
+       exits 70, so every backend ends a divide by zero the same way. */
+    sb_append(sb, "[[noreturn]] static void sub_die(const char *msg) {\n");
+    sb_append(sb, "    std::cerr << \"RuntimeError: \" << msg << std::endl;\n");
+    sb_append(sb, "    std::exit(70);\n}\n");
+    sb_append(sb, "static long long sub_idiv(long long a, long long b) {\n");
+    sb_append(sb, "    if (b == 0) sub_die(\"division by zero\");\n");
+    sb_append(sb, "    return a / b;\n}\n");
+    sb_append(sb, "static long long sub_mod(long long a, long long b) {\n");
+    sb_append(sb, "    if (b == 0) sub_die(\"modulo by zero\");\n");
+    sb_append(sb, "    return a %% b;\n}\n");
+    /* `%` is not defined for doubles in C++ at all, so a float remainder
+       has to go through std::fmod or the program will not compile. */
+    sb_append(sb, "static double sub_fdiv(double a, double b) {\n");
+    sb_append(sb, "    if (b == 0) sub_die(\"division by zero\");\n");
+    sb_append(sb, "    return a / b;\n}\n");
+    sb_append(sb, "static double sub_fmod(double a, double b) {\n");
+    sb_append(sb, "    if (b == 0) sub_die(\"modulo by zero\");\n");
+    sb_append(sb, "    return std::fmod(a, b);\n}\n\n");
 
     /* Two-pass approach: functions first, then main() with top-level statements */
     StringBuilder *main_sb = sb_create();

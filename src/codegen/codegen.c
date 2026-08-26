@@ -387,10 +387,17 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, ", ");
                     generate_expression(sb, node->right);
                     sb_append(sb, ")");
-                } else if (node->value && strcmp(node->value, "%") == 0 &&
-                           ((node->left && (node->left->data_type == TYPE_FLOAT || (node->left->value && strchr(node->left->value, '.')))) ||
-                            (node->right && (node->right->data_type == TYPE_FLOAT || (node->right->value && strchr(node->right->value, '.')))))) {
-                    sb_append(sb, "fmod(");
+                } else if (node->value &&
+                           (strcmp(node->value, "/") == 0 || strcmp(node->value, "%") == 0)) {
+                    /* Division and remainder go through helpers so that
+                       integer division truncates, float remainder follows
+                       fmod, and dividing by zero reports the interpreter's
+                       runtime error instead of raising SIGFPE. */
+                    int is_div = (strcmp(node->value, "/") == 0);
+                    int is_flt = (infer_expr_type(node->left)  == TYPE_FLOAT ||
+                                  infer_expr_type(node->right) == TYPE_FLOAT);
+                    sb_append(sb, "%s(", is_flt ? (is_div ? "sub_fdiv" : "sub_fmod")
+                                                : (is_div ? "sub_idiv" : "sub_mod"));
                     generate_expression(sb, node->left);
                     sb_append(sb, ", ");
                     generate_expression(sb, node->right);
@@ -633,13 +640,18 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                                 else if (arg->data_type == TYPE_FLOAT) fmt = "%g";
                                 else if (arg->data_type == TYPE_STRING) fmt = "%s";
                             }
-                            /* The ad-hoc rules above predate shared inference;
-                               consult it for anything they left as the default. */
-                            if (strcmp(fmt, "%ld") == 0) {
+                            /* The ad-hoc rules above predate shared
+                               inference. Where inference has a concrete
+                               answer it wins: the argument is cast to the
+                               type inference reports, so choosing the format
+                               any other way lets the two disagree - which is
+                               how min(3, 9) came out as 1.03365e-317. */
+                            {
                                 DataType it = infer_expr_type(arg);
                                 if (it == TYPE_STRING)     fmt = "%s";
                                 else if (it == TYPE_FLOAT) fmt = "%g";
                                 else if (it == TYPE_BOOL)  fmt = "%s";
+                                else if (it == TYPE_INT)   fmt = "%ld";
                             }
                             /* SUB spells booleans true/false, so C must print
                                the words rather than 1/0 - otherwise the same
@@ -731,8 +743,18 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     else if (strcmp(fn, "floor") == 0) sb_append(sb, "(long)floor(");
                     else if (strcmp(fn, "ceil") == 0) sb_append(sb, "(long)ceil(");
                     else if (strcmp(fn, "round") == 0) sb_append(sb, "(long)round(");
-                    else if (strcmp(fn, "min") == 0) sb_append(sb, "fmin(");
-                    else if (strcmp(fn, "max") == 0) sb_append(sb, "fmax(");
+                    else if (strcmp(fn, "min") == 0 || strcmp(fn, "max") == 0) {
+                        /* fmin/fmax are double-only: using them for two
+                           integers rounds anything past 2^53 and makes the
+                           result a double, which is not what SUB returns. */
+                        int both_int = (node->child_count >= 2 &&
+                            infer_expr_type(node->children[0]) == TYPE_INT &&
+                            infer_expr_type(node->children[1]) == TYPE_INT);
+                        if (both_int)
+                            sb_append(sb, fn[1] == 'i' ? "sub_min_i(" : "sub_max_i(");
+                        else
+                            sb_append(sb, fn[1] == 'i' ? "fmin(" : "fmax(");
+                    }
                     else if (strcmp(fn, "to_string") == 0) {
                         if (node->child_count > 0) {
                             if (node->children[0]->data_type == TYPE_FLOAT) sb_append(sb, "sub_str_from_double(");
@@ -1333,6 +1355,25 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "}\n\n");
     
     sb_append(sb, "/* String Methods */\n");
+    /* Integer division by zero is undefined behaviour in C and arrives as
+       SIGFPE. SUB reports the interpreter's runtime error and exits 70. */
+    sb_append(sb, "static void sub_die(const char *msg) {\n");
+    sb_append(sb, "    fprintf(stderr, \"RuntimeError: %%s\\n\", msg);\n");
+    sb_append(sb, "    exit(70);\n}\n");
+    sb_append(sb, "static inline long long sub_idiv(long long a, long long b) {\n");
+    sb_append(sb, "    if (b == 0) sub_die(\"division by zero\");\n");
+    sb_append(sb, "    return a / b;\n}\n");
+    sb_append(sb, "static inline long long sub_mod(long long a, long long b) {\n");
+    sb_append(sb, "    if (b == 0) sub_die(\"modulo by zero\");\n");
+    sb_append(sb, "    return a %% b;\n}\n");
+    sb_append(sb, "static inline double sub_fdiv(double a, double b) {\n");
+    sb_append(sb, "    if (b == 0) sub_die(\"division by zero\");\n");
+    sb_append(sb, "    return a / b;\n}\n");
+    sb_append(sb, "static inline double sub_fmod(double a, double b) {\n");
+    sb_append(sb, "    if (b == 0) sub_die(\"modulo by zero\");\n");
+    sb_append(sb, "    return fmod(a, b);\n}\n");
+    sb_append(sb, "static inline long long sub_min_i(long long a, long long b) { return a < b ? a : b; }\n");
+    sb_append(sb, "static inline long long sub_max_i(long long a, long long b) { return a > b ? a : b; }\n");
     sb_append(sb, "static inline long sub_str_len(const char *s) { return s ? (long)strlen(s) : 0; }\n");
     sb_append(sb, "static inline char* sub_str_upper(const char *s) {\n");
     sb_append(sb, "    if (!s) return sub_strdup(\"\");\n");

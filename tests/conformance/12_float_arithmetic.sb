@@ -1,0 +1,16 @@
+# Float division and remainder. The remainder follows C's fmod - it keeps the
+# sign of the left operand - rather than flooring the way Python and Ruby do
+# natively.
+println(9.0 / 2.0)
+println(-9.0 / 2.0)
+println(7.5 % 2.0)
+println(-7.5 % 3.0)
+println(7.5 % -3.0)
+println(1.0 / 3.0)
+
+let a = 10
+let b = 4
+println(a / b)
+println(float(a) / float(b))
+println(a % b)
+println(-a % b)

@@ -1,0 +1,29 @@
+# break, continue, nested loops and range(start, end)
+let total = 0
+let i = 0
+while i < 20 {
+    i = i + 1
+    if i % 3 == 0 {
+        continue
+    }
+    if i > 12 {
+        break
+    }
+    total = total + i
+}
+println(total)
+
+for a in range(1, 4) {
+    for b in range(2) {
+        println(str(a) + ":" + str(b))
+    }
+}
+
+let n = 0
+while true {
+    n = n + 1
+    if n == 5 {
+        break
+    }
+}
+println(n)

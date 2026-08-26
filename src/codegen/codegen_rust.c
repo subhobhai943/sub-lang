@@ -30,14 +30,29 @@ typedef struct { const char *sub_name, *prefix, *suffix; } RustBuiltin;
 
 static const RustBuiltin* rust_builtin(const char *name) {
     static const RustBuiltin table[] = {
-        {"str","(",").to_string()"},     {"to_string","(",").to_string()"},
+        /* str() of a float has to use the same %g shape as printing it. */
+        {"str","_sub_str(",")"},         {"to_string","_sub_str(",")"},
         {"int","(",") as i64"},          {"float","(",") as f64"},
         {"len","(",").len() as i64"},    {"length","(",").len() as i64"},
         {"abs","((",") as f64).abs()"},  {"sqrt","((",") as f64).sqrt()"},
-        {"floor","((",") as f64).floor()"}, {"ceil","((",") as f64).ceil()"},
+        {"floor","_sub_floor(",")"},     {"ceil","_sub_ceil(",")"},
+        {"round","_sub_round(",")"},
         {"upper","(",").to_uppercase()"},{"lower","(",").to_lowercase()"},
         {"trim","(",").trim().to_string()"},
         {NULL,NULL,NULL}
+    };
+    if (!name) return NULL;
+    for (int i = 0; table[i].sub_name; i++)
+        if (strcmp(table[i].sub_name, name) == 0) return &table[i];
+    return NULL;
+}
+
+/* Builtins taking more than one argument. Rust spells the numeric minimum
+   as a method on floats and a free function on integers, so both go through
+   one generic helper rather than being spelled per type at every call. */
+static const RustBuiltin* rust_builtin_multi(const char *name) {
+    static const RustBuiltin table[] = {
+        {"min","_sub_min(",")"}, {"max","_sub_max(",")"}, {NULL,NULL,NULL}
     };
     if (!name) return NULL;
     for (int i = 0; table[i].sub_name; i++)
@@ -173,6 +188,18 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     
     switch (node->type) {
+        /*  A dropped `break` turns a loop that terminates into one
+           that does not, so this must never fall through to the default. */
+        case AST_BREAK_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "break;\n");
+            break;
+
+        case AST_CONTINUE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "continue;\n");
+            break;
+
         case AST_PROGRAM:
             for (ASTNode *s = block_first(node); s; s = s->next) {
                 generate_node_rust(sb, s, indent);
@@ -345,6 +372,23 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                 sb_append(sb, ").is_nan()");
                 break;
             }
+            /* Integer / and % go through helpers so that dividing by zero
+               reports the interpreter's runtime error and exit status
+               instead of panicking with Rust's own. */
+            if (node->value &&
+                (strcmp(node->value, "/") == 0 || strcmp(node->value, "%") == 0)) {
+                int is_div = (strcmp(node->value, "/") == 0);
+                int is_flt = (infer_expr_type(node->left)  == TYPE_FLOAT ||
+                              infer_expr_type(node->right) == TYPE_FLOAT);
+                const char *ty = is_flt ? "f64" : "i64";
+                sb_append(sb, "%s((", is_flt ? (is_div ? "_sub_fdiv" : "_sub_fmod")
+                                             : (is_div ? "_sub_idiv" : "_sub_mod"));
+                generate_expr_rust(sb, node->left);
+                sb_append(sb, ") as %s, (", ty);
+                generate_expr_rust(sb, node->right);
+                sb_append(sb, ") as %s)", ty);
+                break;
+            }
             /* Rust has no ** operator, and integer literals need an explicit
                type before a method like .pow()/.abs() can be resolved. */
             if (node->value && strcmp(node->value, "**") == 0) {
@@ -408,6 +452,16 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
             break;
         case AST_CALL_EXPR:
             {
+                if (node->value &&
+                    (strcmp(node->value, "str") == 0 ||
+                     strcmp(node->value, "to_string") == 0) &&
+                    node->child_count == 1 &&
+                    infer_expr_type(node->children[0]) == TYPE_FLOAT) {
+                    sb_append(sb, "_sub_fmt(");
+                    generate_expr_rust(sb, node->children[0]);
+                    sb_append(sb, ")");
+                    break;
+                }
                 const RustBuiltin *rb = rust_builtin(node->value);
                 if (rb && node->child_count == 1) {
                     sb_append(sb, "%s", rb->prefix);
@@ -415,10 +469,25 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, "%s", rb->suffix);
                     break;
                 }
+                rb = rust_builtin_multi(node->value);
+                if (rb && node->child_count >= 2) {
+                    sb_append(sb, "%s", rb->prefix);
+                    for (int i = 0; i < node->child_count; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_rust(sb, node->children[i]);
+                    }
+                    sb_append(sb, "%s", rb->suffix);
+                    break;
+                }
             }
             if (is_print_builtin(node->value)) {
                 sb_append(sb, "println!(\"{}\", ");
-                if (node->child_count > 0) generate_expr_rust(sb, node->children[0]);
+                if (node->child_count > 0) {
+                    int flt = (infer_expr_type(node->children[0]) == TYPE_FLOAT);
+                    if (flt) sb_append(sb, "_sub_fmt(");
+                    generate_expr_rust(sb, node->children[0]);
+                    if (flt) sb_append(sb, ")");
+                }
                 sb_append(sb, ")");
             } else {
                 if (node->value) {
@@ -477,6 +546,62 @@ char* codegen_rust(ASTNode *ast, const char *source) {
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     sb_append(sb, "// Generated by SUB Language Compiler (Rust Target)\n\n");
+
+    /* SUB's floor/ceil/round yield an integer, and round() breaks ties away
+       from zero - which is what f64::round already does. min/max are generic
+       so one helper serves both the integer and the floating-point call. */
+    sb_append(sb, "#[allow(dead_code)] fn _sub_str<T: std::fmt::Display>(v: T) -> String "
+                  "{ v.to_string() }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_floor(x: f64) -> i64 "
+                  "{ x.floor() as i64 }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_ceil(x: f64) -> i64 "
+                  "{ x.ceil() as i64 }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_round(x: f64) -> i64 "
+                  "{ x.round() as i64 }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_min<T: PartialOrd>(a: T, b: T) -> T "
+                  "{ if a < b { a } else { b } }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_max<T: PartialOrd>(a: T, b: T) -> T "
+                  "{ if a > b { a } else { b } }\n");
+
+    /* Rust panics on integer division by zero, with a message and exit
+       status of its own. SUB reports the interpreter's error and exits 70,
+       so every backend ends the same way. */
+    sb_append(sb, "#[allow(dead_code)] fn _sub_die(msg: &str) -> ! "
+                  "{ eprintln!(\"RuntimeError: {}\", msg); std::process::exit(70) }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_idiv(a: i64, b: i64) -> i64 "
+                  "{ if b == 0 { _sub_die(\"division by zero\") } a / b }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_mod(a: i64, b: i64) -> i64 "
+                  "{ if b == 0 { _sub_die(\"modulo by zero\") } a %% b }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_fdiv(a: f64, b: f64) -> f64 "
+                  "{ if b == 0.0 { _sub_die(\"division by zero\") } a / b }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_fmod(a: f64, b: f64) -> f64 "
+                  "{ if b == 0.0 { _sub_die(\"modulo by zero\") } a %% b }\n");
+
+    /* printf's %g, as the interpreter prints floats: six significant digits,
+       trailing zeros dropped, exponent form outside 1e-4 .. 1e+6. Rust's
+       Display for f64 prints every digit needed to round-trip, so 1.0 / 3.0
+       came out 0.3333333333333333. */
+    sb_append(sb, "#[allow(dead_code)] fn _sub_fmt(x: f64) -> String {\n");
+    sb_append(sb, "    if x.is_nan() { return \"nan\".to_string() }\n");
+    sb_append(sb, "    if x.is_infinite() { return (if x < 0.0 { \"-inf\" } "
+                  "else { \"inf\" }).to_string() }\n");
+    sb_append(sb, "    if x == 0.0 { return (if x.is_sign_negative() { \"-0\" } "
+                  "else { \"0\" }).to_string() }\n");
+    sb_append(sb, "    let mut e = x.abs().log10().floor() as i32;\n");
+    sb_append(sb, "    if x.abs() / 10f64.powi(e) >= 10.0 { e += 1 }\n");
+    sb_append(sb, "    if x.abs() / 10f64.powi(e) < 1.0 { e -= 1 }\n");
+    sb_append(sb, "    let strip = |s: String| -> String {\n");
+    sb_append(sb, "        if s.contains('.') {\n");
+    sb_append(sb, "            let t = s.trim_end_matches('0').to_string();\n");
+    sb_append(sb, "            return t.trim_end_matches('.').to_string();\n");
+    sb_append(sb, "        }\n        s\n    };\n");
+    sb_append(sb, "    if e < -4 || e >= 6 {\n");
+    sb_append(sb, "        let m = strip(format!(\"{:.5}\", x / 10f64.powi(e)));\n");
+    sb_append(sb, "        return format!(\"{}e{}{:02}\", m, "
+                  "if e < 0 { \"-\" } else { \"+\" }, e.abs());\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    let d = if 5 - e > 0 { (5 - e) as usize } else { 0 };\n");
+    sb_append(sb, "    strip(format!(\"{:.*}\", d, x))\n}\n\n");
     if (ast_contains_object(ast)) {
         sb_append(sb, "use std::collections::HashMap;\n\n");
     }

@@ -563,13 +563,28 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                     node->data_type = TYPE_ARRAY;
                     return TYPE_ARRAY;
                 }
-                /* Math built-ins returning float */
-                if (fn_name && (strcmp(fn_name, "abs") == 0 || strcmp(fn_name, "sqrt") == 0 ||
-                                strcmp(fn_name, "min") == 0 || strcmp(fn_name, "max") == 0)) {
+                /* sqrt always widens to a float. */
+                if (fn_name && strcmp(fn_name, "sqrt") == 0) {
                     for (int i = 0; i < node->child_count; i++)
                         check_expression_type(node->children[i], table);
                     node->data_type = TYPE_FLOAT;
                     return TYPE_FLOAT;
+                }
+                /* abs/min/max keep the shape of their arguments: abs of an
+                   int is an int. Typing them as float made every backend
+                   declare `let m = min(3, 9)` as a double. */
+                if (fn_name && (strcmp(fn_name, "abs") == 0 ||
+                                strcmp(fn_name, "min") == 0 ||
+                                strcmp(fn_name, "max") == 0)) {
+                    DataType t = TYPE_UNKNOWN;
+                    for (int i = 0; i < node->child_count; i++) {
+                        DataType a = check_expression_type(node->children[i], table);
+                        if (a == TYPE_FLOAT || t == TYPE_FLOAT) t = TYPE_FLOAT;
+                        else if (t == TYPE_UNKNOWN) t = a;
+                    }
+                    if (t != TYPE_FLOAT) t = TYPE_INT;
+                    node->data_type = t;
+                    return t;
                 }
                 /* Math built-ins returning int */
                 if (fn_name && (strcmp(fn_name, "floor") == 0 || strcmp(fn_name, "ceil") == 0 ||
