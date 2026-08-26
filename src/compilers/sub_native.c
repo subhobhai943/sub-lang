@@ -8,6 +8,7 @@
 #include "sub_compiler.h"
 #include "codegen_cpp.h"
 #include "codegen_infer.h"
+#include "native.h"
 #include "logo.h"
 #include "windows_compat.h"
 #include <stdio.h>
@@ -42,75 +43,114 @@ void print_usage_native(const char *prog_name) {
     printf("Usage: %s <input.sb> [options]\n\n", prog_name);
     printf("Output Options:\n");
     printf("  -o <file>          Output filename (default: derived from input)\n\n");
-    printf("Optimization:\n");
-    printf("  -O0                No optimization (fast compile)\n");
-    printf("  -O1                Basic optimization\n");
-    printf("  -O2                Standard optimization (default)\n");
-    printf("  -O3                Aggressive optimization\n\n");
+    printf("Backend:\n");
+    printf("  --native           Emit machine code directly (no C compiler).\n");
+    printf("                     Fail rather than fall back.\n");
+    printf("  --via-c            Generate C and build it with $CC (default: gcc).\n");
+    printf("                     Default is --native where supported, --via-c otherwise.\n\n");
+    printf("Optimization (--via-c only):\n");
+    printf("  -O0 -O1 -O2 -O3    Passed through to the C compiler\n\n");
     printf("Debug:\n");
     printf("  -v, --verbose      Verbose output\n\n");
     printf("Examples:\n");
     printf("  %s hello.sb                  # Compile to ./hello\n", prog_name);
-    printf("  %s hello.sb -O3              # Max optimization\n", prog_name);
+    printf("  %s hello.sb --native         # Refuse to fall back to a C compiler\n", prog_name);
     printf("  %s hello.sb -o myapp         # Custom output name\n\n", prog_name);
 }
 
-int compile_to_native(const char *input_file, const char *output_name,
-                      bool verbose, int opt_level) {
-    /* ---- Phase 1: Read source ---- */
+/* Where the two backends agree: read the file, lex, parse, check.
+   Returns the AST, or NULL after reporting why not. Both `tokens` and
+   `source` are handed back so the caller can free them in the right order -
+   AST nodes borrow strings from the token array. */
+static ASTNode* front_end(const char *input_file, bool verbose,
+                          Token **tokens_out, int *ntok_out, char **source_out) {
     FILE *f = fopen(input_file, "rb");
-    if (!f) { fprintf(stderr, "Cannot open: %s\n", input_file); return 1; }
+    if (!f) { fprintf(stderr, "Cannot open: %s\n", input_file); return NULL; }
     if (fseek(f, 0, SEEK_END) != 0) {
         fprintf(stderr, "Error: Failed to seek file %s\n", input_file);
-        fclose(f); return 1;
+        fclose(f); return NULL;
     }
     long sz = ftell(f);
     if (sz < 0) {
         fprintf(stderr, "Error: Failed to determine file size for %s\n", input_file);
-        fclose(f); return 1;
+        fclose(f); return NULL;
     }
     if (fseek(f, 0, SEEK_SET) != 0) {
         fprintf(stderr, "Error: Failed to rewind file %s\n", input_file);
-        fclose(f); return 1;
+        fclose(f); return NULL;
     }
     char *source = malloc((size_t)sz + 1);
-    if (!source) { fprintf(stderr, "Error: Out of memory reading %s\n", input_file); fclose(f); return 1; }
+    if (!source) {
+        fprintf(stderr, "Error: Out of memory reading %s\n", input_file);
+        fclose(f); return NULL;
+    }
     size_t read_size = fread(source, 1, (size_t)sz, f);
     fclose(f);
     if (read_size != (size_t)sz) {
         fprintf(stderr, "Error: Failed to read complete file %s\n", input_file);
-        free(source); return 1;
+        free(source); return NULL;
     }
     source[read_size] = '\0';
 
-    /* ---- Phase 2: Lex ---- */
     if (verbose) printf("[1/4] Lexing...\n");
     int ntok;
     Token *tokens = lexer_tokenize(source, &ntok);
-    if (!tokens) { free(source); return 1; }
+    if (!tokens) { free(source); return NULL; }
 
-    /* ---- Phase 3: Parse ---- */
     if (verbose) printf("[2/4] Parsing...\n");
     ASTNode *ast = parser_parse(tokens, ntok);
     if (!ast) {
         fprintf(stderr, "Parsing failed.\n");
         lexer_free_tokens(tokens, ntok); free(source);
-        return 1;
+        return NULL;
     }
 
-    /* ---- Phase 4: Semantic ---- */
     if (verbose) printf("[3/4] Semantic analysis...\n");
     if (!semantic_analyze(ast)) {
         fprintf(stderr, "Semantic analysis failed.\n");
         parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
-        return 1;
+        return NULL;
     }
 
-    /* ---- Phase 5: Generate C, write temp file ---- */
-    if (verbose) printf("[4/4] Generating binary via gcc...\n");
     infer_function_signatures(ast);
+    *tokens_out = tokens;
+    *ntok_out   = ntok;
+    *source_out = source;
+    return ast;
+}
+
+/* Backend selection. `native` means "emit machine code from this process";
+   `via_c` means "write C and hand it to a C compiler". */
+typedef enum { BACKEND_AUTO, BACKEND_NATIVE, BACKEND_VIA_C } Backend;
+
+/* Append the platform's executable suffix unless it is already there. */
+static void with_exe_suffix(const char *name, char *out, size_t n) {
+    const char *ext = sub_host_exe_suffix();
+    size_t name_len = strlen(name), ext_len = strlen(ext);
+    int has_ext = (ext_len > 0 && name_len >= ext_len &&
+                   strcmp(name + name_len - ext_len, ext) == 0);
+    snprintf(out, n, "%s%s", name, has_ext ? "" : ext);
+}
+
+/* Reject anything that would let an output name reach the shell. Only the
+   --via-c path runs a command, but the check is cheap and applies to both. */
+static int output_name_is_safe(const char *name) {
+    for (const char *p = name; *p; p++) {
+        if (!isalnum((unsigned char)*p) &&
+            *p != '_' && *p != '-' && *p != '.' && *p != '/') {
+            fprintf(stderr, "Error: Output name contains unsafe characters: "
+                            "'%c'. Only alphanumeric, underscore, dash, dot "
+                            "and slash are allowed.\n", *p);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int build_via_c(ASTNode *ast, const char *out_with_ext,
+                       bool verbose, int opt_level) {
+    if (verbose) printf("[4/4] Generating C and invoking the host compiler...\n");
     char *c_code = codegen_generate(ast, sub_host_platform());
-    parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
     if (!c_code) { fprintf(stderr, "Code generation failed.\n"); return 1; }
 
     char tmp_c[512];
@@ -123,41 +163,72 @@ int compile_to_native(const char *input_file, const char *output_name,
     if (!cf) { free(c_code); fprintf(stderr, "Cannot write temp file.\n"); return 1; }
     fputs(c_code, cf); fclose(cf); free(c_code);
 
-    /* ---- Phase 6: Compile with gcc ---- */
     const char *opt = opt_level >= 2 ? "-O2" : opt_level == 1 ? "-O1" : "-O0";
-    char cmd[2048];
-    /* Validate output_name contains no shell metacharacters to prevent command injection */
-    for (const char *p = output_name; *p; p++) {
-        if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-' && *p != '.' && *p != '/') {
-            fprintf(stderr, "Error: Output name contains unsafe characters: '%c'. Only alphanumeric, underscore, dash, dot, and slash are allowed.\n", *p);
-            remove(tmp_c);
-            return 1;
-        }
-    }
-    /* Windows executables need the .exe suffix, and the C compiler is gcc
-       only by convention - honour $CC so clang-only machines work too. */
     const char *cc  = sub_host_cc();
-    const char *ext = sub_host_exe_suffix();
-    char out_with_ext[512];
-    size_t name_len = strlen(output_name);
-    size_t ext_len  = strlen(ext);
-    int has_ext = (ext_len > 0 && name_len >= ext_len &&
-                   strcmp(output_name + name_len - ext_len, ext) == 0);
-    snprintf(out_with_ext, sizeof(out_with_ext), "%s%s",
-             output_name, has_ext ? "" : ext);
-
+    char cmd[2048];
     snprintf(cmd, sizeof(cmd), "%s %s -o \"%s\" \"%s\" -lm",
              cc, opt, out_with_ext, tmp_c);
     int ret = system(cmd);
     remove(tmp_c);
-
     if (ret != 0) {
         fprintf(stderr, "Compilation failed. Make sure %s is installed "
                         "(set CC to choose a different compiler).\n", cc);
         return 1;
     }
-    printf("\u2705 Compiled: %s\n", out_with_ext);
     return 0;
+}
+
+int compile_to_native(const char *input_file, const char *output_name,
+                      bool verbose, int opt_level, Backend backend) {
+    if (!output_name_is_safe(output_name)) return 1;
+
+    Token *tokens = NULL; int ntok = 0; char *source = NULL;
+    ASTNode *ast = front_end(input_file, verbose, &tokens, &ntok, &source);
+    if (!ast) return 1;
+
+    char out_with_ext[512];
+    with_exe_suffix(output_name, out_with_ext, sizeof(out_with_ext));
+
+    int rc = 1;
+    int used_native = 0;
+
+    if (SUB_NATIVE_BACKEND && backend != BACKEND_VIA_C) {
+        if (verbose) printf("[4/4] Emitting machine code...\n");
+        char why[256] = "";
+        if (native_compile(ast, out_with_ext, why, sizeof(why)) == 0) {
+            rc = 0;
+            used_native = 1;
+        } else if (backend == BACKEND_NATIVE) {
+            /* The message already names the backend, so do not prefix it. */
+            fprintf(stderr, "%s\n", why);
+            fprintf(stderr, "Drop --native to build this program through the "
+                            "C backend instead.\n");
+            parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
+            return 1;
+        } else {
+            /* Falling back silently would make it impossible to tell whether
+               a build needed a C compiler, so say so. */
+            fprintf(stderr, "Note: %s\n", why);
+            fprintf(stderr, "Note: falling back to the C backend (%s).\n",
+                    sub_host_cc());
+        }
+    } else if (backend == BACKEND_NATIVE) {
+        fprintf(stderr, "The native backend is not available for this host "
+                        "(it targets x86-64 Linux).\n");
+        parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
+        return 1;
+    }
+
+    if (rc != 0) rc = build_via_c(ast, out_with_ext, verbose, opt_level);
+
+    parser_free_ast(ast);
+    lexer_free_tokens(tokens, ntok);
+    free(source);
+
+    if (rc == 0)
+        printf("\u2705 Compiled: %s%s\n", out_with_ext,
+               used_native ? "  (native backend, no C compiler used)" : "");
+    return rc;
 }
 
 /* Target type classification */
@@ -436,6 +507,7 @@ int main(int argc, char *argv[]) {
     const char *user_out = NULL;
     bool verbose = false;
     int opt_level = 2;
+    Backend backend = BACKEND_AUTO;
     
     // Parse command line options
     for (int i = 2; i < argc; i++) {
@@ -451,6 +523,13 @@ int main(int argc, char *argv[]) {
             opt_level = 2;
         } else if (strcmp(argv[i], "-O3") == 0) {
             opt_level = 3;
+        } else if (strcmp(argv[i], "--native") == 0) {
+            backend = BACKEND_NATIVE;
+        } else if (strcmp(argv[i], "--via-c") == 0) {
+            backend = BACKEND_VIA_C;
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            return 1;
         }
     }
 
@@ -459,9 +538,12 @@ int main(int argc, char *argv[]) {
 
     if (verbose) {
         printf("[Input]   %s\n", input_file);
-        printf("[Mode]    Native via gcc (-O%d)\n", opt_level);
+        printf("[Mode]    %s\n",
+               backend == BACKEND_VIA_C ? "C backend + host compiler" :
+               SUB_NATIVE_BACKEND       ? "direct machine code" :
+                                          "C backend + host compiler");
         printf("[Output]  %s\n\n", output_name);
     }
     
-    return compile_to_native(input_file, output_name, verbose, opt_level);
+    return compile_to_native(input_file, output_name, verbose, opt_level, backend);
 }

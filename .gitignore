@@ -99,3 +99,6 @@ install_manifest.txt
 node_modules/
 __pycache__/
 *.pyc
+
+# gcc -MMD dependency files
+*.d

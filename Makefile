@@ -1,7 +1,7 @@
 # SUB Language Compiler Makefile
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c11 -O2 -Isrc/include -Isrc/core -Isrc/codegen -I.
+CFLAGS = -Wall -Wextra -std=c11 -O2 -Isrc/include -Isrc/core -Isrc/codegen -Isrc/native -I.
 LDFLAGS = -lm
 
 # Source files for the main compiler/transpiler (sub)
@@ -9,8 +9,10 @@ COMPILER_SRC = src/compilers/sub.c src/core/interpreter.c src/core/lexer.c src/c
 COMPILER_OBJ = $(COMPILER_SRC:.c=.o)
 COMPILER_TARGET = sub
 
-# Source files for the native compiler (subc) - now uses C backend + gcc
-NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
+# Source files for the native compiler (subc). src/native/ is the built-in
+# x86-64 backend: it emits machine code and writes the ELF itself, so a
+# compiled SUB program needs no C toolchain on the machine that runs subc.
+NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/native/x64_emit.c src/native/x64_runtime.c src/native/x64_codegen.c src/native/elf64.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
 NATIVE_COMPILER_OBJ = $(NATIVE_COMPILER_SRC:.c=.o)
 NATIVE_COMPILER_TARGET = subc
 
@@ -63,13 +65,21 @@ interpreter: $(INTERP_TARGET)
 $(INTERP_TARGET): $(INTERP_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+# -MMD -MP records which headers each object used, so editing a header
+# rebuilds what depends on it. Without this a change to an enum in a shared
+# header left already-built objects using the old numbering, and the two
+# halves of the program disagreed about what the values meant.
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+DEPS = $(COMPILER_OBJ:.o=.d) $(NATIVE_COMPILER_OBJ:.o=.d) $(INTERP_OBJ:.o=.d)
+-include $(DEPS)
 
 # Clean build artifacts
 clean:
 	@echo "Cleaning build artifacts..."
 	@rm -f $(COMPILER_OBJ) $(NATIVE_COMPILER_OBJ) $(INTERP_OBJ)
+	@rm -f $(COMPILER_OBJ:.o=.d) $(NATIVE_COMPILER_OBJ:.o=.d) $(INTERP_OBJ:.o=.d)
 	@rm -f $(COMPILER_TARGET) $(NATIVE_COMPILER_TARGET) $(INTERP_TARGET)
 	@rm -f sub.exe subc.exe subi.exe
 	@rm -f *.o
