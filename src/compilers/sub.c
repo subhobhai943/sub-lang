@@ -256,10 +256,15 @@ int main(int argc, char *argv[]) {
     sub_console_init_utf8();
     printf(SUB_LOGO);
 
-    // Check for --help anywhere in argv
+    // Check for --help / --version anywhere in argv. Without the version
+    // check, `sub --version` was treated as an input filename.
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_help(argv[0]);
+            return 0;
+        }
+        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+            printf("sub %s\n", SUB_VERSION);
             return 0;
         }
     }

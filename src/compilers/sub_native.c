@@ -311,7 +311,18 @@ int main(int argc, char *argv[]) {
         print_usage_native(argv[0]);
         return 1;
     }
-    
+
+    /* Asking for help is not an error, so it exits 0 - `subc --help` used to
+       report failure, which makes it unusable as a CI liveness check. */
+    if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
+        print_usage_native(argv[0]);
+        return 0;
+    }
+    if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
+        printf("subc %s\n", SUB_VERSION);
+        return 0;
+    }
+
     const char *input_file = argv[1];
 
     if (argc > 2 && argv[2][0] != '-') {

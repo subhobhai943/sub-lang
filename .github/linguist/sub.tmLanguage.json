@@ -2,16 +2,18 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "SUB",
   "scopeName": "source.sub",
-  "fileTypes": ["sb"],
+  "fileTypes": [
+    "sb"
+  ],
   "patterns": [
     {
       "include": "#comments"
     },
     {
-      "include": "#keywords"
+      "include": "#strings"
     },
     {
-      "include": "#strings"
+      "include": "#keywords"
     },
     {
       "include": "#numbers"
@@ -33,6 +35,10 @@
     "comments": {
       "patterns": [
         {
+          "name": "comment.line.number-sign.sub",
+          "match": "#.*$"
+        },
+        {
           "name": "comment.line.double-slash.sub",
           "match": "//.*$"
         },
@@ -47,19 +53,27 @@
       "patterns": [
         {
           "name": "keyword.control.sub",
-          "match": "\\b(#if|#elif|#else|#end|#for|#while|#do|#break|#continue|#return)\\b"
+          "match": "\\b(if|elif|else|for|while|do|break|continue|return|end|try|catch|finally|throw|match|case|default|in)\\b"
         },
         {
           "name": "keyword.declaration.sub",
-          "match": "\\b(#var|#const|#function)\\b"
+          "match": "\\b(let|fn|const|class|extends|implements|var|function|def)\\b"
         },
         {
           "name": "keyword.other.sub",
-          "match": "\\b(#embed|#endembed|#ui|#import|#export)\\b"
+          "match": "\\b(embed|endembed|ui|import|export|new|this|super|static|private|public|protected|async|await|yield)\\b"
+        },
+        {
+          "name": "storage.type.sub",
+          "match": "\\b(int|float|string|bool|auto|void)\\b"
+        },
+        {
+          "name": "constant.language.sub",
+          "match": "\\b(true|false|null|nil)\\b"
         },
         {
           "name": "keyword.operator.logical.sub",
-          "match": "\\b(and|or|not|in)\\b"
+          "match": "\\b(and|or|not)\\b"
         }
       ]
     },
@@ -137,7 +151,7 @@
       "patterns": [
         {
           "name": "entity.name.function.sub",
-          "match": "#(print|input|len|range|type|str|int|float|bool)\\b"
+          "match": "\\b(print|println|show|input|len|range|type|str|to_string|int|float|bool|abs|sqrt|min|max|floor|ceil|round|push|pop|append|split|join|upper|lower|trim|substring|replace|contains|char_at)\\b(?=\\s*\\()"
         },
         {
           "name": "entity.name.function.sub",

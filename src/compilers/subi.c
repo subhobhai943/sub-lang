@@ -246,10 +246,32 @@ static int run_repl(void) {
 
 /* ── Entry Point ────────────────────────────────────────────── */
 
+static void print_usage_interp(const char *prog) {
+    printf(SUB_LOGO);
+    printf("Usage: %s [script.sb]\n\n", prog);
+    printf("With no arguments, starts the interactive REPL.\n\n");
+    printf("Options:\n");
+    printf("  -h, --help         Show this help message\n");
+    printf("  -v, --version      Show the version\n\n");
+    printf("Examples:\n");
+    printf("  %s hello.sb        # Run a script\n", prog);
+    printf("  %s                 # Start the REPL\n", prog);
+}
+
 int main(int argc, char *argv[]) {
     sub_console_init_utf8();
     if (argc < 2) {
         return run_repl();
+    }
+    /* Without this, `subi --help` was treated as a filename and failed with
+       "Cannot open: --help". Asking for help is not an error, so it exits 0. */
+    if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
+        print_usage_interp(argv[0]);
+        return 0;
+    }
+    if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
+        printf("subi %s\n", SUB_VERSION);
+        return 0;
     }
     return interpret_file(argv[1]);
 }

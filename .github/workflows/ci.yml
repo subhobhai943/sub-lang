@@ -1,0 +1,191 @@
+name: CI
+
+# Cross-platform build and conformance.
+#
+# The three tools are C, so "it builds on my machine" says very little. This
+# builds them on every platform that is claimed to be supported and then
+# checks that a SUB program means the same thing everywhere, rather than only
+# that the compiler starts up.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch makes the previous run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not hide the state of the others.
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux x86_64 (gcc)
+            os: ubuntu-latest
+            cc: gcc
+          - name: linux x86_64 (clang)
+            os: ubuntu-latest
+            cc: clang
+          - name: linux arm64 (gcc)
+            os: ubuntu-24.04-arm
+            cc: gcc
+          - name: macos arm64 (clang)
+            os: macos-latest
+            cc: clang
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang
+        if: matrix.cc == 'clang' && runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Build
+        run: make CC=${{ matrix.cc }} all
+
+      - name: Reject new compiler warnings
+        # The tree builds warning-free; keep it that way rather than letting
+        # warnings accumulate until they hide a real one.
+        run: |
+          make clean
+          make CC=${{ matrix.cc }} CFLAGS="-Wall -Wextra -Werror -std=c11 -O2 -Isrc/include -Isrc/core -Isrc/codegen -I." all
+
+      - name: Tools start and report a version
+        # --help and --version must succeed: asking for help is not an error,
+        # and a non-zero exit here means the binary is broken on this platform.
+        run: |
+          ./sub --help > /dev/null
+          ./subc --help > /dev/null
+          ./subi --help > /dev/null
+          ./sub --version
+          ./subc --version
+          ./subi --version
+
+      - name: Regression tests
+        run: python3 tests/run_tests.py
+
+      - name: Conformance (targets available on every runner)
+        # python3 and a C/C++ compiler are present everywhere; the full
+        # multi-language sweep runs once, in the `conformance` job.
+        run: python3 tests/conformance.py native c cpp python
+
+      - name: subc honours $CC
+        run: |
+          CC=${{ matrix.cc }} ./subc examples/fibonacci.sb -o /tmp/fib_cc
+          /tmp/fib_cc
+
+      - name: subc reports a missing compiler clearly
+        run: |
+          if CC=definitely-not-a-compiler ./subc examples/fibonacci.sb -o /tmp/fib_bad 2>err.txt; then
+            echo "expected subc to fail with a bogus CC"; exit 1
+          fi
+          grep -q "definitely-not-a-compiler" err.txt
+
+  build-windows:
+    name: windows x86_64 (mingw)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-python
+            make
+
+      - name: Build
+        run: make all
+
+      - name: Executables carry the .exe suffix
+        # subc appends it itself; this is the behaviour that used to be
+        # missing and produced an unrunnable file on Windows.
+        run: |
+          ./subc.exe examples/fibonacci.sb -o fib_win
+          test -f fib_win.exe || { echo "subc did not produce fib_win.exe"; exit 1; }
+          ./fib_win.exe
+
+      - name: Regression tests
+        run: python3 tests/run_tests.py
+
+      - name: Conformance (targets available on this runner)
+        run: python3 tests/conformance.py native c cpp python
+
+  conformance:
+    name: conformance (all language targets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update
+
+      - name: Build
+        run: make all
+
+      - name: Record which toolchains are present
+        # The harness skips a target whose toolchain is missing, so print the
+        # roster: a shrinking target list should be visible, not silent.
+        run: |
+          for t in python3 node ruby gcc g++ rustc go java; do
+            printf '%-8s %s\n' "$t" "$(command -v $t || echo MISSING)"
+          done
+
+      - name: Conformance across every installed target
+        run: python3 tests/conformance.py
+
+  syntax:
+    name: examples use the canonical syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make all
+
+      - name: No deprecated spellings in tracked examples
+        # The aliases still work on purpose, but the code shipped in this repo
+        # should teach the canonical form. The lexer reports each alias once,
+        # so any output here means an example drifted back.
+        run: |
+          status=0
+          for f in examples/*.sb tests/conformance/*.sb calculator.sb test_hello.sb; do
+            [ -e "$f" ] || continue
+            if ./subi "$f" 2>&1 >/dev/null </dev/null | grep -q "is deprecated"; then
+              echo "::error file=$f::uses deprecated syntax"
+              ./subi "$f" 2>&1 >/dev/null </dev/null | grep "is deprecated"
+              status=1
+            fi
+          done
+          exit $status

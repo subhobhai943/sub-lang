@@ -23,9 +23,15 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CASES = os.path.join(ROOT, "tests", "conformance")
-SUB = os.path.join(ROOT, "sub")
-SUBI = os.path.join(ROOT, "subi")
-SUBC = os.path.join(ROOT, "subc")
+
+# The Makefile builds sub.exe / subi.exe / subc.exe on Windows, and a linker
+# asked for `-o foo` there produces foo.exe. Both have to be spelled the way
+# the platform actually names them or the harness cannot find what it built.
+EXE = ".exe" if os.name == "nt" else ""
+
+SUB = os.path.join(ROOT, "sub" + EXE)
+SUBI = os.path.join(ROOT, "subi" + EXE)
+SUBC = os.path.join(ROOT, "subc" + EXE)
 
 TIMEOUT = 30
 
@@ -99,7 +105,7 @@ def check(case, target, spec, workdir):
         rc, out, err = run([SUBC, case, "-o", exe], workdir)
         if rc != 0:
             return "fail", "subc failed: %s" % (err.strip() or out.strip())[:300]
-        rc, got, err = run([exe], workdir)
+        rc, got, err = run([exe + EXE], workdir)
         if rc != 0:
             return "fail", "runtime error: %s" % (err.strip() or rc)[:300]
         if normalize(got) != normalize(want):
@@ -124,7 +130,8 @@ def check(case, target, spec, workdir):
         if rc != 0:
             return "fail", "build failed: %s" % (err.strip() or out.strip())[:300]
 
-    argv = [a.format(src=src, exe=exe) for a in spec["run"]]
+    argv = [a.format(src=src, exe=exe + EXE if a == "{exe}" else exe)
+            for a in spec["run"]]
     rc, got, err = run(argv, workdir)
     if rc != 0:
         return "fail", "runtime error: %s" % (err.strip() or rc)[:300]

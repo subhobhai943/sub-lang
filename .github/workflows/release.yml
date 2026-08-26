@@ -57,7 +57,7 @@ jobs:
 
       - name: Smoke test all tools
         run: |
-          echo 'var x = 42' > /tmp/smoke.sb
+          echo 'let x = 42' > /tmp/smoke.sb
           echo 'print(x)' >> /tmp/smoke.sb
           ./sub /tmp/smoke.sb python
           ./subc /tmp/smoke.sb -o /tmp/smoke_bin
@@ -188,7 +188,7 @@ jobs:
       - name: Smoke test all tools
         shell: msys2 {0}
         run: |
-          echo 'var x = 42' > smoke.sb
+          echo 'let x = 42' > smoke.sb
           echo 'print(x)' >> smoke.sb
           ./sub.exe smoke.sb python
           ./subc.exe smoke.sb -o smoke_bin
