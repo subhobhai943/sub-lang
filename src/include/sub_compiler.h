@@ -212,6 +212,15 @@ typedef enum {
     PLATFORM_WASM         // WebAssembly target
 } Platform;
 
+/* Host detection - used instead of hardcoding PLATFORM_LINUX so that
+   `subc` generates and builds correctly on macOS and Windows too. */
+/* Clears the once-per-run deprecated-spelling warnings (see lexer.c). */
+void        lexer_reset_deprecation_warnings(void);
+
+Platform    sub_host_platform(void);
+const char* sub_host_cc(void);        /* honours $CC, else clang/gcc */
+const char* sub_host_exe_suffix(void);/* ".exe" on Windows, "" elsewhere */
+
 /* Compilation Options */
 typedef struct {
     bool optimize;              // Enable optimizations

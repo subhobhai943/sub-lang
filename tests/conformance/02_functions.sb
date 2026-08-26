@@ -1,0 +1,22 @@
+# Return-type and parameter inference across backends
+fn add(a, b) {
+    return a + b
+}
+
+fn greet(who) {
+    return "Hello, " + who
+}
+
+fn is_big(n) {
+    return n > 100
+}
+
+fn shout() {
+    println("no return value")
+}
+
+println(add(2, 3))
+println(greet("world"))
+println(is_big(500))
+println(is_big(5))
+shout()

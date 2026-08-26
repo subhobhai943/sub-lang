@@ -2,9 +2,9 @@
 
 print(123456789)
 
-var x = 10
-var y = 20
-var sum = x + y
+let x = 10
+let y = 20
+let sum = x + y
 print(sum)
 
 if (sum > 25) {
@@ -13,7 +13,7 @@ if (sum > 25) {
     print(0) # False
 }
 
-var counter = 5
+let counter = 5
 while (counter > 0) {
     print(counter)
     counter = counter - 1

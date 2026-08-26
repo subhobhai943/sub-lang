@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE
 #include "codegen_rust.h"
+#include "codegen_infer.h"
 #include "windows_compat.h"
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +17,49 @@ typedef struct {
     size_t size;
     size_t capacity;
 } StringBuilder;
+
+/* Map SUB's inferred types onto Rust types. Parameters take &str for strings
+   so callers can pass string literals without an allocation; returns own their
+   data. TYPE_GENERIC means inference saw conflicting types for the slot, which
+   Rust cannot express without generics, so fall back to f64 - the widest
+   numeric type - rather than emitting something that will not compile. */
+/* SUB builtin conversions in Rust spelling. Rust has no free `str(x)`
+   function - `str` is a primitive type - so emitting the SUB name verbatim
+   was a hard compile error. */
+typedef struct { const char *sub_name, *prefix, *suffix; } RustBuiltin;
+
+static const RustBuiltin* rust_builtin(const char *name) {
+    static const RustBuiltin table[] = {
+        {"str","(",").to_string()"},     {"to_string","(",").to_string()"},
+        {"int","(",") as i64"},          {"float","(",") as f64"},
+        {"len","(",").len() as i64"},    {"length","(",").len() as i64"},
+        {"abs","((",") as f64).abs()"},  {"sqrt","((",") as f64).sqrt()"},
+        {"floor","((",") as f64).floor()"}, {"ceil","((",") as f64).ceil()"},
+        {"upper","(",").to_uppercase()"},{"lower","(",").to_lowercase()"},
+        {"trim","(",").trim().to_string()"},
+        {NULL,NULL,NULL}
+    };
+    if (!name) return NULL;
+    for (int i = 0; table[i].sub_name; i++)
+        if (strcmp(table[i].sub_name, name) == 0) return &table[i];
+    return NULL;
+}
+
+static const char* rust_type(DataType t, int is_param) {
+    (void)is_param;
+    switch (t) {
+        case TYPE_INT:    return "i64";
+        case TYPE_FLOAT:  return "f64";
+        case TYPE_BOOL:   return "bool";
+        /* Owned on both sides: the expression generator emits string
+           literals as String::from(...), so a &str parameter would reject
+           every call site. */
+        case TYPE_STRING: return "String";
+        case TYPE_ARRAY:  return "Vec<i64>";
+        case TYPE_VOID:   return "()";
+        default:          return "f64";
+    }
+}
 
 static StringBuilder* sb_create(void) {
     StringBuilder *sb = malloc(sizeof(StringBuilder));
@@ -150,9 +194,15 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "\nfn %s(", node->value ? node->value : "func");
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
-                sb_append(sb, "%s: i64", node->children[i]->value ? node->children[i]->value : "arg");
+                sb_append(sb, "%s: %s", node->children[i]->value ? node->children[i]->value : "arg",
+                          rust_type(node->children[i]->data_type, 1));
             }
-            sb_append(sb, ") {\n");
+            sb_append(sb, ")");
+            /* Rust requires the return type in the signature; omitting it
+               declares `-> ()` and every `return <value>` fails to compile. */
+            if (node->data_type != TYPE_VOID && node->data_type != TYPE_UNKNOWN)
+                sb_append(sb, " -> %s", rust_type(node->data_type, 0));
+            sb_append(sb, " {\n");
             if (node->body) {
                 generate_node_rust(sb, node->body, indent + 1);
             }
@@ -264,6 +314,26 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, "%s", node->value);
             break;
         case AST_BINARY_EXPR:
+            /* Rust has no ** operator, and integer literals need an explicit
+               type before a method like .pow()/.abs() can be resolved. */
+            if (node->value && strcmp(node->value, "**") == 0) {
+                int as_int = (infer_expr_type(node->left)  == TYPE_INT &&
+                              infer_expr_type(node->right) == TYPE_INT);
+                if (as_int) {
+                    sb_append(sb, "((");
+                    generate_expr_rust(sb, node->left);
+                    sb_append(sb, ") as i64).pow((");
+                    generate_expr_rust(sb, node->right);
+                    sb_append(sb, ") as u32)");
+                } else {
+                    sb_append(sb, "((");
+                    generate_expr_rust(sb, node->left);
+                    sb_append(sb, ") as f64).powf((");
+                    generate_expr_rust(sb, node->right);
+                    sb_append(sb, ") as f64)");
+                }
+                break;
+            }
             if (node->value && strcmp(node->value, "+") == 0 &&
                 (node->data_type == TYPE_STRING ||
                  (node->left && node->left->data_type == TYPE_STRING) ||
@@ -297,7 +367,16 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, " }");
             break;
         case AST_CALL_EXPR:
-            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) {
+            {
+                const RustBuiltin *rb = rust_builtin(node->value);
+                if (rb && node->child_count == 1) {
+                    sb_append(sb, "%s", rb->prefix);
+                    generate_expr_rust(sb, node->children[0]);
+                    sb_append(sb, "%s", rb->suffix);
+                    break;
+                }
+            }
+            if (is_print_builtin(node->value)) {
                 sb_append(sb, "println!(\"{}\", ");
                 if (node->child_count > 0) generate_expr_rust(sb, node->children[0]);
                 sb_append(sb, ")");

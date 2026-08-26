@@ -181,6 +181,44 @@ static const KWEntry kw_table[] = {
     {NULL, 0}
 };
 
+/* ── Deprecated spellings ──────────────────────────────────────
+   SUB grew several names for the same concept (var/let, function/fn/def,
+   null/nil) plus a second block style. They all still work, but the docs
+   teach one spelling each, and the compiler now says so once per alias per
+   run - once, not per occurrence, so a large file does not drown in it. */
+typedef struct {
+    const char *alias;
+    const char *canonical;
+    const char *note;
+    int          warned;
+} DeprecatedSpelling;
+
+static DeprecatedSpelling g_deprecated[] = {
+    {"var",      "let",  "use 'let' to declare a variable",              0},
+    {"function", "fn",   "use 'fn' to declare a function",               0},
+    {"def",      "fn",   "use 'fn' to declare a function",               0},
+    {"nil",      "null", "use 'null' for the empty value",               0},
+    {"end",      "}",    "close blocks with '}' instead of 'end'",       0},
+    {NULL, NULL, NULL, 0}
+};
+
+void lexer_reset_deprecation_warnings(void) {
+    for (DeprecatedSpelling *d = g_deprecated; d->alias; d++) d->warned = 0;
+}
+
+static void warn_if_deprecated(const char *start, int len, int line) {
+    for (DeprecatedSpelling *d = g_deprecated; d->alias; d++) {
+        if ((int)strlen(d->alias) != len || memcmp(d->alias, start, len) != 0)
+            continue;
+        if (d->warned) return;
+        d->warned = 1;
+        fprintf(stderr,
+                "warning: line %d: '%s' is deprecated (still supported) - %s\n",
+                line, d->alias, d->note);
+        return;
+    }
+}
+
 static TokenType lookup_keyword(const char *start, int len) {
     for (const KWEntry *e = kw_table; e->word; e++) {
         if ((int)strlen(e->word) == len &&
@@ -383,6 +421,7 @@ static Token scan_identifier(Lexer *L) {
 
     int len = (int)(L->ptr - start);
     TokenType type = lookup_keyword(start, len);
+    if (type != TOKEN_IDENTIFIER) warn_if_deprecated(start, len, L->line);
 
     return make_token_span(type, start, len, L->line, start_col);
 }

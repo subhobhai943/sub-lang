@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE
 #include "codegen_cpp.h"
+#include "codegen_infer.h"
 #include "type_system.h"
 #include "windows_compat.h"
 #include <stdarg.h>
@@ -18,6 +19,29 @@ typedef struct {
     size_t size;
     size_t capacity;
 } StringBuilder;
+
+/* SUB builtin conversions in C++ spelling. str() on something already a
+   std::string must stay untouched - std::to_string has no string overload -
+   so the caller checks the inferred argument type before using this. */
+typedef struct { const char *sub_name, *prefix, *suffix; } CppBuiltin;
+
+static const CppBuiltin* cpp_builtin(const char *name) {
+    static const CppBuiltin table[] = {
+        {"str","std::to_string(",")"},   {"to_string","std::to_string(",")"},
+        {"int","(long long)(",")"},      {"float","(double)(",")"},
+        {"bool","(bool)(",")"},          {"len","(long long)(",").size()"},
+        {"length","(long long)(",").size()"},
+        {"abs","std::abs(",")"},         {"sqrt","std::sqrt(",")"},
+        {"upper","sub_upper(",")"},      {"lower","sub_lower(",")"},
+        {"trim","sub_trim(",")"},
+        {"floor","std::floor(",")"},     {"ceil","std::ceil(",")"},
+        {NULL,NULL,NULL}
+    };
+    if (!name) return NULL;
+    for (int i = 0; table[i].sub_name; i++)
+        if (strcmp(table[i].sub_name, name) == 0) return &table[i];
+    return NULL;
+}
 
 static StringBuilder* sb_create(void) {
     StringBuilder *sb = malloc(sizeof(StringBuilder));
@@ -197,6 +221,18 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
             break;
 
         case AST_BINARY_EXPR:
+            /* C++ has no ** operator; emitting it verbatim parsed as a double
+               dereference and failed to compile. */
+            if (node->value && strcmp(node->value, "**") == 0) {
+                int as_int = (infer_expr_type(node->left)  == TYPE_INT &&
+                              infer_expr_type(node->right) == TYPE_INT);
+                sb_append(sb, as_int ? "(long long)std::pow(" : "std::pow(");
+                generate_expr_cpp(sb, node->left);
+                sb_append(sb, ", ");
+                generate_expr_cpp(sb, node->right);
+                sb_append(sb, ")");
+                break;
+            }
             sb_append(sb, "(");
             generate_expr_cpp(sb, node->left);
             sb_append(sb, " %s ", node->value ? node->value : "+");
@@ -221,7 +257,23 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
 
         case AST_CALL_EXPR: {
             const char *fn = node->value ? node->value : "func";
-            if (strcmp(fn, "print") == 0 || strcmp(fn, "show") == 0) {
+            {
+                const CppBuiltin *cb = cpp_builtin(node->value);
+                if (cb && node->child_count == 1) {
+                    /* std::to_string(std::string) does not exist; a string
+                       argument to str() is already the answer. */
+                    if (strcmp(cb->sub_name, "str") == 0 &&
+                        infer_expr_type(node->children[0]) == TYPE_STRING) {
+                        generate_expr_cpp(sb, node->children[0]);
+                        break;
+                    }
+                    sb_append(sb, "%s", cb->prefix);
+                    generate_expr_cpp(sb, node->children[0]);
+                    sb_append(sb, "%s", cb->suffix);
+                    break;
+                }
+            }
+            if (is_print_builtin(fn)) {
                 sb_append(sb, "std::cout << ");
                 if (node->child_count > 0) {
                     generate_expr_cpp(sb, node->children[0]);
@@ -470,7 +522,7 @@ static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent) {
 
         case AST_CALL_EXPR:
             indent_code(sb, indent);
-            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) {
+            if (is_print_builtin(node->value)) {
                 sb_append(sb, "std::cout << ");
                 if (node->child_count > 0) {
                     generate_expr_cpp(sb, node->children[0]);
@@ -596,6 +648,9 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
 
     /* Emit includes based on AST analysis */
     sb_append(sb, "#include <iostream>\n");
+    sb_append(sb, "#include <cmath>\n");
+    sb_append(sb, "#include <algorithm>\n");
+    sb_append(sb, "#include <cctype>\n");
     if (ast_needs_string(ast)) {
         sb_append(sb, "#include <string>\n");
     }
@@ -631,7 +686,22 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
         }
     }
 
+    /* SUB exposes upper/lower/trim as plain functions; C++ has no such free
+       functions for std::string, so generate them. */
+    sb_append(sb, "\nstatic std::string sub_upper(std::string s) {\n");
+    sb_append(sb, "    std::transform(s.begin(), s.end(), s.begin(), ::toupper);\n");
+    sb_append(sb, "    return s;\n}\n");
+    sb_append(sb, "\nstatic std::string sub_lower(std::string s) {\n");
+    sb_append(sb, "    std::transform(s.begin(), s.end(), s.begin(), ::tolower);\n");
+    sb_append(sb, "    return s;\n}\n");
+    sb_append(sb, "\nstatic std::string sub_trim(std::string s) {\n");
+    sb_append(sb, "    size_t b = s.find_first_not_of(\" \\t\\n\\r\");\n");
+    sb_append(sb, "    size_t e = s.find_last_not_of(\" \\t\\n\\r\");\n");
+    sb_append(sb, "    return b == std::string::npos ? \"\" : s.substr(b, e - b + 1);\n}\n");
     sb_append(sb, "int main() {\n");
+    /* SUB spells booleans true/false; C++ streams default to 1/0, which made
+       the same program print differently than the interpreter. */
+    sb_append(sb, "    std::cout << std::boolalpha;\n");
     sb_append(sb, "%s", main_sb->buffer);
     sb_append(sb, "    return 0;\n");
     sb_append(sb, "}\n");

@@ -2,20 +2,20 @@
 # Tests variables, control flow, functions, loops, and recursion
 
 # Variable declarations
-var x = 10
-var y = 20
-var name = "SUB"
-var is_active = true
+let x = 10
+let y = 20
+let name = "SUB"
+let is_active = true
 
 print("Starting checks for " + name)
 
 # Function definition
-function add(a, b) {
+fn add(a, b) {
     return a + b
 }
 
 # Function call
-var sum = add(x, y)
+let sum = add(x, y)
 print("Sum of 10 + 20 is:")
 print(sum)
 
@@ -29,7 +29,7 @@ if (sum > 25) {
 }
 
 # Recursion test (Factorial)
-function factorial(n) {
+fn factorial(n) {
     if (n <= 1) {
         return 1
     }
@@ -46,7 +46,7 @@ for i in range(5) {
 }
 
 # Dynamic range from variable
-var limit = 3
+let limit = 3
 print("Counting to limit 3:")
 for j in range(limit) {
     print(j)

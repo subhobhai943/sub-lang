@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include "codegen_infer.h"
 #include "windows_compat.h"
 #include <stdarg.h>
 
@@ -375,8 +376,12 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     generate_expression(sb, node->right);
                     sb_append(sb, ") %s)", cop);
                 } else if (node->value && strcmp(node->value, "**") == 0) {
-                    /* Power operator: a ** b -> pow(a, b) */
-                    sb_append(sb, "pow(");
+                    /* Power operator: a ** b -> pow(a, b). pow() returns a
+                       double, so an integer power has to be cast back or the
+                       %ld used to print it reads the double's bit pattern. */
+                    int as_int = (infer_expr_type(node->left)  == TYPE_INT &&
+                                  infer_expr_type(node->right) == TYPE_INT);
+                    sb_append(sb, as_int ? "(long long)pow(" : "pow(");
                     generate_expression(sb, node->left);
                     sb_append(sb, ", ");
                     generate_expression(sb, node->right);
@@ -581,7 +586,7 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                 }
             } else if (node->value) {
                 /* Map SUB print()/println()/show() to C printf() */
-                if ((strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0 || strcmp(node->value, "println") == 0)) {
+                if (is_print_builtin(node->value)) {
                     if (node->child_count > 0) {
                         sb_append(sb, "printf(\"");
                         for (int i = 0; i < node->child_count; i++) {
@@ -627,11 +632,29 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                                 else if (arg->data_type == TYPE_FLOAT) fmt = "%g";
                                 else if (arg->data_type == TYPE_STRING) fmt = "%s";
                             }
+                            /* The ad-hoc rules above predate shared inference;
+                               consult it for anything they left as the default. */
+                            if (strcmp(fmt, "%ld") == 0) {
+                                DataType it = infer_expr_type(arg);
+                                if (it == TYPE_STRING)     fmt = "%s";
+                                else if (it == TYPE_FLOAT) fmt = "%g";
+                                else if (it == TYPE_BOOL)  fmt = "%s";
+                            }
+                            /* SUB spells booleans true/false, so C must print
+                               the words rather than 1/0 - otherwise the same
+                               program prints differently per backend. */
+                            if (arg->data_type == TYPE_BOOL ||
+                                infer_expr_type(arg) == TYPE_BOOL) fmt = "%s";
                             sb_append(sb, "%s%s", fmt, i + 1 < node->child_count ? " " : "\\n");
                         }
                         sb_append(sb, "\", ");
                         for (int i = 0; i < node->child_count; i++) {
-                            generate_expression(sb, node->children[i]);
+                            ASTNode *arg = node->children[i];
+                            int is_bool = (arg->data_type == TYPE_BOOL ||
+                                           infer_expr_type(arg) == TYPE_BOOL);
+                            if (is_bool) sb_append(sb, "((");
+                            generate_expression(sb, arg);
+                            if (is_bool) sb_append(sb, ") ? \"true\" : \"false\")");
                             if (i + 1 < node->child_count) {
                                 sb_append(sb, ", ");
                             }
@@ -670,6 +693,26 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                         } else {
                             sb_append(sb, "\"null\"");
                         }
+                    }
+                    /* Function forms of the string/collection builtins. Only
+                       the method forms (s.upper()) were wired up, so calling
+                       upper(s) or len(s) emitted an undeclared function.
+                       These emit the whole call, closing parens included. */
+                    else if (strcmp(fn, "upper") == 0 || strcmp(fn, "lower") == 0) {
+                        sb_append(sb, "%s((const char*)(",
+                                  strcmp(fn, "upper") == 0 ? "sub_str_upper" : "sub_str_lower");
+                        if (node->child_count > 0) generate_expression(sb, node->children[0]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "))");
+                    }
+                    else if (strcmp(fn, "len") == 0 || strcmp(fn, "length") == 0) {
+                        int is_arr = (node->child_count > 0 &&
+                                      infer_expr_type(node->children[0]) == TYPE_ARRAY);
+                        sb_append(sb, is_arr ? "sub_array_len((SubArray*)("
+                                             : "(long)strlen((const char*)(");
+                        if (node->child_count > 0) generate_expression(sb, node->children[0]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "))");
                     }
                     else if (strcmp(fn, "input") == 0) sb_append(sb, "sub_input(");
                     else if (strcmp(fn, "sqrt") == 0) sb_append(sb, "sqrt(");
@@ -727,6 +770,8 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     
                     if (strcmp(fn, "type") != 0 && strcmp(fn, "push") != 0 && strcmp(fn, "pop") != 0 &&
                         strcmp(fn, "join") != 0 && strcmp(fn, "trim") != 0 && strcmp(fn, "char_at") != 0 &&
+                        strcmp(fn, "upper") != 0 && strcmp(fn, "lower") != 0 &&
+                        strcmp(fn, "len") != 0 && strcmp(fn, "length") != 0 &&
                         (strcmp(fn, "str") != 0 || node->child_count > 0) &&
                         (strcmp(fn, "to_string") != 0 || node->child_count > 0)) {
                         for (int i = 0; i < node->child_count; i++) {
@@ -1477,7 +1522,7 @@ static void generate_js_expression(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, ")");
             break;
         case AST_CALL_EXPR:
-            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) {
+            if (is_print_builtin(node->value)) {
                 sb_append(sb, "console.log(");
                 if (node->child_count > 0) generate_js_expression(sb, node->children[0]);
                 sb_append(sb, ")");

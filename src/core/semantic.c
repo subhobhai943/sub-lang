@@ -579,9 +579,13 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                     node->data_type = TYPE_INT;
                     return TYPE_INT;
                 }
-                /* String built-ins */
+                /* String built-ins. upper/lower/replace/substring exist as
+                   methods but were missing here, so calling them in function
+                   form failed with "Undefined function". */
                 if (fn_name && (strcmp(fn_name, "trim") == 0 || strcmp(fn_name, "char_at") == 0 ||
-                                strcmp(fn_name, "join") == 0 || strcmp(fn_name, "to_string") == 0)) {
+                                strcmp(fn_name, "join") == 0 || strcmp(fn_name, "to_string") == 0 ||
+                                strcmp(fn_name, "upper") == 0 || strcmp(fn_name, "lower") == 0 ||
+                                strcmp(fn_name, "replace") == 0 || strcmp(fn_name, "substring") == 0)) {
                     for (int i = 0; i < node->child_count; i++)
                         check_expression_type(node->children[i], table);
                     node->data_type = TYPE_STRING;

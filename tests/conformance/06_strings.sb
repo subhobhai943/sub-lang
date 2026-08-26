@@ -1,0 +1,6 @@
+let s = "Hello"
+println(s + ", " + "world")
+println(len(s))
+println(upper(s))
+println(lower(s))
+println(str(42) + "!")

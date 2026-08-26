@@ -1512,6 +1512,11 @@ SubVal eval(ASTNode *node, Env *env) {
         if (fn && strcmp(fn, "int") == 0) {
             if (node->child_count > 0) {
                 SubVal v = to_number(eval(node->children[0], env));
+                /* iv and fv share a union: reading iv from a float value
+                   reinterprets the double's bit pattern, which is why
+                   int(3.9) used to return 4615964438073389875. Truncate
+                   toward zero instead, matching every backend. */
+                if (v.type == VAL_FLOAT) return make_int((long long)v.fv);
                 return make_int(v.iv);
             }
             return make_int(0);

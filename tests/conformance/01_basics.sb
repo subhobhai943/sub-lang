@@ -1,0 +1,13 @@
+# Values, printing and string building
+println("hello")
+println(42)
+println(true)
+
+let name = "SUB"
+let version = 2
+println("lang " + name + " v" + str(version))
+
+let total = 3 + 4 * 2
+println(total)
+println(10 - 3)
+println(7 % 3)

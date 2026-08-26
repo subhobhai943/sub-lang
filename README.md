@@ -85,6 +85,23 @@ This builds the three primary CLI tools:
 - `./subi` — Direct AST interpreter & REPL
 - `./sub` — Multi-language transpiler
 
+### Platform notes
+
+The toolchain builds and runs on Linux, macOS and Windows (MinGW/MSYS2 or
+MSVC). Platform handling is resolved at build time rather than assumed:
+
+- `subc` generates code for the **host** platform and appends `.exe`
+  automatically on Windows.
+- The C compiler `subc` shells out to defaults to `clang` on macOS and `gcc`
+  elsewhere. Set `CC` to override it:
+
+  ```bash
+  CC=clang ./subc hello.sb -o hello
+  ```
+
+- Console output is switched to UTF-8 on Windows so the banner and any
+  box-drawing characters render correctly.
+
 ---
 
 ## The Three Tools
@@ -140,23 +157,37 @@ Translates `.sb` code into the target programming language of your choice:
 
 ## Language Syntax Guide
 
+SUB has **one canonical spelling for each idea**. Older spellings still
+compile, so existing programs keep working, but the compiler prints a
+deprecation note and the docs below teach only the canonical form.
+
+| Idea | Use this | Still accepted (deprecated) |
+|------|----------|-----------------------------|
+| Variable | `let` | `var` |
+| Function | `fn` | `function`, `def` |
+| Empty value | `null` | `nil` |
+| Block | `{ ... }` | `end`-delimited blocks |
+
+`const` is **not** an alias for `let` - it declares a value that cannot be
+reassigned, so it stays.
+
 ### Variables & Types
 
 ```sub
-var name  = "SUB"        # string
-var age   = 25           # integer
-var pi    = 3.14159      # float
-var ok    = true         # boolean
-var empty = null         # null / nil
-const MAX = 100          # constant
+let name  = "SUB"        # string
+let age   = 25           # integer
+let pi    = 3.14159      # float
+let ok    = true         # boolean
+let empty = null         # empty value
+const MAX = 100          # constant (cannot be reassigned)
 ```
 
 ### Functions
 
-Functions can be declared using `function`, `fn`, or `def`:
+Declare functions with `fn`:
 
 ```sub
-function greet(name) {
+fn greet(name) {
     return "Hello, " + name + "!"
 }
 
@@ -164,24 +195,24 @@ fn add(a, b) {
     return a + b
 }
 
-def multiply(a, b) {
-    return a * b
-}
-
 println(greet("World"))   # Hello, World!
 println(add(10, 20))      # 30
-println(multiply(6, 7))   # 42
 ```
+
+Parameter and return types are inferred, including when compiling to a
+statically typed target - `add` above becomes `long add(long, long)` in C and
+`fn add(a: i64, b: i64) -> i64` in Rust. You can annotate explicitly when you
+want to; an explicit type always wins over inference.
 
 ### Classes & Objects
 
 ```sub
 class Point {
-    var x = 0
-    var y = 0
+    let x = 0
+    let y = 0
 }
 
-var p = Point.new
+let p = Point.new
 p.x = 10
 p.y = 20
 
@@ -191,12 +222,11 @@ println(p.y)  # 20
 
 ### Control Flow
 
-Supports both `{}` brace syntax and `end` blocks:
+Blocks use braces:
 
 ```sub
-var score = 85
+let score = 85
 
-# Brace style
 if score >= 90 {
     println("Grade: A")
 } elif score >= 80 {
@@ -204,16 +234,10 @@ if score >= 90 {
 } else {
     println("Grade: C")
 }
-
-# End-delimited style
-if score >= 90
-    println("Grade: A")
-elif score >= 80
-    println("Grade: B")
-else
-    println("Grade: C")
-end
 ```
+
+The older `end`-delimited style still parses, but braces are the documented
+form and the one every example uses.
 
 ### Loops & Iteration
 
@@ -224,7 +248,7 @@ for i in range(1, 6) {
 }
 
 # Array iteration
-var items = [10, 20, 30]
+let items = [10, 20, 30]
 for item in items {
     println(item)
 }
@@ -235,7 +259,7 @@ for ch in "hello" {
 }
 
 # While loop
-var n = 3
+let n = 3
 while n > 0 {
     println(n)
     n -= 1
@@ -252,7 +276,7 @@ for i in range(10) {
 ### Pattern Matching
 
 ```sub
-var choice = 2
+let choice = 2
 
 switch choice {
     case 1:
@@ -280,7 +304,7 @@ try {
 
 #### Strings
 ```sub
-var s = "Hello World"
+let s = "Hello World"
 println(s.length)              # 11
 println(s.upper())             # HELLO WORLD
 println(s.lower())             # hello world
@@ -290,13 +314,13 @@ println(s.replace("World", "SUB")) # Hello SUB
 println(s.trim())              # trims whitespace
 println(s.char_at(0))          # H
 
-var parts = "a,b,c".split(",")
+let parts = "a,b,c".split(",")
 println(parts[0])              # a
 ```
 
 #### Arrays
 ```sub
-var list = [1, 2, 3]
+let list = [1, 2, 3]
 list.push(4)
 println(list.length)           # 4
 println(list.pop())            # 4
@@ -320,15 +344,15 @@ println("Embedded C code compiled seamlessly!")
 ### Cross-Platform UI Declarations
 
 ```sub
-function handleClick() {
+fn handleClick() {
     println("Button clicked!")
 }
 
-ui.window(title="SUB App", width=800, height=600)
+ui.window(title="SUB App", width=800, height=600) {
     ui.label(text="Welcome to SUB!", size=24)
     ui.button(text="Click Me", onclick=handleClick)
     ui.input(placeholder="Enter name", id="nameInput")
-end
+}
 ```
 
 ---
@@ -339,7 +363,7 @@ end
 |---|---|---|
 | `print(x)` / `show(x)` | Prints expression with newline | `print("hi")` |
 | `println(a, b...)` | Prints space-separated arguments | `println("val:", 42)` |
-| `input(prompt)` | Reads string input from stdin | `var s = input("Enter: ")` |
+| `input(prompt)` | Reads string input from stdin | `let s = input("Enter: ")` |
 | `str(x)` / `to_string(x)` | Converts value to string | `str(123)` |
 | `int(x)` | Converts value to integer | `int("42")` |
 | `float(x)` | Converts value to float | `float("3.14")` |

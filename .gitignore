@@ -77,6 +77,10 @@ test_hello.c
 *.rs
 *.kt
 *.swift
+# Anchored to the repo root: transpiler output lands beside the .sb file, but
+# a bare *.c / *.go would also swallow the compiler's own sources in src/.
+/*.c
+/*.go
 !tests/*.py
 !examples/*.py
 !examples/*.js

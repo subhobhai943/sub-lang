@@ -603,3 +603,41 @@ const char* platform_get_compiler(Platform platform, bool use_cpp) {
 }
 
 /* C++ CodeGen helper functions are now in codegen_cpp.c */
+
+/* ================================================================
+   Host platform detection
+
+   The native compiler used to hardcode PLATFORM_LINUX, so `subc` on
+   macOS or Windows generated Linux-flavoured C and then invoked a
+   compiler that might not exist. Resolve the host at build time
+   instead, and let the environment override the C compiler.
+   ================================================================ */
+Platform sub_host_platform(void) {
+#if defined(_WIN32) || defined(__CYGWIN__)
+    return PLATFORM_WINDOWS;
+#elif defined(__APPLE__)
+    return PLATFORM_MACOS;
+#else
+    return PLATFORM_LINUX;
+#endif
+}
+
+const char* sub_host_cc(void) {
+    /* Honour the usual CC override so users on clang-only machines, or
+       cross-compiling, are not forced through gcc. */
+    const char *env = getenv("CC");
+    if (env && *env) return env;
+#if defined(__APPLE__)
+    return "clang";
+#else
+    return "gcc";
+#endif
+}
+
+const char* sub_host_exe_suffix(void) {
+#if defined(_WIN32) || defined(__CYGWIN__)
+    return ".exe";
+#else
+    return "";
+#endif
+}

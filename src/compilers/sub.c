@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "sub_compiler.h"
 #include "codegen_cpp.h"
+#include "codegen_infer.h"
 #include "logo.h"
 #include "windows_compat.h"
 
@@ -179,6 +180,11 @@ static const TargetDescriptor* lookup_target(const char *name) {
 
 // Generate code for a language target. Returns allocated string or NULL.
 static char* generate_language_code(const char *name, ASTNode *ast, const char *source) {
+    /* SUB is dynamically typed, but C/C++/Rust/Java/Go/Swift/Kotlin all need a
+       concrete signature for every function. Annotate the AST once here so
+       every backend below emits real return and parameter types. */
+    infer_function_signatures(ast);
+
     /* C target → use the existing platform codegen (produces C code) */
     if (strcasecmp(name, "c") == 0) {
         return codegen_generate(ast, PLATFORM_LINUX);
@@ -210,9 +216,9 @@ static char* generate_language_code(const char *name, ASTNode *ast, const char *
     return NULL;
 }
 
-// Print help / usage
+// Print help / usage. main() has already printed the banner, so this must
+// not print it again - doing so showed the logo twice on every --help.
 static void print_help(const char *prog) {
-    printf(SUB_LOGO);
     printf("Usage: %s <input.sb> [target] [--help]\n\n", prog);
     printf("Targets can be a PLATFORM or a LANGUAGE:\n\n");
     printf("  Platform targets (generates platform-specific code):\n");

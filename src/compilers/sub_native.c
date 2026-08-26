@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "sub_compiler.h"
 #include "codegen_cpp.h"
+#include "codegen_infer.h"
 #include "logo.h"
 #include "windows_compat.h"
 #include <stdio.h>
@@ -36,9 +37,8 @@ static void derive_output_name(const char *input, const char *user_out,
     if (dot) *dot = '\0';
 }
 
-/* Print usage */
+/* Print usage. main() prints the banner already, so this must not repeat it. */
 void print_usage_native(const char *prog_name) {
-    printf(SUB_LOGO);
     printf("Usage: %s <input.sb> [options]\n\n", prog_name);
     printf("Output Options:\n");
     printf("  -o <file>          Output filename (default: derived from input)\n\n");
@@ -108,7 +108,8 @@ int compile_to_native(const char *input_file, const char *output_name,
 
     /* ---- Phase 5: Generate C, write temp file ---- */
     if (verbose) printf("[4/4] Generating binary via gcc...\n");
-    char *c_code = codegen_generate(ast, PLATFORM_LINUX);
+    infer_function_signatures(ast);
+    char *c_code = codegen_generate(ast, sub_host_platform());
     parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
     if (!c_code) { fprintf(stderr, "Code generation failed.\n"); return 1; }
 
@@ -124,7 +125,7 @@ int compile_to_native(const char *input_file, const char *output_name,
 
     /* ---- Phase 6: Compile with gcc ---- */
     const char *opt = opt_level >= 2 ? "-O2" : opt_level == 1 ? "-O1" : "-O0";
-    char cmd[1024];
+    char cmd[2048];
     /* Validate output_name contains no shell metacharacters to prevent command injection */
     for (const char *p = output_name; *p; p++) {
         if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-' && *p != '.' && *p != '/') {
@@ -133,15 +134,29 @@ int compile_to_native(const char *input_file, const char *output_name,
             return 1;
         }
     }
-    snprintf(cmd, sizeof(cmd), "gcc %s -o \"%s\" \"%s\" -lm", opt, output_name, tmp_c);
+    /* Windows executables need the .exe suffix, and the C compiler is gcc
+       only by convention - honour $CC so clang-only machines work too. */
+    const char *cc  = sub_host_cc();
+    const char *ext = sub_host_exe_suffix();
+    char out_with_ext[512];
+    size_t name_len = strlen(output_name);
+    size_t ext_len  = strlen(ext);
+    int has_ext = (ext_len > 0 && name_len >= ext_len &&
+                   strcmp(output_name + name_len - ext_len, ext) == 0);
+    snprintf(out_with_ext, sizeof(out_with_ext), "%s%s",
+             output_name, has_ext ? "" : ext);
+
+    snprintf(cmd, sizeof(cmd), "%s %s -o \"%s\" \"%s\" -lm",
+             cc, opt, out_with_ext, tmp_c);
     int ret = system(cmd);
     remove(tmp_c);
 
     if (ret != 0) {
-        fprintf(stderr, "Compilation failed. Make sure gcc is installed.\n");
+        fprintf(stderr, "Compilation failed. Make sure %s is installed "
+                        "(set CC to choose a different compiler).\n", cc);
         return 1;
     }
-    printf("\u2705 Compiled: %s\n", output_name);
+    printf("\u2705 Compiled: %s\n", out_with_ext);
     return 0;
 }
 
@@ -260,7 +275,8 @@ void write_file(const char *filename, const char *content) {
 }
 
 static char* generate_language_code_native(const char *name, ASTNode *ast, const char *source) {
-    if (strcasecmp(name, "c") == 0) return codegen_generate(ast, PLATFORM_LINUX);
+    infer_function_signatures(ast);
+    if (strcasecmp(name, "c") == 0) return codegen_generate(ast, sub_host_platform());
     if (strcasecmp(name, "cpp") == 0 || strcasecmp(name, "c++") == 0) return codegen_cpp_generate(ast, source);
     if (strcasecmp(name, "typescript") == 0 || strcasecmp(name, "ts") == 0) return codegen_javascript(ast, source);
     if (strcasecmp(name, "python") == 0     || strcasecmp(name, "py") == 0)     return codegen_python(ast, source);
@@ -340,6 +356,7 @@ int main(int argc, char *argv[]) {
         
         char *output_code = NULL;
         if (target->kind == TARGET_KIND_PLATFORM) {
+            infer_function_signatures(ast);
             output_code = codegen_generate(ast, target->platform);
         } else {
             output_code = generate_language_code_native(target_str, ast, source);

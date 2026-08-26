@@ -6,10 +6,12 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include "codegen_infer.h"
 #include "type_system.h"
 #include "windows_compat.h"
 #include <stdarg.h>
 #include <ctype.h>
+
 
 /* String Builder */
 typedef struct {
@@ -17,6 +19,163 @@ typedef struct {
     size_t size;
     size_t capacity;
 } StringBuilder;
+
+/* ----------------------------------------------------------------
+   Inferred SUB types -> target language types.
+
+   These backends previously hardcoded `void` returns and Object/Any/
+   interface{} parameters, which produced code that did not compile the
+   moment a function returned a value or did arithmetic on an argument.
+   They now read the types that infer_function_signatures() wrote onto the
+   AST. TYPE_GENERIC means inference saw conflicting types, so it maps to
+   each language's real top type.
+   ---------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------
+   SUB builtin conversions -> target language spellings.
+
+   SUB programs call str(), int(), len() and friends. Every backend used to
+   emit those names verbatim, so the generated code referred to functions
+   that do not exist in the target language ("str is not defined" in JS,
+   "cannot find symbol: str" in Java, and so on).
+
+   A builtin is emitted as prefix + argument + suffix, which covers both the
+   call-style spellings (String.valueOf(x)) and the method-style ones
+   ((x).length()). Anything not in the table is left alone and emitted as an
+   ordinary call.
+   ---------------------------------------------------------------- */
+
+typedef enum {
+    LANG_JS, LANG_JAVA, LANG_SWIFT, LANG_KOTLIN, LANG_GO, LANG_RUBY, LANG_PY
+} TargetLang;
+
+typedef struct {
+    const char *sub_name;
+    const char *prefix;
+    const char *suffix;
+} BuiltinSpelling;
+
+static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name) {
+    static const BuiltinSpelling js[] = {
+        {"str","String(",")"},        {"to_string","String(",")"},
+        {"int","Math.trunc(Number(","))"}, {"float","Number(",")"},
+        {"bool","Boolean(",")"},      {"len","(",").length"},
+        {"length","(",").length"},    {"abs","Math.abs(",")"},
+        {"sqrt","Math.sqrt(",")"},    {"floor","Math.floor(",")"},
+        {"ceil","Math.ceil(",")"},    {"round","Math.round(",")"},
+        {"upper","(",").toUpperCase()"}, {"lower","(",").toLowerCase()"},
+        {"trim","(",").trim()"},      {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling java[] = {
+        {"str","_subStr(",")"},        {"to_string","_subStr(",")"},
+        {"int","(long)(",")"},         {"float","(double)(",")"},
+        {"bool","(boolean)(",")"},     {"len","(",").length()"},
+        {"length","(",").length()"},   {"abs","Math.abs(",")"},
+        {"sqrt","Math.sqrt(",")"},     {"floor","Math.floor(",")"},
+        {"ceil","Math.ceil(",")"},     {"round","Math.round(",")"},
+        {"upper","(",").toUpperCase()"},{"lower","(",").toLowerCase()"},
+        {"trim","(",").trim()"},       {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling swift[] = {
+        {"str","String(describing: ",")"}, {"to_string","String(describing: ",")"},
+        {"int","Int(",")"},            {"float","Double(",")"},
+        {"bool","Bool(",")"},          {"len","(",").count"},
+        {"length","(",").count"},      {"abs","abs(",")"},
+        {"sqrt","(Double(",")).squareRoot()"},
+        {"upper","(",").uppercased()"},{"lower","(",").lowercased()"},
+        {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling kotlin[] = {
+        {"str","(",").toString()"},    {"to_string","(",").toString()"},
+        {"int","(",").toLong()"},      {"float","(",").toDouble()"},
+        {"len","(",").length"},        {"length","(",").length"},
+        {"abs","kotlin.math.abs(",")"},{"sqrt","kotlin.math.sqrt((",").toDouble())"},
+        {"upper","(",").uppercase()"}, {"lower","(",").lowercase()"},
+        {"trim","(",").trim()"},       {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling go[] = {
+        {"str","fmt.Sprint(",")"},     {"to_string","fmt.Sprint(",")"},
+        {"len","int64(len(","))"},     {"length","int64(len(","))"},
+        {"abs","math.Abs(",")"},       {"sqrt","math.Sqrt(",")"},
+        {"floor","math.Floor(",")"},   {"ceil","math.Ceil(",")"},
+        {"upper","strings.ToUpper(",")"}, {"lower","strings.ToLower(",")"},
+        {"trim","strings.TrimSpace(",")"}, {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling ruby[] = {
+        {"str","(",").to_s"},          {"to_string","(",").to_s"},
+        {"int","(",").to_i"},          {"float","(",").to_f"},
+        {"len","(",").length"},        {"length","(",").length"},
+        {"abs","(",").abs"},           {"sqrt","Math.sqrt(",")"},
+        {"upper","(",").upcase"},      {"lower","(",").downcase"},
+        {"trim","(",").strip"},        {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling py[] = {
+        {"println","print(",")"},      {"show","print(",")"},
+        {NULL,NULL,NULL}
+    };
+
+    const BuiltinSpelling *table;
+    switch (lang) {
+        case LANG_JS:     table = js;     break;
+        case LANG_JAVA:   table = java;   break;
+        case LANG_SWIFT:  table = swift;  break;
+        case LANG_KOTLIN: table = kotlin; break;
+        case LANG_GO:     table = go;     break;
+        case LANG_RUBY:   table = ruby;   break;
+        default:          table = py;     break;
+    }
+    if (!name) return NULL;
+    for (int i = 0; table[i].sub_name; i++)
+        if (strcmp(table[i].sub_name, name) == 0) return &table[i];
+    return NULL;
+}
+
+static const char* java_type(DataType t) {
+    switch (t) {
+        case TYPE_INT:    return "long";
+        case TYPE_FLOAT:  return "double";
+        case TYPE_BOOL:   return "boolean";
+        case TYPE_STRING: return "String";
+        case TYPE_ARRAY:  return "long[]";
+        case TYPE_VOID:   return "void";
+        default:          return "Object";
+    }
+}
+
+static const char* swift_type(DataType t) {
+    switch (t) {
+        case TYPE_INT:    return "Int";
+        case TYPE_FLOAT:  return "Double";
+        case TYPE_BOOL:   return "Bool";
+        case TYPE_STRING: return "String";
+        case TYPE_ARRAY:  return "[Int]";
+        case TYPE_VOID:   return "Void";
+        default:          return "Any";
+    }
+}
+
+static const char* kotlin_type(DataType t) {
+    switch (t) {
+        case TYPE_INT:    return "Long";
+        case TYPE_FLOAT:  return "Double";
+        case TYPE_BOOL:   return "Boolean";
+        case TYPE_STRING: return "String";
+        case TYPE_ARRAY:  return "LongArray";
+        case TYPE_VOID:   return "Unit";
+        default:          return "Any";
+    }
+}
+
+static const char* go_type(DataType t) {
+    switch (t) {
+        case TYPE_INT:    return "int64";
+        case TYPE_FLOAT:  return "float64";
+        case TYPE_BOOL:   return "bool";
+        case TYPE_STRING: return "string";
+        case TYPE_ARRAY:  return "[]int64";
+        default:          return "interface{}";
+    }
+}
 
 static StringBuilder* sb_create(void) {
     StringBuilder *sb = malloc(sizeof(StringBuilder));
@@ -184,6 +343,90 @@ static char* escape_string_for_codegen(const char *raw) {
    PYTHON CODE GENERATOR - REAL
    ======================================== */
 
+static void generate_expr_python(StringBuilder *sb, ASTNode *node);
+static void generate_expr_js(StringBuilder *sb, ASTNode *node);
+static void generate_expr_java(StringBuilder *sb, ASTNode *node);
+static void generate_expr_swift(StringBuilder *sb, ASTNode *node);
+static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node);
+static void generate_expr_go(StringBuilder *sb, ASTNode *node);
+static void generate_expr_ruby(StringBuilder *sb, ASTNode *node);
+
+/* ----------------------------------------------------------------
+   Operators that do not survive a verbatim copy into the target.
+
+   `**` is SUB's power operator. Only Python, JS and Ruby spell it that way;
+   emitting it verbatim into Java/Go/Swift/Kotlin produced a syntax error.
+
+   `/` is integer division in SUB when both operands are integers (9 / 2 is 4,
+   as the interpreter computes it). C, Java, Go, Swift and Kotlin already do
+   that for integer operands, but Python's `/` and JavaScript's `/` always
+   produce a float, so those two need an explicit integer form to agree with
+   every other backend.
+   ---------------------------------------------------------------- */
+
+typedef void (*ExprGen)(StringBuilder *, ASTNode *);
+
+static int both_int_operands(ASTNode *node) {
+    return infer_expr_type(node->left)  == TYPE_INT &&
+           infer_expr_type(node->right) == TYPE_INT;
+}
+
+/* Emits a special form and returns 1, or returns 0 to let the caller emit the
+   ordinary infix expression. */
+static int emit_special_binop(StringBuilder *sb, ASTNode *node,
+                              TargetLang lang, ExprGen gen) {
+    const char *op = node->value;
+    if (!op) return 0;
+
+    if (strcmp(op, "**") == 0) {
+        int as_int = both_int_operands(node);
+        switch (lang) {
+            case LANG_PY:
+            case LANG_RUBY:
+            case LANG_JS:
+                return 0;                      /* ** is native in these */
+            case LANG_JAVA:
+                sb_append(sb, as_int ? "(long)Math.pow(" : "Math.pow(");
+                gen(sb, node->left); sb_append(sb, ", ");
+                gen(sb, node->right); sb_append(sb, ")");
+                return 1;
+            case LANG_GO:
+                sb_append(sb, as_int ? "int64(math.Pow(float64(" : "math.Pow(float64(");
+                gen(sb, node->left); sb_append(sb, "), float64(");
+                gen(sb, node->right); sb_append(sb, as_int ? ")))" : "))");
+                return 1;
+            case LANG_SWIFT:
+                sb_append(sb, as_int ? "Int(pow(Double(" : "pow(Double(");
+                gen(sb, node->left); sb_append(sb, "), Double(");
+                gen(sb, node->right); sb_append(sb, as_int ? ")))" : "))");
+                return 1;
+            case LANG_KOTLIN:
+                sb_append(sb, "Math.pow((");
+                gen(sb, node->left); sb_append(sb, ").toDouble(), (");
+                gen(sb, node->right);
+                sb_append(sb, as_int ? ").toDouble()).toLong()" : ").toDouble())");
+                return 1;
+        }
+        return 0;
+    }
+
+    if (strcmp(op, "/") == 0 && both_int_operands(node)) {
+        if (lang == LANG_PY) {
+            sb_append(sb, "(");
+            gen(sb, node->left); sb_append(sb, " // ");
+            gen(sb, node->right); sb_append(sb, ")");
+            return 1;
+        }
+        if (lang == LANG_JS) {
+            sb_append(sb, "Math.trunc(");
+            gen(sb, node->left); sb_append(sb, " / ");
+            gen(sb, node->right); sb_append(sb, ")");
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
     if (!node) return;
     
@@ -206,6 +449,7 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, "%s", node->value ? node->value : "var");
             break;
         case AST_BINARY_EXPR:
+            if (emit_special_binop(sb, node, LANG_PY, generate_expr_python)) break;
             if (node->value && strcmp(node->value, "+") == 0) {
                 /* SUB's '+' auto-converts to string concatenation when either
                    operand is a string (matching the interpreter's eval_binary).
@@ -337,8 +581,27 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
                 }
             } else if (node->value) {
                 const char *fn = node->value;
-                if (strcmp(fn, "print") == 0 || strcmp(fn, "println") == 0 || strcmp(fn, "show") == 0) {
-                    sb_append(sb, "print(");
+                if (is_print_builtin(fn)) {
+                    sb_append(sb, "_sub_print(");
+                } else if (strcmp(fn, "str") == 0 || strcmp(fn, "to_string") == 0) {
+                    sb_append(sb, "_sub_str(");
+                } else if (strcmp(fn, "upper") == 0) {
+                    /* SUB exposes these as plain functions; Python spells them
+                       as string methods. */
+                    sb_append(sb, "(");
+                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]);
+                    sb_append(sb, ").upper()");
+                    break;
+                } else if (strcmp(fn, "lower") == 0) {
+                    sb_append(sb, "(");
+                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]);
+                    sb_append(sb, ").lower()");
+                    break;
+                } else if (strcmp(fn, "trim") == 0) {
+                    sb_append(sb, "(");
+                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]);
+                    sb_append(sb, ").strip()");
+                    break;
                 } else if (strcmp(fn, "sqrt") == 0) {
                     sb_append(sb, "math.sqrt(");
                 } else if (strcmp(fn, "floor") == 0) {
@@ -610,6 +873,21 @@ char* codegen_python(ASTNode *ast, const char *source) {
     sb_append(sb, "#!/usr/bin/env python3\n");
     sb_append(sb, "# Generated by SUB Language Compiler\n");
     sb_append(sb, "import math\n");
+    /* SUB writes booleans as true/false. Python's str() writes True/False, so
+       the same program printed different text depending on the backend.
+       These helpers keep Python's output identical to the interpreter's. */
+    sb_append(sb, "\n\ndef _sub_str(v):\n");
+    sb_append(sb, "    if isinstance(v, bool):\n");
+    sb_append(sb, "        return \"true\" if v else \"false\"\n");
+    sb_append(sb, "    if v is None:\n");
+    sb_append(sb, "        return \"null\"\n");
+    /* SUB prints a float with no fractional part as an integer (sqrt(16.0)
+       is 4, not 4.0), so Python has to drop the trailing .0 to agree. */
+    sb_append(sb, "    if isinstance(v, float) and v.is_integer():\n");
+    sb_append(sb, "        return str(int(v))\n");
+    sb_append(sb, "    return str(v)\n");
+    sb_append(sb, "\n\ndef _sub_print(*a):\n");
+    sb_append(sb, "    print(*[_sub_str(x) for x in a])\n\n");
     sb_append(sb, "import sys\n\n");
     sb_append(sb, "def _sub_add(a, b):\n");
     sb_append(sb, "    # SUB's '+' concatenates when either side is a string,\n");
@@ -654,6 +932,7 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, "%s", node->value ? node->value : "var");
             break;
         case AST_BINARY_EXPR:
+            if (emit_special_binop(sb, node, LANG_JS, generate_expr_js)) break;
             sb_append(sb, "(");
             generate_expr_js(sb, node->left);
             sb_append(sb, " %s ", node->value ? node->value : "+");
@@ -674,6 +953,15 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, ")");
             break;
         case AST_CALL_EXPR:
+            {
+                const BuiltinSpelling *bs = builtin_spelling(LANG_JS, node->value);
+                if (bs && node->child_count == 1) {
+                    sb_append(sb, "%s", bs->prefix);
+                    generate_expr_js(sb, node->children[0]);
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
+            }
             if (node->value && strcmp(node->value, "show") == 0) {
                 sb_append(sb, "console.log(");
             } else if (node->value) {
@@ -865,7 +1153,7 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_CALL_EXPR:
             indent_code(sb, indent);
             // Map print to console.log
-            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) {
+            if (is_print_builtin(node->value)) {
                 sb_append(sb, "console.log(");
                 if (node->child_count > 0) generate_expr_js(sb, node->children[0]);
                 sb_append(sb, ")");
@@ -941,6 +1229,7 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, "%s", node->value ? node->value : "var");
             break;
         case AST_BINARY_EXPR:
+            if (emit_special_binop(sb, node, LANG_JAVA, generate_expr_java)) break;
             sb_append(sb, "(");
             generate_expr_java(sb, node->left);
             sb_append(sb, " %s ", node->value ? node->value : "+");
@@ -962,8 +1251,17 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
             break;
         case AST_CALL_EXPR: {
             const char *fn = node->value ? node->value : "func";
-            if (strcmp(fn, "print") == 0 || strcmp(fn, "show") == 0) {
-                sb_append(sb, "System.out.println(");
+            {
+                const BuiltinSpelling *bs = builtin_spelling(LANG_JAVA, node->value);
+                if (bs && node->child_count == 1) {
+                    sb_append(sb, "%s", bs->prefix);
+                    generate_expr_java(sb, node->children[0]);
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
+            }
+            if (is_print_builtin(fn)) {
+                sb_append(sb, "_subPrint(");
                 if (node->child_count > 0) generate_expr_java(sb, node->children[0]);
                 sb_append(sb, ")");
             } else {
@@ -1045,11 +1343,13 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_FUNCTION_DECL:
             sb_append(sb, "\n");
             indent_code(sb, indent);
-            sb_append(sb, "public static void %s(", node->value ? node->value : "func");
+            sb_append(sb, "public static %s %s(", java_type(node->data_type),
+                      node->value ? node->value : "func");
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
-                    sb_append(sb, "Object %s", node->children[i]->value ? node->children[i]->value : "arg");
+                    sb_append(sb, "%s %s", java_type(node->children[i]->data_type),
+                              node->children[i]->value ? node->children[i]->value : "arg");
                 }
             }
             sb_append(sb, ") {\n");
@@ -1178,6 +1478,20 @@ char* codegen_java(ASTNode *ast, const char *source) {
     }
 
     sb_append(sb, "public class SubProgram {\n");
+    /* SUB prints booleans as true/false and drops the trailing .0 on a float
+       with no fractional part. Java's println does neither, so route printing
+       through a helper to keep output identical to the interpreter's. */
+    sb_append(sb, "\n    static String _subStr(Object v) {\n");
+    sb_append(sb, "        if (v instanceof Double) {\n");
+    sb_append(sb, "            double d = (Double) v;\n");
+    sb_append(sb, "            if (d == Math.floor(d) && !Double.isInfinite(d))\n");
+    sb_append(sb, "                return String.valueOf((long) d);\n");
+    sb_append(sb, "        }\n");
+    sb_append(sb, "        return String.valueOf(v);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "\n    static void _subPrint(Object v) {\n");
+    sb_append(sb, "        System.out.println(_subStr(v));\n");
+    sb_append(sb, "    }\n");
 
     /* Two-pass approach: functions and non-function statements separated */
     StringBuilder *main_sb = sb_create();
@@ -1228,11 +1542,21 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
             break;
         case AST_IDENTIFIER: sb_append(sb, "%s", node->value ? node->value : "var"); break;
         case AST_BINARY_EXPR:
+            if (emit_special_binop(sb, node, LANG_SWIFT, generate_expr_swift)) break;
             sb_append(sb, "("); generate_expr_swift(sb, node->left);
             sb_append(sb, " %s ", node->value ? node->value : "+");
             generate_expr_swift(sb, node->right); sb_append(sb, ")"); break;
         case AST_CALL_EXPR:
-            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) sb_append(sb, "print(");
+            {
+                const BuiltinSpelling *bs = builtin_spelling(LANG_SWIFT, node->value);
+                if (bs && node->child_count == 1) {
+                    sb_append(sb, "%s", bs->prefix);
+                    generate_expr_swift(sb, node->children[0]);
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
+            }
+            if (is_print_builtin(node->value)) sb_append(sb, "print(");
             else if (node->value) sb_append(sb, "%s(", node->value);
             else { generate_expr_swift(sb, node->left); sb_append(sb, "("); }
             for (int i = 0; i < node->child_count; i++) {
@@ -1262,10 +1586,14 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
-                    sb_append(sb, "_ %s: Any", node->children[i]->value ? node->children[i]->value : "arg");
+                    sb_append(sb, "_ %s: %s", node->children[i]->value ? node->children[i]->value : "arg",
+                              swift_type(node->children[i]->data_type));
                 }
             }
-            sb_append(sb, ") {\n");
+            sb_append(sb, ")");
+            if (node->data_type != TYPE_VOID && node->data_type != TYPE_UNKNOWN)
+                sb_append(sb, " -> %s", swift_type(node->data_type));
+            sb_append(sb, " {\n");
             if (node->body) generate_node_swift(sb, node->body, indent + 1);
             sb_append(sb, "}\n"); break;
         case AST_FOR_STMT:
@@ -1396,17 +1724,32 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
                 char *escaped = escape_string_for_codegen(node->value ? node->value : "");
                 sb_append(sb, "\"%s\"", escaped ? escaped : "");
                 free(escaped);
+            } else if (node->data_type == TYPE_INT && node->value) {
+                /* SUB integers are 64-bit, so parameters and returns are Long.
+                   Kotlin does not widen an Int literal to Long implicitly, so
+                   a bare `2` fails to type-check against a Long parameter. */
+                sb_append(sb, "%sL", node->value);
             } else {
                 sb_append(sb, "%s", node->value ? node->value : "null");
             }
             break;
         case AST_IDENTIFIER: sb_append(sb, "%s", node->value ? node->value : "var"); break;
         case AST_BINARY_EXPR:
+            if (emit_special_binop(sb, node, LANG_KOTLIN, generate_expr_kotlin)) break;
             sb_append(sb, "("); generate_expr_kotlin(sb, node->left);
             sb_append(sb, " %s ", node->value ? node->value : "+");
             generate_expr_kotlin(sb, node->right); sb_append(sb, ")"); break;
         case AST_CALL_EXPR:
-            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0)) sb_append(sb, "println(");
+            {
+                const BuiltinSpelling *bs = builtin_spelling(LANG_KOTLIN, node->value);
+                if (bs && node->child_count == 1) {
+                    sb_append(sb, "%s", bs->prefix);
+                    generate_expr_kotlin(sb, node->children[0]);
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
+            }
+            if (is_print_builtin(node->value)) sb_append(sb, "println(");
             else if (node->value) sb_append(sb, "%s(", node->value);
             else { generate_expr_kotlin(sb, node->left); sb_append(sb, "("); }
             for (int i = 0; i < node->child_count; i++) {
@@ -1436,10 +1779,14 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
-                    sb_append(sb, "%s: Any", node->children[i]->value ? node->children[i]->value : "arg");
+                    sb_append(sb, "%s: %s", node->children[i]->value ? node->children[i]->value : "arg",
+                              kotlin_type(node->children[i]->data_type));
                 }
             }
-            sb_append(sb, ") {\n");
+            sb_append(sb, ")");
+            if (node->data_type != TYPE_VOID && node->data_type != TYPE_UNKNOWN)
+                sb_append(sb, ": %s", kotlin_type(node->data_type));
+            sb_append(sb, " {\n");
             if (node->body) generate_node_kotlin(sb, node->body, indent + 1);
             sb_append(sb, "}\n"); break;
         case AST_FOR_STMT:
@@ -1685,7 +2032,7 @@ static void generate_asm_expr(StringBuilder *sb, ASTNode *node, int *str_lbl, St
             else if (node->value && strcmp(node->value, "~") == 0) sb_append(sb, "    not rax\n");
             break;
         case AST_CALL_EXPR:
-            if (node->value && (strcmp(node->value, "print") == 0 || strcmp(node->value, "println") == 0 || strcmp(node->value, "show") == 0)) {
+            if (is_print_builtin(node->value)) {
                 if (node->child_count > 0) {
                     ASTNode *arg = node->children[0];
                     generate_asm_expr(sb, arg, str_lbl, data_sb);
@@ -1812,6 +2159,7 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
             break;
 
         case AST_BINARY_EXPR:
+            if (emit_special_binop(sb, node, LANG_RUBY, generate_expr_ruby)) break;
             sb_append(sb, "(");
             generate_expr_ruby(sb, node->left);
             sb_append(sb, " %s ", node->value ? node->value : "+");
@@ -1821,7 +2169,16 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
 
         case AST_CALL_EXPR: {
             const char *func_name = node->value ? node->value : "func";
-            if (strcmp(func_name, "print") == 0 || strcmp(func_name, "show") == 0) {
+            {
+                const BuiltinSpelling *bs = builtin_spelling(LANG_RUBY, node->value);
+                if (bs && node->child_count == 1) {
+                    sb_append(sb, "%s", bs->prefix);
+                    generate_expr_ruby(sb, node->children[0]);
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
+            }
+            if (is_print_builtin(func_name)) {
                 sb_append(sb, "puts");
                 if (node->child_count > 0) {
                     sb_append(sb, " ");
@@ -2104,7 +2461,7 @@ static void indent_go(StringBuilder *sb, int level) {
 static bool ast_needs_fmt(ASTNode *node) {
     if (!node) return false;
     if (node->type == AST_CALL_EXPR && node->value &&
-        (strcmp(node->value, "print") == 0 || strcmp(node->value, "show") == 0))
+        is_print_builtin(node->value))
         return true;
     if (ast_needs_fmt(node->left)) return true;
     if (ast_needs_fmt(node->right)) return true;
@@ -2159,6 +2516,7 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
             break;
 
         case AST_BINARY_EXPR:
+            if (emit_special_binop(sb, node, LANG_GO, generate_expr_go)) break;
             sb_append(sb, "(");
             generate_expr_go(sb, node->left);
             sb_append(sb, " %s ", node->value ? node->value : "+");
@@ -2183,7 +2541,16 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
 
         case AST_CALL_EXPR: {
             const char *func_name = node->value ? node->value : "fn";
-            if (strcmp(func_name, "print") == 0 || strcmp(func_name, "show") == 0) {
+            {
+                const BuiltinSpelling *bs = builtin_spelling(LANG_GO, node->value);
+                if (bs && node->child_count == 1) {
+                    sb_append(sb, "%s", bs->prefix);
+                    generate_expr_go(sb, node->children[0]);
+                    sb_append(sb, "%s", bs->suffix);
+                    break;
+                }
+            }
+            if (is_print_builtin(func_name)) {
                 sb_append(sb, "fmt.Println(");
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
@@ -2294,12 +2661,17 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
                     if (node->children[i] && node->children[i]->value) {
-                        sb_append(sb, "%s", node->children[i]->value);
+                        /* Go needs a type per parameter, not one trailing type
+                           shared by every name. */
+                        sb_append(sb, "%s %s", node->children[i]->value,
+                                  go_type(node->children[i]->data_type));
                     }
                 }
-                sb_append(sb, " interface{}");
             }
-            sb_append(sb, ") {\n");
+            sb_append(sb, ")");
+            if (node->data_type != TYPE_VOID && node->data_type != TYPE_UNKNOWN)
+                sb_append(sb, " %s", go_type(node->data_type));
+            sb_append(sb, " {\n");
             if (node->body) {
                 generate_node_go(sb, node->body, indent + 1);
             }

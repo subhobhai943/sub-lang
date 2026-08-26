@@ -1,0 +1,473 @@
+/* ========================================
+   SUB Language - Shared Signature Inference
+   See codegen_infer.h for why this exists.
+   ======================================== */
+
+#include "codegen_infer.h"
+#include "windows_compat.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+/* ----------------------------------------------------------------
+   Function registry
+   ---------------------------------------------------------------- */
+
+#define MAX_TRACKED_FUNCTIONS 512
+
+typedef struct {
+    ASTNode *decl;        /* the AST_FUNCTION_DECL node */
+    const char *name;
+} FnEntry;
+
+typedef struct {
+    FnEntry items[MAX_TRACKED_FUNCTIONS];
+    int count;
+} FnTable;
+
+static FnTable g_fns;
+
+static ASTNode* fn_lookup(const char *name) {
+    if (!name) return NULL;
+    for (int i = 0; i < g_fns.count; i++) {
+        if (g_fns.items[i].name && strcmp(g_fns.items[i].name, name) == 0)
+            return g_fns.items[i].decl;
+    }
+    return NULL;
+}
+
+/* ----------------------------------------------------------------
+   Type lattice
+   ---------------------------------------------------------------- */
+
+/* Combine two observations about the same slot.
+   Widening int -> float is safe; genuinely conflicting observations
+   (e.g. a parameter called with both a string and a number) collapse to
+   TYPE_GENERIC so backends can fall back to their "any" type. */
+static DataType type_merge(DataType a, DataType b) {
+    if (a == TYPE_UNKNOWN) return b;
+    if (b == TYPE_UNKNOWN) return a;
+    if (a == b) return a;
+
+    /* null tells us nothing about the value's shape */
+    if (a == TYPE_NULL) return b;
+    if (b == TYPE_NULL) return a;
+
+    /* auto is a placeholder, not a real observation */
+    if (a == TYPE_AUTO) return b;
+    if (b == TYPE_AUTO) return a;
+
+    if ((a == TYPE_INT && b == TYPE_FLOAT) || (a == TYPE_FLOAT && b == TYPE_INT))
+        return TYPE_FLOAT;
+
+    return TYPE_GENERIC;
+}
+
+/* ----------------------------------------------------------------
+   Builtin return types
+   ---------------------------------------------------------------- */
+
+static int builtin_return_type(const char *name, DataType *out) {
+    static const struct { const char *name; DataType type; } builtins[] = {
+        {"str",       TYPE_STRING}, {"to_string", TYPE_STRING},
+        {"string",    TYPE_STRING}, {"input",     TYPE_STRING},
+        {"upper",     TYPE_STRING}, {"lower",     TYPE_STRING},
+        {"trim",      TYPE_STRING}, {"replace",   TYPE_STRING},
+        {"substring", TYPE_STRING}, {"char_at",   TYPE_STRING},
+        {"join",      TYPE_STRING}, {"type",      TYPE_STRING},
+
+        {"int",       TYPE_INT},    {"len",       TYPE_INT},
+        {"length",    TYPE_INT},
+
+        {"float",     TYPE_FLOAT},  {"sqrt",      TYPE_FLOAT},
+        {"abs",       TYPE_FLOAT},  {"round",     TYPE_FLOAT},
+        {"floor",     TYPE_FLOAT},  {"ceil",      TYPE_FLOAT},
+
+        {"bool",      TYPE_BOOL},   {"contains",  TYPE_BOOL},
+
+        {"array",     TYPE_ARRAY},  {"split",     TYPE_ARRAY},
+        {"range",     TYPE_ARRAY},
+
+        {"print",     TYPE_VOID},   {"println",   TYPE_VOID},
+        {"show",      TYPE_VOID},   {"push",      TYPE_VOID},
+        {"append",    TYPE_VOID},
+    };
+
+    if (!name) return 0;
+    for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
+        if (strcmp(builtins[i].name, name) == 0) {
+            *out = builtins[i].type;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* ----------------------------------------------------------------
+   Expression typing
+   ---------------------------------------------------------------- */
+
+static int is_comparison_op(const char *op) {
+    if (!op) return 0;
+    return strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
+           strcmp(op, "<")  == 0 || strcmp(op, ">")  == 0 ||
+           strcmp(op, "<=") == 0 || strcmp(op, ">=") == 0 ||
+           strcmp(op, "&&") == 0 || strcmp(op, "||") == 0 ||
+           strcmp(op, "and") == 0 || strcmp(op, "or") == 0;
+}
+
+/* Guard against cycles in mutually recursive functions. */
+static int g_expr_depth = 0;
+#define MAX_EXPR_DEPTH 64
+
+/* The function whose body is currently being typed. Identifiers inside a body
+   are most often the function's own parameters, and the parameter declaration
+   is where the inferred type lives - the identifier nodes referencing it are
+   left untyped by the parser. Without this, `return n` looks untyped and the
+   whole function degrades to the generic fallback type. */
+static ASTNode *g_current_fn = NULL;
+
+/* The parser marks un-annotated declarations TYPE_AUTO and leaves other nodes
+   TYPE_UNKNOWN. Both mean "nothing known yet", so every check below has to
+   accept either - treating AUTO as a resolved type is what left recursive
+   functions typed as `auto` and pushed backends onto their fallback type. */
+static int type_is_unresolved(DataType t) {
+    return t == TYPE_UNKNOWN || t == TYPE_AUTO;
+}
+
+static DataType param_type_in_current_fn(const char *name) {
+    if (!g_current_fn || !name) return TYPE_UNKNOWN;
+    for (int i = 0; i < g_current_fn->child_count; i++) {
+        ASTNode *p = g_current_fn->children[i];
+        if (p && p->value && strcmp(p->value, name) == 0)
+            return p->data_type;
+    }
+    return TYPE_UNKNOWN;
+}
+
+DataType infer_expr_type(ASTNode *expr) {
+    if (!expr) return TYPE_UNKNOWN;
+    if (g_expr_depth > MAX_EXPR_DEPTH) return TYPE_UNKNOWN;
+
+    g_expr_depth++;
+    DataType result = TYPE_UNKNOWN;
+
+    switch (expr->type) {
+        case AST_LITERAL:
+            result = expr->data_type;
+            break;
+
+        case AST_ARRAY_LITERAL:
+            result = TYPE_ARRAY;
+            break;
+
+        case AST_OBJECT_LITERAL:
+            result = TYPE_OBJECT;
+            break;
+
+        case AST_RANGE_EXPR:
+            result = TYPE_ARRAY;
+            break;
+
+        case AST_BINARY_EXPR: {
+            if (is_comparison_op(expr->value)) {
+                result = TYPE_BOOL;
+                break;
+            }
+            DataType l = infer_expr_type(expr->left);
+            DataType r = infer_expr_type(expr->right);
+
+            /* Concatenation: a string on either side makes the whole
+               expression a string, even when the other side is a number. */
+            if (expr->value && strcmp(expr->value, "+") == 0 &&
+                (l == TYPE_STRING || r == TYPE_STRING)) {
+                result = TYPE_STRING;
+                break;
+            }
+            /* True division always yields a float in SUB. */
+            if (expr->value && strcmp(expr->value, "/") == 0) {
+                result = TYPE_FLOAT;
+                break;
+            }
+            result = type_merge(l, r);
+            break;
+        }
+
+        case AST_UNARY_EXPR:
+            if (expr->value && (strcmp(expr->value, "!") == 0 ||
+                                strcmp(expr->value, "not") == 0))
+                result = TYPE_BOOL;
+            else
+                result = infer_expr_type(expr->right ? expr->right : expr->left);
+            break;
+
+        case AST_TERNARY_EXPR:
+            result = type_merge(infer_expr_type(expr->left),
+                                infer_expr_type(expr->right));
+            break;
+
+        case AST_CALL_EXPR: {
+            DataType bt;
+            if (expr->value && builtin_return_type(expr->value, &bt)) {
+                result = bt;
+                break;
+            }
+            ASTNode *callee = fn_lookup(expr->value);
+            if (callee) result = callee->data_type;
+            break;
+        }
+
+        case AST_IDENTIFIER:
+            /* The semantic pass annotates identifiers it could resolve;
+               otherwise fall back to the enclosing function's parameters. */
+            result = expr->data_type;
+            if (type_is_unresolved(result))
+                result = param_type_in_current_fn(expr->value);
+            break;
+
+        default:
+            result = expr->data_type;
+            break;
+    }
+
+    g_expr_depth--;
+    return result;
+}
+
+/* ----------------------------------------------------------------
+   Return type inference
+   ---------------------------------------------------------------- */
+
+/* Walk a function body collecting the types of every `return <expr>`.
+   Does not descend into nested function declarations, whose returns
+   belong to that inner function. */
+static void collect_return_types(ASTNode *node, DataType *acc, int *saw_value_return) {
+    if (!node) return;
+
+    if (node->type == AST_FUNCTION_DECL || node->type == AST_ARROW_FUNCTION)
+        return;
+
+    if (node->type == AST_RETURN_STMT) {
+        if (node->right) {
+            *saw_value_return = 1;
+            *acc = type_merge(*acc, infer_expr_type(node->right));
+        }
+        /* A bare `return` contributes nothing; a function mixing bare and
+           value returns still needs the value type. */
+    }
+
+    collect_return_types(node->left,      acc, saw_value_return);
+    collect_return_types(node->right,     acc, saw_value_return);
+    collect_return_types(node->condition, acc, saw_value_return);
+    collect_return_types(node->body,      acc, saw_value_return);
+    for (int i = 0; i < node->child_count; i++)
+        collect_return_types(node->children[i], acc, saw_value_return);
+    collect_return_types(node->next,      acc, saw_value_return);
+}
+
+DataType infer_return_type(ASTNode *body) {
+    DataType acc = TYPE_UNKNOWN;
+    int saw_value_return = 0;
+    collect_return_types(body, &acc, &saw_value_return);
+
+    if (!saw_value_return) return TYPE_VOID;
+    /* Returns a value we could not classify - let the backend pick its widest
+       type rather than emitting `void`, which miscompiles on every target
+       that checks return types. */
+    if (type_is_unresolved(acc) || acc == TYPE_NULL) return TYPE_GENERIC;
+    return acc;
+}
+
+/* ----------------------------------------------------------------
+   Parameter inference from call sites
+   ---------------------------------------------------------------- */
+
+static void propagate_call_sites(ASTNode *node) {
+    if (!node) return;
+
+    if (node->type == AST_CALL_EXPR && node->value) {
+        ASTNode *decl = fn_lookup(node->value);
+        if (decl) {
+            int n = node->child_count < decl->child_count
+                        ? node->child_count : decl->child_count;
+            for (int i = 0; i < n; i++) {
+                ASTNode *param = decl->children[i];
+                ASTNode *arg   = node->children[i];
+                if (!param || !arg) continue;
+                /* Never override a type the programmer wrote down. */
+                if (param->metadata) continue;
+                DataType at = infer_expr_type(arg);
+                if (!type_is_unresolved(at))
+                    param->data_type = type_merge(param->data_type, at);
+            }
+        }
+    }
+
+    propagate_call_sites(node->left);
+    propagate_call_sites(node->right);
+    propagate_call_sites(node->condition);
+    propagate_call_sites(node->body);
+    for (int i = 0; i < node->child_count; i++)
+        propagate_call_sites(node->children[i]);
+    propagate_call_sites(node->next);
+}
+
+/* ----------------------------------------------------------------
+   Parameter inference from body usage
+   ---------------------------------------------------------------- */
+
+/* Look for uses of `pname` inside `node` that reveal its type, e.g.
+   `"Hello, " + name` implies name is a string. Used only when no call
+   site pinned the parameter down. */
+static void scan_param_usage(ASTNode *node, const char *pname, DataType *acc) {
+    if (!node || !pname) return;
+
+    if (node->type == AST_BINARY_EXPR && node->value) {
+        ASTNode *l = node->left, *r = node->right;
+        int l_is_param = l && l->type == AST_IDENTIFIER && l->value &&
+                         strcmp(l->value, pname) == 0;
+        int r_is_param = r && r->type == AST_IDENTIFIER && r->value &&
+                         strcmp(r->value, pname) == 0;
+
+        if (l_is_param || r_is_param) {
+            ASTNode *other = l_is_param ? r : l;
+            DataType ot = infer_expr_type(other);
+
+            if (strcmp(node->value, "+") == 0 && ot == TYPE_STRING)
+                *acc = type_merge(*acc, TYPE_STRING);
+            else if (is_comparison_op(node->value) && ot != TYPE_UNKNOWN &&
+                     ot != TYPE_BOOL)
+                *acc = type_merge(*acc, ot);
+            else if (!is_comparison_op(node->value) && ot != TYPE_UNKNOWN)
+                *acc = type_merge(*acc, ot);
+        }
+    }
+
+    /* Passing the parameter straight through to another function tells us
+       what that function expects. */
+    if (node->type == AST_CALL_EXPR && node->value) {
+        ASTNode *decl = fn_lookup(node->value);
+        if (decl) {
+            int n = node->child_count < decl->child_count
+                        ? node->child_count : decl->child_count;
+            for (int i = 0; i < n; i++) {
+                ASTNode *arg = node->children[i];
+                if (arg && arg->type == AST_IDENTIFIER && arg->value &&
+                    strcmp(arg->value, pname) == 0 && decl->children[i])
+                    *acc = type_merge(*acc, decl->children[i]->data_type);
+            }
+        }
+    }
+
+    scan_param_usage(node->left,      pname, acc);
+    scan_param_usage(node->right,     pname, acc);
+    scan_param_usage(node->condition, pname, acc);
+    scan_param_usage(node->body,      pname, acc);
+    for (int i = 0; i < node->child_count; i++)
+        scan_param_usage(node->children[i], pname, acc);
+    scan_param_usage(node->next,      pname, acc);
+}
+
+/* ----------------------------------------------------------------
+   Driver
+   ---------------------------------------------------------------- */
+
+static void collect_functions(ASTNode *node) {
+    if (!node) return;
+
+    if (node->type == AST_FUNCTION_DECL && node->value &&
+        g_fns.count < MAX_TRACKED_FUNCTIONS) {
+        if (!fn_lookup(node->value)) {
+            g_fns.items[g_fns.count].decl = node;
+            g_fns.items[g_fns.count].name = node->value;
+            g_fns.count++;
+        }
+    }
+
+    collect_functions(node->left);
+    collect_functions(node->right);
+    collect_functions(node->condition);
+    collect_functions(node->body);
+    for (int i = 0; i < node->child_count; i++)
+        collect_functions(node->children[i]);
+    collect_functions(node->next);
+}
+
+void infer_function_signatures(ASTNode *program) {
+    if (!program) return;
+
+    g_fns.count = 0;
+    g_expr_depth = 0;
+    collect_functions(program);
+    if (g_fns.count == 0) return;
+
+    /* The parser stores the written-out type name in metadata whenever the
+       source annotated a parameter, so a non-NULL metadata is already the
+       "explicitly typed" flag - inference only reads it, never writes it. */
+
+    /* Types flow both ways: a call site pins down a parameter, which fixes a
+       return type, which pins down a parameter one level up. Iterate to a
+       fixpoint with a small bound - three rounds settles every shape we
+       generate, and the bound keeps mutual recursion from looping. */
+    for (int round = 0; round < 3; round++) {
+        propagate_call_sites(program);
+
+        for (int i = 0; i < g_fns.count; i++) {
+            ASTNode *fn = g_fns.items[i].decl;
+            if (type_is_unresolved(fn->data_type)) {
+                g_current_fn = fn;
+                DataType rt = infer_return_type(fn->body);
+                g_current_fn = NULL;
+                /* Leave it unresolved for now if the body only told us
+                   "some value" - a later round may pin it down properly
+                   once callee return types are known. */
+                if (!type_is_unresolved(rt) && rt != TYPE_GENERIC) fn->data_type = rt;
+            }
+        }
+    }
+
+    /* Fill any parameter still unresolved from how the body uses it. */
+    for (int i = 0; i < g_fns.count; i++) {
+        ASTNode *fn = g_fns.items[i].decl;
+        for (int p = 0; p < fn->child_count; p++) {
+            ASTNode *param = fn->children[p];
+            if (!param || param->metadata) continue;
+            if (!type_is_unresolved(param->data_type)) continue;
+
+            DataType acc = TYPE_UNKNOWN;
+            g_current_fn = fn;
+            scan_param_usage(fn->body, param->value, &acc);
+            g_current_fn = NULL;
+            if (!type_is_unresolved(acc)) param->data_type = acc;
+        }
+    }
+
+    /* Anything still unknown is genuinely unconstrained - a numeric default
+       matches SUB's most common use and what the C backend always assumed. */
+    for (int i = 0; i < g_fns.count; i++) {
+        ASTNode *fn = g_fns.items[i].decl;
+        for (int p = 0; p < fn->child_count; p++) {
+            ASTNode *param = fn->children[p];
+            if (!param) continue;
+            if (type_is_unresolved(param->data_type))
+                param->data_type = TYPE_INT;
+        }
+        if (type_is_unresolved(fn->data_type)) {
+            g_current_fn = fn;
+            fn->data_type = infer_return_type(fn->body);
+            g_current_fn = NULL;
+        }
+    }
+
+    if (getenv("SUB_INFER_DEBUG")) {
+        for (int i = 0; i < g_fns.count; i++) {
+            ASTNode *f = g_fns.items[i].decl;
+            fprintf(stderr, "[infer] %s ret=%d", f->value, (int)f->data_type);
+            for (int p = 0; p < f->child_count; p++)
+                fprintf(stderr, " %s=%d", f->children[p]->value, (int)f->children[p]->data_type);
+            fprintf(stderr, "\n");
+        }
+    }
+
+}

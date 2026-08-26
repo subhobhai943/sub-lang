@@ -7,19 +7,19 @@
 
 # --- Helper Functions ---
 
-function add(a, b) {
+fn add(a, b) {
     return a + b
 }
 
-function subtract(a, b) {
+fn subtract(a, b) {
     return a - b
 }
 
-function multiply(a, b) {
+fn multiply(a, b) {
     return a * b
 }
 
-function divide(a, b) {
+fn divide(a, b) {
     if b == 0 {
         println("Error: Division by zero!")
         return null
@@ -27,7 +27,7 @@ function divide(a, b) {
     return a / b
 }
 
-function modulo(a, b) {
+fn modulo(a, b) {
     if b == 0 {
         println("Error: Modulo by zero!")
         return null
@@ -35,11 +35,11 @@ function modulo(a, b) {
     return a % b
 }
 
-function power(a, b) {
+fn power(a, b) {
     return a ** b
 }
 
-function square_root(a) {
+fn square_root(a) {
     if a < 0 {
         println("Error: Cannot take square root of a negative number!")
         return null
@@ -47,13 +47,13 @@ function square_root(a) {
     return sqrt(a)
 }
 
-function absolute(a) {
+fn absolute(a) {
     return abs(a)
 }
 
 # --- Display Menu ---
 
-function show_menu() {
+fn show_menu() {
     println("")
     println("╔══════════════════════════════════════╗")
     println("║       SUB LANGUAGE CALCULATOR        ║")
@@ -73,13 +73,13 @@ function show_menu() {
 
 # --- Main Calculator Loop ---
 
-var running = true
+let running = true
 
 while running {
     show_menu()
 
-    var choice = input("Enter your choice (0-8): ")
-    var op = int(choice)
+    let choice = input("Enter your choice (0-8): ")
+    let op = int(choice)
 
     if op == 0 {
         println("")
@@ -87,27 +87,27 @@ while running {
         running = false
     } elif op == 7 {
         # Square root only needs one number
-        var num_str = input("Enter a number: ")
-        var num = float(num_str)
-        var result = square_root(num)
+        let num_str = input("Enter a number: ")
+        let num = float(num_str)
+        let result = square_root(num)
         if result != null {
             println("sqrt(" + str(num) + ") = " + str(result))
         }
     } elif op == 8 {
         # Absolute value only needs one number
-        var num_str = input("Enter a number: ")
-        var num = float(num_str)
-        var result = absolute(num)
+        let num_str = input("Enter a number: ")
+        let num = float(num_str)
+        let result = absolute(num)
         println("|" + str(num) + "| = " + str(result))
     } elif op >= 1 && op <= 6 {
         # Two-operand operations
-        var a_str = input("Enter first number: ")
-        var b_str = input("Enter second number: ")
-        var a = float(a_str)
-        var b = float(b_str)
+        let a_str = input("Enter first number: ")
+        let b_str = input("Enter second number: ")
+        let a = float(a_str)
+        let b = float(b_str)
 
-        var result = null
-        var symbol = ""
+        let result = null
+        let symbol = ""
 
         if op == 1 {
             result = add(a, b)
