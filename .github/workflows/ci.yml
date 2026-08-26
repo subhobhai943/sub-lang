@@ -76,16 +76,22 @@ jobs:
       - name: Conformance (targets available on every runner)
         # python3 and a C/C++ compiler are present everywhere; the full
         # multi-language sweep runs once, in the `conformance` job.
-        run: python3 tests/conformance.py native c cpp python
+        run: python3 tests/conformance.py native native-c c cpp python
 
-      - name: subc honours $CC
+      - name: Native backend needs no toolchain
+        # The point of the machine-code backend is that a compiled SUB
+        # program does not require a C compiler. This compiles and runs with
+        # PATH emptied, so a gcc sitting on the runner cannot rescue it.
+        run: python3 tests/native_backend.py
+
+      - name: subc --via-c honours $CC
         run: |
-          CC=${{ matrix.cc }} ./subc examples/fibonacci.sb -o /tmp/fib_cc
+          CC=${{ matrix.cc }} ./subc examples/fibonacci.sb --via-c -o /tmp/fib_cc
           /tmp/fib_cc
 
-      - name: subc reports a missing compiler clearly
+      - name: subc --via-c reports a missing compiler clearly
         run: |
-          if CC=definitely-not-a-compiler ./subc examples/fibonacci.sb -o /tmp/fib_bad 2>err.txt; then
+          if CC=definitely-not-a-compiler ./subc examples/fibonacci.sb --via-c -o /tmp/fib_bad 2>err.txt; then
             echo "expected subc to fail with a bogus CC"; exit 1
           fi
           grep -q "definitely-not-a-compiler" err.txt
@@ -123,7 +129,9 @@ jobs:
         run: python3 tests/run_tests.py
 
       - name: Conformance (targets available on this runner)
-        run: python3 tests/conformance.py native c cpp python
+        # `native` skips itself here: the machine-code backend targets
+        # x86-64 Linux, so on Windows subc goes through the C backend.
+        run: python3 tests/conformance.py native native-c c cpp python
 
   conformance:
     name: conformance (all language targets)
@@ -164,6 +172,9 @@ jobs:
 
       - name: Conformance across every installed target
         run: python3 tests/conformance.py
+
+      - name: Native backend needs no toolchain
+        run: python3 tests/native_backend.py
 
   syntax:
     name: examples use the canonical syntax

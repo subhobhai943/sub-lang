@@ -21,7 +21,7 @@
 
 ---
 
-> **v2.0.0** — Native compiler via optimized C backend, direct AST interpreter (`subi`), multi-target transpiler (`sub`), classes, UI component declarations, and embed blocks.
+> **v2.0.0** — Native compiler that emits x86-64 machine code itself (no C compiler required), direct AST interpreter (`subi`), multi-target transpiler (`sub`), classes, UI component declarations, and embed blocks.
 
 ---
 
@@ -44,6 +44,7 @@
   - [Cross-Platform UI Declarations](#cross-platform-ui-declarations)
 - [Built-in Functions](#built-in-functions)
 - [Supported Transpilation Targets](#supported-transpilation-targets)
+- [Numbers, division and errors](#numbers-division-and-errors)
 - [Testing](#testing)
 - [Architecture](#architecture)
 - [Contributing & License](#license)
@@ -54,7 +55,7 @@
 
 **SUB (Simple Universal Builder)** is a clean, versatile programming language designed for developer productivity and maximum portability:
 
-- 🚀 **Native Compilation**: Compiles `.sb` code directly to native machine binaries via an optimized C backend.
+- 🚀 **Native Compilation**: `subc` emits x86-64 machine code and writes the ELF executable itself. No assembler, no linker, no C compiler, no libc - a compiled SUB program is a self-contained static binary a few kilobytes in size.
 - 🔄 **Multi-Target Transpilation**: Generates idiomatic code in Python, JavaScript, TypeScript, C, C++, Rust, Go, Java, Kotlin, Swift, Ruby, x86-64 Assembly, and CSS.
 - ⚡ **Direct AST Interpretation**: Run `.sb` programs instantly or interactively in REPL mode via `subi`.
 - 🎨 **Minimal, Expressive Syntax**: One canonical spelling per idea - `let`, `fn`, `null`, and brace-delimited `{}` blocks. Older spellings still compile, with a deprecation note.
@@ -63,6 +64,7 @@
 
 ## Key Highlights
 
+- **A compiler, not a wrapper**: on x86-64 Linux `subc` goes from `.sb` straight to machine code in one process. Nothing is shelled out to, so the machine that compiles a SUB program needs no toolchain beyond `subc` itself.
 - **Dynamic & Static Flexibility**: SUB is dynamically typed, but a shared inference pass gives every function a concrete signature when targeting a statically typed language - so `fn add(a, b)` becomes `long add(long, long)` in C and `fn add(a: i64, b: i64) -> i64` in Rust without annotations.
 - **Rich Standard Library**: 25+ built-in utility functions, string methods, math wrappers, and dynamic array operations.
 - **Embedded Foreign Code**: Seamlessly mix foreign C, Go, or Python directly inside `.sb` files using `#embed` blocks.
@@ -90,13 +92,16 @@ This builds the three primary CLI tools:
 The toolchain builds and runs on Linux, macOS and Windows (MinGW/MSYS2 or
 MSVC). Platform handling is resolved at build time rather than assumed:
 
+- On **x86-64 Linux**, `subc` emits machine code directly and needs no other
+  tool. Everywhere else it falls back to generating C and building it with a
+  host compiler, and says so when it does.
 - `subc` generates code for the **host** platform and appends `.exe`
   automatically on Windows.
-- The C compiler `subc` shells out to defaults to `clang` on macOS and `gcc`
+- On the fallback path the C compiler defaults to `clang` on macOS and `gcc`
   elsewhere. Set `CC` to override it:
 
   ```bash
-  CC=clang ./subc hello.sb -o hello
+  CC=clang ./subc hello.sb --via-c -o hello
   ```
 
 - Console output is switched to UTF-8 on Windows so the banner and any
@@ -108,7 +113,7 @@ MSVC). Platform handling is resolved at build time rather than assumed:
 
 ### 1. Native Compiler (`subc`)
 
-Compiles SUB source code directly to a standalone native machine executable:
+Compiles SUB source code to a standalone native executable:
 
 ```bash
 # Compile and create executable (default: ./hello)
@@ -120,6 +125,39 @@ Compiles SUB source code directly to a standalone native machine executable:
 # Run native binary
 ./calc
 ```
+
+**Two backends.** On x86-64 Linux the default is the built-in machine-code
+backend: `subc` encodes x86-64 instructions, emits its own runtime, and
+writes a static ELF64 executable, all in-process. On other hosts, and for
+programs using something the machine-code backend does not implement yet, it
+generates C and hands that to a host compiler instead - printing a note
+saying which construct forced the fallback.
+
+```bash
+./subc hello.sb --native     # require the machine-code backend; fail rather than fall back
+./subc hello.sb --via-c      # generate C and build it with $CC
+```
+
+The difference is visible in what comes out:
+
+| | machine-code backend | via a C compiler |
+|---|---|---|
+| Tools needed at compile time | none | a working `cc` |
+| `examples/fibonacci.sb` binary | ~3.5 KB, static, no `libc` | ~16 KB, dynamically linked |
+| Compile time | ~1 ms | ~100 ms |
+| `fib(30)` runtime | ~13 ms | ~3 ms (`gcc -O2`) |
+
+The generated code is unoptimised - one accumulator register, everything else
+through memory - so it gives up roughly 4x against `gcc -O2` while still
+running about 90x faster than the interpreter. What it buys is that nothing
+else has to be installed.
+
+**Not yet in the machine-code backend:** arrays and objects, classes,
+`input()`, string slicing (`substring`, `char_at`, `replace`, `split`,
+`join`), `try`/`catch`, `switch`, `do`/`while`, iterating anything other than
+`range(...)`, and functions of more than six parameters. Programs using these
+compile through the C backend automatically, and `subc` names the construct
+that forced the fallback rather than failing silently.
 
 ### 2. Direct Interpreter (`subi`)
 
@@ -438,6 +476,19 @@ python3 tests/run_tests.py
 Validates `subi`, `subc` (native binary execution), `sub python`, `sub js`,
 and `sub cpp` (compiled via `g++`).
 
+**Native backend suite** - did `subc` really compile that without help?
+
+```bash
+python3 tests/native_backend.py
+```
+
+Compiles every conformance case with `PATH` emptied, runs the result with
+`PATH` emptied, and reads the ELF header to confirm there is no dynamic
+segment and no interpreter named. A green run means no compiler, assembler,
+linker or `libc` was involved - which is the one thing the conformance suite
+cannot tell you, since it only compares output. On hosts the backend does not
+target it reports that and exits 0.
+
 **Conformance suite** - does a program *mean the same thing* on every backend?
 
 ```bash
@@ -447,9 +498,10 @@ python3 tests/conformance.py python c    # just these
 ```
 
 The interpreter is the reference. For each program in `tests/conformance/`,
-the harness runs it under `subi`, then compiles it with `subc` and transpiles
-it to every target whose toolchain is on `PATH`, builds and runs each result,
-and diffs the output against the reference. That is what catches the class of
+the harness runs it under `subi`, then compiles it with `subc` through both
+of its backends (`native` and `native-c`) and transpiles it to every target
+whose toolchain is on `PATH`, builds and runs each result, and diffs the
+output against the reference. That is what catches the class of
 bug where the same source silently produces different answers depending on
 how you ran it.
 
@@ -458,13 +510,59 @@ which nothing actually executed is reported as a failure rather than a pass -
 a missing toolchain can never look green.
 
 Adding a case is just dropping a `.sb` file into `tests/conformance/`;
-whatever the interpreter prints becomes the expected output.
+whatever the interpreter prints - and the status it exits with - becomes the
+expected result. A program that ends in a runtime error is a legitimate case,
+because how a program fails is part of what the language means.
 
 > **What this cannot catch:** because the interpreter is the reference, a bug
 > *in the interpreter* makes every backend agree on the wrong answer and the
 > suite still passes. Interpreter behaviour has to be checked against
 > independently known-correct values. Read a green run as "the
 > implementations agree", not "the language is correct".
+
+---
+
+## Numbers, division and errors
+
+A few behaviours are worth stating outright, because they are the ones where
+languages disagree with each other and a transpiler can quietly inherit the
+wrong one. SUB picks a single answer and every backend implements it.
+
+**Integer division truncates toward zero**, and the remainder takes the sign
+of the left operand - the C, Java and Go rule, not the Python and Ruby one:
+
+```
+ 9 / 2   ->  4          -7 / 2   ->  -3
+ 7 % 3   ->  1          -7 % 3   ->  -1        7 % -3  ->  1
+```
+
+**Float remainder follows `fmod`**, which keeps the sign of the left operand:
+`-7.5 % 3.0` is `-1.5`, not `1.5`.
+
+**Dividing by zero is a runtime error**, for integers and floats alike:
+
+```
+RuntimeError: division by zero
+```
+
+and the program stops with exit status **70**. It is not an infinity, not a
+NaN, not a silent zero, and not a crash. This is the interpreter's behaviour,
+and the compiled and transpiled backends were brought into line with it -
+before that, `7 / 0` raised SIGFPE in C, printed `Infinity` in JavaScript,
+threw in Python and produced `0` in the native backend. Every backend now
+routes `/` and `%` through a small generated helper, so this is also the one
+place to change if a program wants IEEE infinities instead.
+
+**Floats print with six significant digits** (`printf`'s `%g`), trailing
+zeros dropped, switching to exponent form outside `1e-4 … 1e+6`:
+
+```
+1.0 / 3.0  ->  0.333333        sqrt(16.0)  ->  4        1e20  ->  1e+20
+```
+
+Languages that print every digit needed to round-trip a double - JavaScript,
+Python, Rust, Go, Java - go through a formatter that reproduces `%g`, so the
+same program prints the same text everywhere.
 
 ---
 
@@ -487,8 +585,11 @@ source.sb
              │   and identifier with a concrete type, so the statically typed
              │   backends emit consistent signatures instead of each guessing.
              │
-             ├── subc  ─ Native Compiler (src/compilers/sub_native.c + src/codegen/codegen.c)
-             │         └── Emits C99 + runtime library -> $CC -> native binary
+             ├── subc  ─ Native Compiler (src/compilers/sub_native.c)
+             │         ├── src/native/  x86-64 machine code -> static ELF64
+             │         │                (default on x86-64 Linux; no external tools)
+             │         └── src/codegen/codegen.c  C99 + runtime -> $CC -> binary
+             │                          (fallback, and the path on other hosts)
              │
              └── sub   ─ Multi-Target Transpiler (src/compilers/sub.c + src/codegen/)
                        └── Codegen modules for Python, JS, TS, C, C++, Rust,
