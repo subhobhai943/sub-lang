@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/subhobhai943/sub-lang/actions/workflows/ci.yml">
-    <img src="https://github.com/subhobhai943/sub-lang/actions/workflows/build.yml/badge.svg" alt="Build" />
+    <img src="https://github.com/subhobhai943/sub-lang/actions/workflows/ci.yml/badge.svg" alt="Build" />
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" />
@@ -57,13 +57,13 @@
 - 🚀 **Native Compilation**: Compiles `.sb` code directly to native machine binaries via an optimized C backend.
 - 🔄 **Multi-Target Transpilation**: Generates idiomatic code in Python, JavaScript, TypeScript, C, C++, Rust, Go, Java, Kotlin, Swift, Ruby, x86-64 Assembly, and CSS.
 - ⚡ **Direct AST Interpretation**: Run `.sb` programs instantly or interactively in REPL mode via `subi`.
-- 🎨 **Minimal, Expressive Syntax**: Clean syntax with optional semicolons, supporting both brace-delimited `{}` and keyword-delimited `end` blocks.
+- 🎨 **Minimal, Expressive Syntax**: One canonical spelling per idea - `let`, `fn`, `null`, and brace-delimited `{}` blocks. Older spellings still compile, with a deprecation note.
 
 ---
 
 ## Key Highlights
 
-- **Dynamic & Static Flexibility**: Type inference with runtime safety.
+- **Dynamic & Static Flexibility**: SUB is dynamically typed, but a shared inference pass gives every function a concrete signature when targeting a statically typed language - so `fn add(a, b)` becomes `long add(long, long)` in C and `fn add(a: i64, b: i64) -> i64` in Rust without annotations.
 - **Rich Standard Library**: 25+ built-in utility functions, string methods, math wrappers, and dynamic array operations.
 - **Embedded Foreign Code**: Seamlessly mix foreign C, Go, or Python directly inside `.sb` files using `#embed` blocks.
 - **Cross-Platform UI Tree**: First-class declarative syntax for UI windows, labels, buttons, and inputs.
@@ -131,6 +131,14 @@ Executes SUB source code on the fly:
 
 # Run the interactive REPL
 ./subi
+```
+
+All three tools accept `--help` and `--version`:
+
+```bash
+./sub --version     # sub 2.0.0
+./subc --help
+./subi --help
 ```
 
 ### 3. Multi-Target Transpiler (`sub`)
@@ -381,33 +389,82 @@ ui.window(title="SUB App", width=800, height=600) {
 
 ## Supported Transpilation Targets
 
-| Target | Command | Output File |
-|---|---|---|
-| **Python** | `./sub file.sb python` | `file.py` |
-| **JavaScript** | `./sub file.sb js` | `file.js` |
-| **TypeScript** | `./sub file.sb ts` | `file.ts` |
-| **C** | `./sub file.sb c` | `file.c` |
-| **C++** | `./sub file.sb cpp` | `file.cpp` |
-| **Rust** | `./sub file.sb rust` | `file.rs` |
-| **Go** | `./sub file.sb go` | `file.go` |
-| **Java** | `./sub file.sb java` | `file.java` |
-| **Kotlin** | `./sub file.sb kotlin` | `file.kt` |
-| **Swift** | `./sub file.sb swift` | `file.swift` |
-| **Ruby** | `./sub file.sb ruby` | `file.rb` |
-| **Assembly (x86-64)** | `./sub file.sb asm` | `file.asm` |
-| **CSS** | `./sub file.sb css` | `file.css` |
+| Target | Command | Output File | Verified |
+|---|---|---|---|
+| **Python** | `./sub file.sb python` | `file.py` | ✅ executed in CI |
+| **JavaScript** | `./sub file.sb js` | `file.js` | ✅ executed in CI |
+| **C** | `./sub file.sb c` | `file.c` | ✅ executed in CI |
+| **C++** | `./sub file.sb cpp` | `file.cpp` | ✅ executed in CI |
+| **Rust** | `./sub file.sb rust` | `file.rs` | ✅ executed in CI |
+| **Go** | `./sub file.sb go` | `file.go` | ✅ executed in CI |
+| **Java** | `./sub file.sb java` | `SubProgram.java` | ✅ executed in CI |
+| **Ruby** | `./sub file.sb ruby` | `file.rb` | ✅ executed in CI |
+| **Kotlin** | `./sub file.sb kotlin` | `file.kt` | ⚠️ reviewed, not executed |
+| **Swift** | `./sub file.sb swift` | `file.swift` | ⚠️ reviewed, not executed |
+| **TypeScript** | `./sub file.sb ts` | `file.ts` | ⚠️ shares the JS backend |
+| **Assembly (x86-64)** | `./sub file.sb asm` | `file.asm` | ⚠️ incomplete - see below |
+| **CSS** | `./sub file.sb css` | `file.css` | ⚠️ UI declarations only |
+
+"Executed in CI" means the conformance suite compiles and runs the generated
+code and diffs its output against the interpreter. The rest are generated but
+not run automatically - install `swiftc` / `kotlinc` and re-run the suite to
+cover those two.
+
+Java is the one target whose filename is fixed rather than derived: the class
+must be named `SubProgram`, so the file must be `SubProgram.java`.
+
+Two targets are narrower than the table suggests, so treat them accordingly:
+
+- **Assembly** emits top-level arithmetic, variables and `print` correctly,
+  but silently drops function declarations and loops - compiling
+  `examples/fibonacci.sb` yields an empty `main`. Do not rely on it for
+  anything with a function in it.
+- **CSS** does not translate program logic. It emits a base stylesheet plus a
+  class per `ui.*` declaration, so it is only meaningful alongside the UI
+  syntax.
 
 ---
 
 ## Testing
 
-Run the automated regression test suite:
+There are two suites, and they answer different questions.
+
+**Regression suite** - does each tool run without crashing?
 
 ```bash
 python3 tests/run_tests.py
 ```
 
-This validates `subi`, `subc` (native binary execution), `sub python`, `sub js`, and `sub cpp` (compiled via `g++`) across all standard test suites.
+Validates `subi`, `subc` (native binary execution), `sub python`, `sub js`,
+and `sub cpp` (compiled via `g++`).
+
+**Conformance suite** - does a program *mean the same thing* on every backend?
+
+```bash
+make                                     # build first
+python3 tests/conformance.py             # every installed target
+python3 tests/conformance.py python c    # just these
+```
+
+The interpreter is the reference. For each program in `tests/conformance/`,
+the harness runs it under `subi`, then compiles it with `subc` and transpiles
+it to every target whose toolchain is on `PATH`, builds and runs each result,
+and diffs the output against the reference. That is what catches the class of
+bug where the same source silently produces different answers depending on
+how you ran it.
+
+Targets whose toolchain is missing are reported and skipped, and a run in
+which nothing actually executed is reported as a failure rather than a pass -
+a missing toolchain can never look green.
+
+Adding a case is just dropping a `.sb` file into `tests/conformance/`;
+whatever the interpreter prints becomes the expected output.
+
+> **What this cannot catch:** because the interpreter is the reference, a bug
+> *in the interpreter* makes every backend agree on the wrong answer and the
+> suite still passes. Interpreter behaviour has to be checked against
+> independently known-correct values. Read a green run as "the
+> implementations agree", not "the language is correct".
 
 ---
 
@@ -421,15 +478,27 @@ source.sb
     ├── Semantic      (src/core/semantic.c)
     └── Type System   (src/core/type_system.c)
          │
-         ├── subc  ─ Native Compiler  (src/compilers/sub_native.c + src/codegen/codegen.c)
-         │         └── Emits optimized C99 + runtime library -> GCC/Clang -> Native Binary
-         │
          ├── subi  ─ Tree-Walk Interpreter (src/compilers/subi.c + src/core/interpreter.c)
          │         └── Direct AST evaluation & interactive REPL
+         │           (values are dynamic at runtime - no inference needed)
          │
-         └── sub   ─ Multi-Target Transpiler (src/compilers/sub.c + src/codegen/)
-                   └── Codegen modules for Python, JS, TS, C, C++, Rust, Go, Java, Swift, Kotlin, Ruby, ASM, CSS
+         └── Signature Inference (src/codegen/codegen_infer.c)
+             │   Runs before any codegen. Annotates every function, variable
+             │   and identifier with a concrete type, so the statically typed
+             │   backends emit consistent signatures instead of each guessing.
+             │
+             ├── subc  ─ Native Compiler (src/compilers/sub_native.c + src/codegen/codegen.c)
+             │         └── Emits C99 + runtime library -> $CC -> native binary
+             │
+             └── sub   ─ Multi-Target Transpiler (src/compilers/sub.c + src/codegen/)
+                       └── Codegen modules for Python, JS, TS, C, C++, Rust,
+                           Go, Java, Swift, Kotlin, Ruby, ASM, CSS
 ```
+
+Inference is the reason a single fix reaches every backend: it writes types
+onto the AST once, and each codegen module reads them rather than re-deriving
+them. The interpreter bypasses it entirely, since it carries real values at
+runtime.
 
 ---
 
