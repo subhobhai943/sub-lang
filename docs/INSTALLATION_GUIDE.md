@@ -2,219 +2,225 @@
 
 This guide covers how to **download and use pre-built binaries** from the latest release. If you want to build from source instead, see the [Build Guide](BUILD_GUIDE.md).
 
-> **Current Release:** [v1.0.7-beta](https://github.com/subhobhai943/sub-lang/releases/tag/v1.0.7-beta)
+> **Downloads:** [latest release](https://github.com/subhobhai943/sub-lang/releases/latest)
+>
+> Every command below points at `releases/latest`, so it keeps working
+> across releases rather than pinning a version that will go stale.
 
 ---
 
 ## 📦 What's in a Release?
 
-Each release ships **6 binary files** for 3 platforms:
+Every download contains the **whole toolchain** — `sub`, `subc` and `subi`
+— rather than a binary per tool:
 
-| File | Platform | Compiler Type |
-|------|----------|---------------|
-| `sub-linux-x86_64` | Linux (x86-64) | Transpiler (`sub`) |
-| `sub-linux-x86_64-native` | Linux (x86-64) | Native compiler (`subc`) |
-| `sub-macos-arm64` | macOS Apple Silicon (M1/M2/M3) | Transpiler (`sub`) |
-| `sub-macos-arm64-native` | macOS Apple Silicon | Native compiler (`subc`) |
-| `sub-windows-x86_64.exe` | Windows (x86-64) | Transpiler (`sub`) |
-| `sub-windows-x86_64-native.exe` | Windows (x86-64) | Native compiler (`subc`) |
+| File | Platform | Format |
+|------|----------|--------|
+| `sub-linux-x86_64.tar.gz` | Linux (x86-64) | archive |
+| `sub-linux-arm64.tar.gz` | Linux (arm64 / aarch64) | archive |
+| `sub-lang_<version>_amd64.deb` | Debian, Ubuntu and derivatives | package |
+| `sub-lang_<version>_arm64.deb` | Debian, Ubuntu (arm64) | package |
+| `sub-macos-arm64.tar.gz` | macOS Apple Silicon (M1/M2/M3) | archive |
+| `sub-lang-<version>-windows-x86_64.msi` | Windows (x86-64) | installer |
+| `checksums-sha256.txt` | — | checksums for all of the above |
 
-**Transpiler (`sub`)** — converts `.sb` files to Python, JavaScript, Go, Rust, and 8 other languages.  
-**Native compiler (`subc`)** — compiles `.sb` files directly to a standalone executable binary.
+**`sub`** — transpiles `.sb` files to Python, JavaScript, C, C++, Rust, Go,
+Java, Kotlin, Swift, Ruby and more.
+**`subc`** — compiles `.sb` files to a standalone executable. On x86-64
+Linux it emits machine code itself and needs no C compiler installed.
+**`subi`** — runs `.sb` files directly, and gives you a REPL.
+
+### Checking what you downloaded
+
+```bash
+sha256sum -c checksums-sha256.txt
+```
 
 ---
 
-## 🐧 Linux (x86-64)
+## 🐧 Linux (x86-64 and arm64)
 
-### Step 1 — Download
-
-```bash
-# Transpiler
-wget https://github.com/subhobhai943/sub-lang/releases/download/v1.0.7-beta/sub-linux-x86_64 -O sub
-
-# Native compiler
-wget https://github.com/subhobhai943/sub-lang/releases/download/v1.0.7-beta/sub-linux-x86_64-native -O subc
-```
-
-Or use `curl`:
+### Debian, Ubuntu and derivatives
 
 ```bash
-curl -L https://github.com/subhobhai943/sub-lang/releases/download/v1.0.7-beta/sub-linux-x86_64 -o sub
-curl -L https://github.com/subhobhai943/sub-lang/releases/download/v1.0.7-beta/sub-linux-x86_64-native -o subc
+ARCH=$(dpkg --print-architecture)          # amd64 or arm64
+curl -sL https://api.github.com/repos/subhobhai943/sub-lang/releases/latest \
+  | grep -o "https://[^\"]*_${ARCH}\.deb" | head -1 \
+  | xargs curl -Lo sub-lang.deb
+sudo dpkg -i sub-lang.deb
 ```
 
-### Step 2 — Make Executable
+That puts all three tools in `/usr/local/bin`, so they are on your `PATH`
+already. Remove it with `sudo dpkg -r sub-lang`.
+
+### Any other distribution
 
 ```bash
-chmod +x sub subc
+ARCH=$(uname -m); [ "$ARCH" = "aarch64" ] && ARCH=arm64
+curl -sL https://api.github.com/repos/subhobhai943/sub-lang/releases/latest \
+  | grep -o "https://[^\"]*sub-linux-${ARCH}\.tar\.gz" | head -1 \
+  | xargs curl -Lo sub.tar.gz
+tar xzf sub.tar.gz
+sudo install -m755 sub-linux-*/sub sub-linux-*/subc sub-linux-*/subi /usr/local/bin/
 ```
 
-### Step 3 — (Optional) Install System-Wide
+### Verify
 
 ```bash
-sudo mv sub subc /usr/local/bin/
+sub --version
+subc --version
+subi --version
 ```
 
-After this you can run `sub` and `subc` from any directory.
+### Run your first program
 
-### Step 4 — Verify
-
-```bash
-./sub --version
-./subc --version
-```
-
-### Step 5 — Run Your First Program
-
-Create a file `hello.sb`:
+Create `hello.sb`:
 
 ```sub
-#var name = "World"
-#print("Hello, " + name)
+let name = "World"
+println("Hello, " + name)
 ```
 
-**Compile to native binary:**
-
 ```bash
-./subc hello.sb hello
+subi hello.sb              # run it
+subc hello.sb -o hello     # compile it
 ./hello
-# Output: Hello, World
-```
-
-**Transpile to Python:**
-
-```bash
-./sub hello.sb python
-# Outputs: hello.py
+sub hello.sb python        # or transpile it
 python3 hello.py
 ```
+
+On x86-64 Linux, `subc` produces a static binary with no library
+dependencies and does not need a C compiler on the machine.
 
 ---
 
 ## 🍎 macOS (Apple Silicon — M1/M2/M3)
 
-### Step 1 — Download
+### Step 1 — Download and install
 
 ```bash
-# Transpiler
-curl -L https://github.com/subhobhai943/sub-lang/releases/download/v1.0.7-beta/sub-macos-arm64 -o sub
-
-# Native compiler
-curl -L https://github.com/subhobhai943/sub-lang/releases/download/v1.0.7-beta/sub-macos-arm64-native -o subc
+curl -sL https://api.github.com/repos/subhobhai943/sub-lang/releases/latest \
+  | grep -o "https://[^\"]*sub-macos-arm64\.tar\.gz" | head -1 \
+  | xargs curl -Lo sub.tar.gz
+tar xzf sub.tar.gz
+sudo install -m755 sub-macos-arm64/sub sub-macos-arm64/subc sub-macos-arm64/subi /usr/local/bin/
 ```
 
-### Step 2 — Make Executable
+### Step 2 — Clear the quarantine flag
+
+The binaries are not notarized by Apple, so Gatekeeper blocks them the first
+time:
 
 ```bash
-chmod +x sub subc
+sudo xattr -d com.apple.quarantine /usr/local/bin/sub /usr/local/bin/subc /usr/local/bin/subi
 ```
 
-### Step 3 — Remove macOS Quarantine (Gatekeeper)
+> **Alternative:** right-click each binary in Finder → Open → Open, once.
 
-Because these binaries are downloaded from the internet and not notarized by Apple, macOS will block them the first time. Remove the quarantine flag:
+### Step 3 — Verify
 
 ```bash
-xattr -d com.apple.quarantine sub subc
+sub --version
+subc --version
+subi --version
 ```
 
-> **Alternative:** Right-click each binary in Finder → Open → Open (to approve it once).
-
-### Step 4 — (Optional) Install System-Wide
-
-```bash
-sudo mv sub subc /usr/local/bin/
-```
-
-### Step 5 — Verify
-
-```bash
-./sub --version
-./subc --version
-```
-
-### Step 6 — Run Your First Program
-
-Create `hello.sb`:
+### Step 4 — Run your first program
 
 ```sub
-#var name = "World"
-#print("Hello, " + name)
+let name = "World"
+println("Hello, " + name)
 ```
 
 ```bash
-# Native binary
-./subc hello.sb hello
-./hello
-
-# Transpile to Go
-./sub hello.sb go
-cat hello.go
+subi hello.sb
+subc hello.sb -o hello && ./hello
+sub hello.sb go
 ```
 
-> **Intel Mac (x86-64)?** The macOS Intel build is not included in v1.0.7-beta. Please [build from source](BUILD_GUIDE.md) using `make all`, or use [Rosetta 2](https://support.apple.com/en-us/HT211861) to run the ARM64 binary on Intel Macs.
+On macOS `subc` generates C and builds it with the host compiler, so Xcode
+command line tools (`xcode-select --install`) need to be installed. `sub`
+and `subi` have no such requirement.
+
+> **Intel Mac (x86-64)?** No Intel build is published — GitHub no longer
+> offers free Intel macOS runners. [Build from source](BUILD_GUIDE.md) with
+> `make all`, or run the arm64 binaries under
+> [Rosetta 2](https://support.apple.com/en-us/HT211861).
 
 ---
 
 ## 🪟 Windows (x86-64)
 
-### Step 1 — Download
+### Step 1 — Run the installer
 
-1. Go to the [v1.0.7-beta release page](https://github.com/subhobhai943/sub-lang/releases/tag/v1.0.7-beta)
-2. Download:
-   - `sub-windows-x86_64.exe` → Transpiler
-   - `sub-windows-x86_64-native.exe` → Native compiler
-3. Rename them to `sub.exe` and `subc.exe` for convenience
+1. Go to the [latest release](https://github.com/subhobhai943/sub-lang/releases/latest)
+2. Download `sub-lang-<version>-windows-x86_64.msi`
+3. Double-click it and follow the prompts
 
-Or use **PowerShell**:
+The installer puts all three tools in `C:\Program Files\SUB Language\`,
+offers to add that folder to your system `PATH`, and associates `.sb` files
+with the interpreter so you can double-click a program to run it. Both the
+`PATH` entry and the Start Menu shortcuts are optional — clear them on the
+feature page if you would rather manage those yourself.
+
+Installing per-machine needs administrator rights, so Windows will ask.
+
+Or from **PowerShell** (run as Administrator):
 
 ```powershell
-# Transpiler
-Invoke-WebRequest -Uri "https://github.com/subhobhai943/sub-lang/releases/download/v1.0.7-beta/sub-windows-x86_64.exe" -OutFile "sub.exe"
-
-# Native compiler
-Invoke-WebRequest -Uri "https://github.com/subhobhai943/sub-lang/releases/download/v1.0.7-beta/sub-windows-x86_64-native.exe" -OutFile "subc.exe"
+$url = (Invoke-RestMethod https://api.github.com/repos/subhobhai943/sub-lang/releases/latest).
+        assets | Where-Object { $_.name -like "*.msi" } | Select-Object -First 1 -Expand browser_download_url
+Invoke-WebRequest -Uri $url -OutFile sub-lang.msi
+msiexec /i sub-lang.msi
 ```
 
-### Step 2 — (Optional) Add to PATH
+Add `/quiet` to `msiexec` for an unattended install.
 
-To use `sub` and `subc` from any folder:
+### Step 2 — Verify
 
-1. Move both `.exe` files to a folder, e.g. `C:\SUBLang\`
-2. Open **Start Menu** → search **Environment Variables**
-3. Click **Edit the system environment variables** → **Environment Variables**
-4. Under **System Variables**, select **Path** → **Edit** → **New**
-5. Add: `C:\SUBLang\`
-6. Click **OK** and restart your terminal
-
-### Step 3 — Verify
-
-Open **Command Prompt** or **PowerShell**:
+Open a **new** Command Prompt or PowerShell — an existing one will not have
+the updated `PATH`:
 
 ```cmd
-sub.exe --version
-subc.exe --version
+sub --version
+subc --version
+subi --version
 ```
 
-### Step 4 — Run Your First Program
+### Step 3 — Run your first program
 
 Create `hello.sb`:
 
 ```sub
-#var name = "World"
-#print("Hello, " + name)
+let name = "World"
+println("Hello, " + name)
 ```
 
 ```cmd
-:: Native binary
-subc.exe hello.sb hello
+:: Interpret it
+subi hello.sb
+
+:: Compile it
+subc hello.sb -o hello
 hello.exe
 
-:: Transpile to JavaScript
-sub.exe hello.sb javascript
+:: Or transpile to JavaScript
+sub hello.sb javascript
 node hello.js
 ```
 
-> **Note:** Windows Defender may flag unknown executables. Click **More info** → **Run anyway** if prompted. You can also whitelist the binaries in your antivirus settings.
+Double-clicking `hello.sb` runs it under the interpreter as well.
+
+### Uninstalling
+
+**Settings → Apps → Installed apps → SUB Language → Uninstall**, or
+`msiexec /x` with the same `.msi`. The `PATH` entry and the file
+association are removed with it.
+
+> **Note:** the installer is not code-signed, so SmartScreen may warn you
+> the first time. Click **More info → Run anyway**. The published checksums
+> (`checksums-sha256.txt` on the release page) let you confirm you have the
+> file the build produced.
 
 ---
 
@@ -262,43 +268,48 @@ sub myapp.sb ruby         # → myapp.rb
 
 ## 🧪 Quick Test
 
-Copy and run this test program to confirm your installation works:
+Copy this in and run it to confirm your installation works.
 
 **fibonacci.sb**
 
 ```sub
-#var a = 0
-#var b = 1
-#var n = 10
+let a = 0
+let b = 1
 
-#print("Fibonacci sequence:")
+println("Fibonacci sequence:")
 
-#for i in range(n)
-    #print(a)
-    #var temp = a + b
+for i in range(10) {
+    println(a)
+    let temp = a + b
     a = b
     b = temp
-#end
+}
 ```
 
 ```bash
-# Native
-./subc fibonacci.sb fib
+subi fibonacci.sb            # interpret
+subc fibonacci.sb -o fib     # or compile
 ./fib
-
-# Expected output:
-# Fibonacci sequence:
-# 0
-# 1
-# 1
-# 2
-# 3
-# 5
-# 8
-# 13
-# 21
-# 34
 ```
+
+Expected output:
+
+```
+Fibonacci sequence:
+0
+1
+1
+2
+3
+5
+8
+13
+21
+34
+```
+
+All three tools should agree — that is what the conformance suite checks on
+every push, across eleven implementations of the language.
 
 ---
 

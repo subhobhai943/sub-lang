@@ -1,10 +1,12 @@
 #ifndef SUB_LOGO_H
 #define SUB_LOGO_H
 
-/* SUB_VERSION is defined in sub_compiler.h, which every includer of this
-   header pulls in first; fall back to a literal if included standalone. */
+/* SUB_VERSION comes from sub_compiler.h, which every includer of this header
+   pulls in first. There used to be a fallback literal here for the
+   standalone case; it went stale the moment the real one was bumped, and a
+   banner printing a version nobody released is worse than a build error. */
 #ifndef SUB_VERSION
-#define SUB_VERSION "2.0.0"
+#error "include sub_compiler.h before logo.h - SUB_VERSION lives there"
 #endif
 
 #define SUB_LOGO \

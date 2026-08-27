@@ -15,13 +15,13 @@
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" />
   </a>
-  <img src="https://img.shields.io/badge/version-2.0.0-brightgreen" alt="Version 2.0.0" />
+  <img src="https://img.shields.io/badge/version-1.0.8-brightgreen" alt="Version 1.0.8" />
   <img src="https://img.shields.io/badge/transpiles%20to-13%20languages-orange" alt="Transpiles to 13 languages" />
 </p>
 
 ---
 
-> **v2.0.0** — Native compiler that emits x86-64 machine code itself (no C compiler required), direct AST interpreter (`subi`), multi-target transpiler (`sub`), classes, UI component declarations, and embed blocks.
+> **v1.0.8** — Native compiler that emits x86-64 machine code itself (no C compiler required), direct AST interpreter (`subi`), multi-target transpiler (`sub`), classes, UI component declarations, and embed blocks.
 
 ---
 
@@ -177,7 +177,7 @@ Executes SUB source code on the fly:
 All three tools accept `--help` and `--version`:
 
 ```bash
-./sub --version     # sub 2.0.0
+./sub --version     # sub 1.0.8
 ./subc --help
 ./subi --help
 ```

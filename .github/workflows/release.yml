@@ -15,9 +15,75 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────
+  # 0. Verify before releasing anything
+  # ─────────────────────────────────────────────
+  # Nothing here gated on the tests, so a tag could publish binaries that
+  # had never been run. Every build job now waits on this.
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+      numeric: ${{ steps.version.outputs.NUMERIC }}
+      wix: ${{ steps.version.outputs.WIX_VERSION }}
+      prerelease: ${{ steps.version.outputs.PRERELEASE }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW="${{ inputs.version }}"
+          else
+            RAW="${GITHUB_REF#refs/tags/}"
+          fi
+          NUMERIC="${RAW#v}"; NUMERIC="${NUMERIC%%-*}"
+          # WiX wants four numeric parts.
+          WIX="$NUMERIC"
+          while [ "$(echo "$WIX" | tr -cd . | wc -c)" -lt 3 ]; do WIX="$WIX.0"; done
+          case "$RAW" in *-alpha*|*-beta*|*-rc*) PRE=true ;; *) PRE=false ;; esac
+          {
+            echo "VERSION=$RAW"
+            echo "NUMERIC=$NUMERIC"
+            echo "WIX_VERSION=$WIX"
+            echo "PRERELEASE=$PRE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $RAW (numeric $NUMERIC, wix $WIX, prerelease $PRE)"
+
+      - name: Build
+        run: make all
+
+      - name: Tools report the version being released
+        # The tag and what `sub --version` prints have to agree. They did
+        # not: the tags ran v1.0.x while SUB_VERSION in the source said
+        # 2.0.0, so every published binary reported a version that was
+        # never released.
+        run: |
+          for tool in sub subc subi; do
+            printed=$(./$tool --version | tr -d '\r' | grep -E "^$tool " | awk '{print $2}')
+            if [ "$printed" != "${{ steps.version.outputs.NUMERIC }}" ]; then
+              echo "::error::$tool --version says '$printed', but the release is ${{ steps.version.outputs.VERSION }}."
+              echo "::error::Update SUB_VERSION in src/include/sub_compiler.h before tagging."
+              exit 1
+            fi
+            echo "$tool $printed"
+          done
+
+      - name: Regression tests
+        run: python3 tests/run_tests.py
+
+      - name: Conformance
+        run: python3 tests/conformance.py native native-c c cpp python
+
+      - name: Native backend needs no toolchain
+        run: python3 tests/native_backend.py
+
+  # ─────────────────────────────────────────────
   # 1. Build Linux & macOS binaries
   # ─────────────────────────────────────────────
   build-unix:
+    needs: verify
     name: build (${{ matrix.platform }}-${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -39,7 +105,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup build environment
         run: |
@@ -84,7 +150,7 @@ jobs:
   # ─────────────────────────────────────────────
   build-linux-packages:
     name: linux packages (${{ matrix.arch }})
-    needs: build-unix
+    needs: [verify, build-unix]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -99,7 +165,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install packaging tools
         run: |
@@ -111,22 +177,10 @@ jobs:
           make clean
           make all
 
-      - name: Get version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            RAW="${{ inputs.version }}"
-          else
-            RAW="${GITHUB_REF#refs/tags/}"
-          fi
-          # Strip leading 'v' for package version fields
-          echo "VERSION=${RAW}" >> $GITHUB_OUTPUT
-          echo "PKG_VERSION=${RAW#v}" >> $GITHUB_OUTPUT
-
       # ── .deb (Debian / Ubuntu) ───────────────
       - name: Build .deb package
         run: |
-          PKG="sub-lang_${{ steps.version.outputs.PKG_VERSION }}_${{ matrix.deb_arch }}"
+          PKG="sub-lang_${{ needs.verify.outputs.numeric }}_${{ matrix.deb_arch }}"
           mkdir -p "${PKG}/DEBIAN"
           mkdir -p "${PKG}/usr/local/bin"
           mkdir -p "${PKG}/usr/share/doc/sub-lang"
@@ -136,7 +190,7 @@ jobs:
 
           printf '%s\n' \
             "Package: sub-lang" \
-            "Version: ${{ steps.version.outputs.PKG_VERSION }}" \
+            "Version: ${{ needs.verify.outputs.numeric }}" \
             "Section: devel" \
             "Priority: optional" \
             "Architecture: ${{ matrix.deb_arch }}" \
@@ -164,11 +218,12 @@ jobs:
   # ─────────────────────────────────────────────
   build-windows-msi:
     name: build (windows-x86_64 MSI)
+    needs: verify
     runs-on: windows-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
@@ -206,42 +261,65 @@ jobs:
           Write-Host "Staged files:"
           Get-ChildItem $dest
 
-      - name: Get version
-        id: version
-        shell: pwsh
-        run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $raw = "${{ inputs.version }}"
-          } else {
-            $raw = "$env:GITHUB_REF" -replace "refs/tags/", ""
-          }
-          # WiX requires a numeric dotted version – strip pre-release suffix
-          $numeric = ($raw -replace "^v", "") -replace "[^0-9.].*", ""
-          # Pad to 4 parts
-          $parts = $numeric.Split(".")
-          while ($parts.Count -lt 4) { $parts += "0" }
-          $wixVer = $parts[0..3] -join "."
-          echo "VERSION=$raw" >> $env:GITHUB_OUTPUT
-          echo "WIX_VERSION=$wixVer" >> $env:GITHUB_OUTPUT
-
       - name: Install WiX Toolset v4
         shell: pwsh
         run: |
           dotnet tool install --global wix --version 4.0.5
           echo "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Add the WiX UI extension
+        shell: pwsh
+        run: wix extension add --global WixToolset.UI.wixext/4.0.5
+
       - name: Build MSI
         shell: pwsh
         run: |
-          $version = "${{ steps.version.outputs.WIX_VERSION }}"
-          # Patch the WiX source to use the explicit version (override bind.FileVersion)
-          $wxsPath = "installer\windows\sub-lang.wxs"
-          $wxsContent = Get-Content $wxsPath -Raw
-          $wxsContent = $wxsContent -replace 'Version="!\(bind\.FileVersion\.sub\.exe\)"', "Version=`"$version`""
-          Set-Content $wxsPath $wxsContent
-
+          # The version goes in as a preprocessor variable. This step used to
+          # rewrite sub-lang.wxs with a regular expression first, which meant
+          # the file that shipped was never the file in the repository.
+          # -bindpath so the licence RTF, the icon and the staged binaries
+          # all resolve regardless of the working directory.
           wix build installer\windows\sub-lang.wxs `
-            -o sub-lang-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi
+            -bindpath installer\windows `
+            -d Version=${{ needs.verify.outputs.wix }} `
+            -ext WixToolset.UI.wixext `
+            -o sub-lang-${{ needs.verify.outputs.version }}-windows-x86_64.msi
+          if (-not (Test-Path "sub-lang-${{ needs.verify.outputs.version }}-windows-x86_64.msi")) {
+            throw "wix build reported success but produced no .msi"
+          }
+
+      - name: Check the MSI
+        shell: pwsh
+        run: |
+          # An MSI that installs nothing still builds, so look inside: the
+          # three tools have to be in there, and the recorded version has to
+          # be the one being released.
+          $msi = Get-ChildItem *.msi | Select-Object -First 1
+          Write-Host ("{0}  {1:N0} bytes" -f $msi.Name, $msi.Length)
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $db = $installer.GetType().InvokeMember(
+                  "OpenDatabase", "InvokeMethod", $null, $installer, @($msi.FullName, 0))
+          function Query($sql) {
+            $view = $db.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $db, @($sql))
+            $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null)
+            $rows = @()
+            while ($true) {
+              $rec = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
+              if (-not $rec) { break }
+              $rows += $rec.GetType().InvokeMember("StringData", "GetProperty", $null, $rec, @(1))
+            }
+            return $rows
+          }
+          $files = Query "SELECT FileName FROM File"
+          Write-Host "Files in the package: $($files -join ', ')"
+          foreach ($want in @("sub.exe", "subc.exe", "subi.exe")) {
+            if (-not ($files -match [regex]::Escape($want))) { throw "$want is missing from the MSI" }
+          }
+          $ver = Query "SELECT Value FROM Property WHERE Property='ProductVersion'"
+          Write-Host "ProductVersion: $ver"
+          if ($ver -ne "${{ needs.verify.outputs.wix }}") {
+            throw "MSI ProductVersion is $ver, expected ${{ needs.verify.outputs.wix }}"
+          }
 
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
@@ -254,19 +332,19 @@ jobs:
   # 4. Create GitHub Release
   # ─────────────────────────────────────────────
   create-release:
-    needs: [build-unix, build-linux-packages, build-windows-msi]
+    needs: [verify, build-unix, build-linux-packages, build-windows-msi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: ./artifacts
 
@@ -277,6 +355,12 @@ jobs:
             -exec cp {} ./release-assets/ \;
           echo "Release assets:"
           ls -lh ./release-assets/
+          for want in sub-linux-x86_64.tar.gz sub-linux-arm64.tar.gz \
+                      sub-macos-arm64.tar.gz; do
+            test -f "./release-assets/$want" || { echo "::error::missing $want"; exit 1; }
+          done
+          ls ./release-assets/*.msi >/dev/null || { echo "::error::no Windows MSI"; exit 1; }
+          ls ./release-assets/*.deb >/dev/null || { echo "::error::no .deb packages"; exit 1; }
 
       - name: Generate checksums
         working-directory: ./release-assets
@@ -285,32 +369,31 @@ jobs:
           echo "Checksums:"
           cat checksums-sha256.txt
 
-      - name: Get version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Determine prerelease
-        id: prerelease
-        run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          if [[ "$VERSION" == *"-beta"* ]] || [[ "$VERSION" == *"-alpha"* ]]; then
-            echo "PRERELEASE=true" >> $GITHUB_OUTPUT
-          else
-            echo "PRERELEASE=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Generate release notes
         id: release_notes
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
+          # Only this version's section. `cat docs/RELEASE_NOTES.md` put the
+          # notes for every release ever made into every release.
+          SECTION=$(awk -v want="## $VERSION" '
+            $0 == want { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' docs/RELEASE_NOTES.md)
+          if [ -z "$(echo "$SECTION" | tr -d '[:space:]')" ]; then
+            echo "::warning::docs/RELEASE_NOTES.md has no section for $VERSION; using the commit log"
+            PREV=$(git describe --tags --abbrev=0 "$VERSION^" 2>/dev/null || true)
+            if [ -n "$PREV" ]; then
+              SECTION=$(printf '### Changes since %s\n\n' "$PREV"; git log --no-merges --format='- %s' "$PREV..$VERSION")
+            else
+              SECTION=$(git log --no-merges --format='- %s' -20)
+            fi
+          fi
           {
-            echo "## SUB Language ${{ steps.version.outputs.VERSION }}";
+            echo "## SUB Language $VERSION";
             echo "";
-            cat docs/RELEASE_NOTES.md;
+            echo "$SECTION";
             echo "";
             echo "---";
             echo "";
@@ -335,15 +418,17 @@ jobs:
             echo "sha256sum -c checksums-sha256.txt";
             echo "\`\`\`";
           } > release_notes.md
+          echo "--- release notes ---"
+          cat release_notes.md
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.VERSION }}
-          name: SUB Language ${{ steps.version.outputs.VERSION }}
+          tag_name: ${{ needs.verify.outputs.version }}
+          name: SUB Language ${{ needs.verify.outputs.version }}
           body_path: release_notes.md
           draft: false
-          prerelease: ${{ steps.prerelease.outputs.PRERELEASE }}
+          prerelease: ${{ needs.verify.outputs.prerelease }}
           files: |
             release-assets/*
         env:
@@ -351,7 +436,7 @@ jobs:
 
       - name: Release Summary
         run: |
-          echo "✅ Release ${{ steps.version.outputs.VERSION }} created successfully!"
+          echo "✅ Release ${{ needs.verify.outputs.version }} created successfully!"
           echo "📦 Artifacts: Linux (x86_64, arm64) tarballs + .deb, macOS (arm64) tarball, Windows MSI"
           echo "🔧 Tools: sub (transpiler), subc (native compiler), subi (interpreter)"
-          echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.VERSION }}"
+          echo "🔗 View release: https://github.com/${{ github.repository }}/releases/tag/${{ needs.verify.outputs.version }}"

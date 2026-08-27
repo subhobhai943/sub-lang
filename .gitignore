@@ -102,3 +102,6 @@ __pycache__/
 
 # gcc -MMD dependency files
 *.d
+
+# compiled output of calculator.sb
+cal

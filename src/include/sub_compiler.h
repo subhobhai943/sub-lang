@@ -13,8 +13,13 @@
    there's exactly one place to bump on release instead of several
    independently-drifting copies. The MSI installer's version is set
    separately from the release tag at build time (see .github/workflows/
-   release.yml), independent of this macro. */
-#define SUB_VERSION "2.0.0"
+   release.yml), independent of this macro.
+
+   Keep this in step with the release tags. It said 2.0.0 while the tags ran
+   v1.0.x, so every published binary reported a version that had never been
+   released; the release workflow now refuses to build when the two
+   disagree. */
+#define SUB_VERSION "1.0.8"
 
 #define _GNU_SOURCE
 #include <stdio.h>
