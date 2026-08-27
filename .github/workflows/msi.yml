@@ -88,40 +88,55 @@ jobs:
         shell: pwsh
         run: |
           # An installer that installs nothing still builds, so look inside.
+          $ErrorActionPreference = "Stop"
           $msi = Get-Item $env:MSI_NAME
           Write-Host ("{0}  {1:N0} bytes" -f $msi.Name, $msi.Length)
+
           $installer = New-Object -ComObject WindowsInstaller.Installer
           $db = $installer.GetType().InvokeMember(
                   "OpenDatabase", "InvokeMethod", $null, $installer, @($msi.FullName, 0))
-          function Query($sql) {
+
+          function Get-MsiRows([string]$sql) {
             $view = $db.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $db, @($sql))
-            $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null)
-            $rows = @()
+            # [void] matters: anything these calls emit would otherwise be
+            # returned alongside the rows and turn the result into nonsense.
+            [void]$view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null)
+            $out = New-Object System.Collections.Generic.List[string]
             while ($true) {
               $rec = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
-              if (-not $rec) { break }
-              $rows += $rec.GetType().InvokeMember("StringData", "GetProperty", $null, $rec, @(1))
+              if ($null -eq $rec) { break }
+              $out.Add([string]$rec.GetType().InvokeMember(
+                         "StringData", "GetProperty", $null, $rec, @(1)))
             }
-            return ,$rows
+            [void]$view.GetType().InvokeMember("Close", "InvokeMethod", $null, $view, $null)
+            return ,$out.ToArray()
           }
-          $files = Query "SELECT FileName FROM File"
-          Write-Host "Files:      $($files -join ', ')"
+
+          $files = Get-MsiRows "SELECT FileName FROM File"
+          Write-Host "Files:       $($files -join ', ')"
           foreach ($want in @("sub.exe", "subc.exe", "subi.exe")) {
-            if (-not ($files -match [regex]::Escape($want))) { throw "$want is missing from the MSI" }
+            if (-not ($files -match [regex]::Escape($want))) {
+              throw "$want is missing from the MSI"
+            }
           }
-          $ver = (Query "SELECT Value FROM Property WHERE Property='ProductVersion'")[0]
-          Write-Host "Version:    $ver"
+
+          $ver = (Get-MsiRows "SELECT Value FROM Property WHERE Property='ProductVersion'")[0]
+          Write-Host "Version:     $ver"
           if ($ver -ne "${{ inputs.wix_version }}") {
-            throw "MSI ProductVersion is $ver, expected ${{ inputs.wix_version }}"
+            throw "MSI ProductVersion is '$ver', expected '${{ inputs.wix_version }}'"
           }
+
           # The .sb association and the PATH entry are the two things a user
           # notices if they silently stop being registered.
-          $ext = Query "SELECT Extension FROM Extension"
-          Write-Host "Extensions: $($ext -join ', ')"
+          $ext = Get-MsiRows "SELECT Extension FROM Extension"
+          Write-Host "Extensions:  $($ext -join ', ')"
           if (-not ($ext -contains "sb")) { throw ".sb file association is missing" }
-          $env_ = Query "SELECT Name FROM Environment"
-          Write-Host "Environment: $($env_ -join ', ')"
-          if (-not ($env_ -match "PATH")) { throw "PATH entry is missing" }
+
+          $envRows = Get-MsiRows "SELECT Name FROM Environment"
+          Write-Host "Environment: $($envRows -join ', ')"
+          if (-not ($envRows -match "PATH")) { throw "PATH entry is missing" }
+
+          Write-Host "MSI contents check passed."
 
       - name: Upload MSI
         if: ${{ inputs.upload }}
