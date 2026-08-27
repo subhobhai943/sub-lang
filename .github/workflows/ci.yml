@@ -120,17 +120,22 @@ jobs:
             mingw-w64-x86_64-python
             make
 
-      # Three steps rather than one `make all`: this job has never passed,
-      # and the workflow log is not readable without repository admin, so
-      # the step name has to carry the information instead.
-      - name: Build the transpiler (sub.exe)
-        run: make compiler
-
-      - name: Build the native compiler (subc.exe)
-        run: make native_compiler
-
-      - name: Build the interpreter (subi.exe)
-        run: make interpreter
+      # This job has never passed, and downloading a workflow log needs
+      # repository admin, so a failure here reports only "exit code 2".
+      # Annotations are public, so the compiler's own diagnostics are
+      # re-emitted as ::error:: lines and become readable.
+      - name: Build
+        run: |
+          set +e
+          make all > build.log 2>&1
+          rc=$?
+          cat build.log
+          if [ $rc -ne 0 ]; then
+            grep -E "error:|Error [0-9]|undefined reference|No such file" build.log \
+              | head -20 \
+              | while IFS= read -r line; do echo "::error::$line"; done
+          fi
+          exit $rc
 
       - name: Executables carry the .exe suffix
         # subc appends it itself; this is the behaviour that used to be
