@@ -206,13 +206,27 @@ static const BuiltinSpelling* builtin_spelling_multi(TargetLang lang, const char
    `return null` can be rendered as the numeric NaN sentinel. */
 static DataType g_java_fn_type = TYPE_UNKNOWN;
 
+/* The element's boxed type, for the empty-list case where Java cannot infer
+   it from anything. */
+static const char* java_elem_box(DataType elem) {
+    switch (elem) {
+    case TYPE_FLOAT:  return "Double";
+    case TYPE_STRING: return "String";
+    case TYPE_BOOL:   return "Boolean";
+    default:          return "Long";
+    }
+}
+
 static const char* java_type(DataType t) {
     switch (t) {
         case TYPE_INT:    return "long";
         case TYPE_FLOAT:  return "double";
         case TYPE_BOOL:   return "boolean";
         case TYPE_STRING: return "String";
-        case TYPE_ARRAY:  return "long[]";
+        /* Locals are declared with `var`, so this is only reached for a
+           function that returns an array - where the element type is not
+           tracked yet, and Long is the common case. */
+        case TYPE_ARRAY:  return "java.util.List<Long>";
         case TYPE_VOID:   return "void";
         default:          return "Object";
     }
@@ -1617,6 +1631,35 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
         case AST_CALL_EXPR: {
             const char *fn = node->value ? node->value : "func";
             {
+                /* Ahead of the table, whose len() spells String.length(). */
+                if (node->value && node->child_count >= 1 && node->children[0] &&
+                    infer_expr_type(node->children[0]) == TYPE_ARRAY) {
+                    DataType el = infer_elem_type(node->children[0]);
+                    if ((!strcmp(node->value, "push") ||
+                         !strcmp(node->value, "append")) && node->child_count >= 2) {
+                        sb_append(sb, "_subPush(");
+                        generate_expr_java(sb, node->children[0]);
+                        sb_append(sb, ", ");
+                        if (el == TYPE_INT)        sb_append(sb, "(Long)(long)(");
+                        else if (el == TYPE_FLOAT) sb_append(sb, "(Double)(double)(");
+                        else                       sb_append(sb, "(");
+                        generate_expr_java(sb, node->children[1]);
+                        sb_append(sb, "))");
+                        break;
+                    }
+                    if (!strcmp(node->value, "pop")) {
+                        sb_append(sb, "_subPop(");
+                        generate_expr_java(sb, node->children[0]);
+                        sb_append(sb, ")");
+                        break;
+                    }
+                    if (!strcmp(node->value, "len") || !strcmp(node->value, "length")) {
+                        sb_append(sb, "(long)(");
+                        generate_expr_java(sb, node->children[0]);
+                        sb_append(sb, ").size()");
+                        break;
+                    }
+                }
                 const BuiltinSpelling *bs = builtin_spelling(LANG_JAVA, node->value);
                 if (bs && node->child_count == 1) {
                     sb_append(sb, "%s", bs->prefix);
@@ -1654,14 +1697,25 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
             }
             break;
         }
-        case AST_ARRAY_LITERAL:
-            sb_append(sb, "java.util.List.of(");
+        case AST_ARRAY_LITERAL: {
+            /* List.of() is immutable, so push() and a[i] = v both threw at
+               run time. An ArrayList can be changed, which is what a SUB
+               array is. */
+            DataType elem = infer_elem_type(node);
+            sb_append(sb, "new java.util.ArrayList<%s>(java.util.List.of(",
+                      java_elem_box(elem));
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
+                /* A bare 1 is an int; the list holds Long. */
+                if (elem == TYPE_INT)        sb_append(sb, "(Long)(long)(");
+                else if (elem == TYPE_FLOAT) sb_append(sb, "(Double)(double)(");
+                else                         sb_append(sb, "(");
                 generate_expr_java(sb, node->children[i]);
+                sb_append(sb, ")");
             }
-            sb_append(sb, ")");
+            sb_append(sb, "))");
             break;
+        }
         case AST_OBJECT_LITERAL:
             sb_append(sb, "java.util.Map.of(");
             for (int i = 0; i < node->child_count; i++) {
@@ -1678,8 +1732,9 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, ".%s", node->value ? node->value : "");
             break;
         case AST_ARRAY_ACCESS:
+            sb_append(sb, "_subAt(");
             generate_expr_java(sb, node->left);
-            sb_append(sb, ".get(");
+            sb_append(sb, ", ");
             generate_expr_java(sb, node->right);
             sb_append(sb, ")");
             break;
@@ -1712,20 +1767,35 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             break;
             
         case AST_VAR_DECL:
+        case AST_CONST_DECL: {
+            /* `var x = 0` gives Java an int, and SUB integers are 64-bit -
+               so `total = total + x` where x came out of a list of Longs
+               would not compile, and anything past 2^31 would have wrapped
+               silently. Name the inferred type instead of leaving it to
+               var; arrays keep var, since the literal carries its own. */
             indent_code(sb, indent);
-            sb_append(sb, "var %s = ", node->value ? node->value : "var");
-            if (node->right) generate_expr_java(sb, node->right);
-            else sb_append(sb, "null");
+            const char *kw = (node->type == AST_CONST_DECL) ? "final " : "";
+            DataType dt = node->data_type;
+            if (dt == TYPE_UNKNOWN || dt == TYPE_AUTO)
+                dt = infer_expr_type(node->right);
+            const char *name = node->value ? node->value
+                             : (node->type == AST_CONST_DECL ? "CONST" : "var");
+            if (dt == TYPE_INT || dt == TYPE_FLOAT ||
+                dt == TYPE_BOOL || dt == TYPE_STRING) {
+                sb_append(sb, "%s%s %s = ", kw, java_type(dt), name);
+                if (dt == TYPE_INT || dt == TYPE_FLOAT)
+                    sb_append(sb, "(%s)(", java_type(dt));
+                if (node->right) generate_expr_java(sb, node->right);
+                else sb_append(sb, "0");
+                if (dt == TYPE_INT || dt == TYPE_FLOAT) sb_append(sb, ")");
+            } else {
+                sb_append(sb, "%svar %s = ", kw, name);
+                if (node->right) generate_expr_java(sb, node->right);
+                else sb_append(sb, "null");
+            }
             sb_append(sb, ";\n");
             break;
-            
-        case AST_CONST_DECL:
-            indent_code(sb, indent);
-            sb_append(sb, "final var %s = ", node->value ? node->value : "CONST");
-            if (node->right) generate_expr_java(sb, node->right);
-            else sb_append(sb, "null");
-            sb_append(sb, ";\n");
-            break;
+        }
             
         case AST_FUNCTION_DECL:
             sb_append(sb, "\n");
@@ -1798,6 +1868,13 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
                         sb_append(sb, "0; %s < 10", var);
                     }
                     sb_append(sb, "; %s++) {\n", var);
+                } else if (node->condition) {
+                    /* `for x in <collection>` had no branch here at all, so
+                       it fell through to the 0..9 fallback below and every
+                       such loop silently iterated ten times over nothing. */
+                    sb_append(sb, "for (var %s : ", var);
+                    generate_expr_java(sb, node->condition);
+                    sb_append(sb, ") {\n");
                 } else {
                     sb_append(sb, "for (int %s = 0; %s < 10; %s++) {\n", var, var, var);
                 }
@@ -1842,6 +1919,22 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_ASSIGN_STMT:
             indent_code(sb, indent);
+            if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                /* _subAt returns a value, not a slot, so a write cannot go
+                   through it the way it can in C++. */
+                DataType el = infer_elem_type(node->left->left);
+                sb_append(sb, "_subPut(");
+                generate_expr_java(sb, node->left->left);
+                sb_append(sb, ", ");
+                generate_expr_java(sb, node->left->right);
+                sb_append(sb, ", ");
+                if (el == TYPE_INT)        sb_append(sb, "(Long)(long)(");
+                else if (el == TYPE_FLOAT) sb_append(sb, "(Double)(double)(");
+                else                       sb_append(sb, "(");
+                generate_expr_java(sb, node->right);
+                sb_append(sb, "));\n");
+                break;
+            }
             generate_expr_java(sb, node->left);
             sb_append(sb, " = ");
             generate_expr_java(sb, node->right);
@@ -1898,11 +1991,40 @@ char* codegen_java(ASTNode *ast, const char *source) {
     sb_append(sb, "\n    static String _subStr(Object v) {\n");
     sb_append(sb, "        if (v instanceof Double) return _subFmt((Double) v);\n");
     sb_append(sb, "        if (v instanceof Float) return _subFmt((Float) v);\n");
+    /* SUB spells a list [a, b, c] with no quotes; Java's toString spells it
+       the same way for numbers but not for anything needing conversion. */
+    sb_append(sb, "        if (v instanceof java.util.List) {\n");
+    sb_append(sb, "            StringBuilder b = new StringBuilder(\"[\");\n");
+    sb_append(sb, "            java.util.List<?> l = (java.util.List<?>) v;\n");
+    sb_append(sb, "            for (int i = 0; i < l.size(); i++) {\n");
+    sb_append(sb, "                if (i > 0) b.append(\", \");\n");
+    sb_append(sb, "                b.append(_subStr(l.get(i)));\n");
+    sb_append(sb, "            }\n");
+    sb_append(sb, "            return b.append(\"]\").toString();\n        }\n");
     sb_append(sb, "        return String.valueOf(v);\n");
     sb_append(sb, "    }\n");
     sb_append(sb, "\n    static void _subPrint(Object v) {\n");
     sb_append(sb, "        System.out.println(_subStr(v));\n");
     sb_append(sb, "    }\n");
+
+    /* Arrays. Generic, so one set covers every element type. Out of range
+       and popping an empty list report the interpreter's message and exit
+       70 rather than throwing Java's own exception. */
+    sb_append(sb, "\n    static <T> T _subAt(java.util.List<T> a, long i) {\n");
+    sb_append(sb, "        if (i < 0 || i >= a.size()) _subDieIndex(i, a.size());\n");
+    sb_append(sb, "        return a.get((int) i);\n    }\n");
+    sb_append(sb, "\n    static <T> void _subPut(java.util.List<T> a, long i, T v) {\n");
+    sb_append(sb, "        if (i < 0 || i >= a.size()) _subDieIndex(i, a.size());\n");
+    sb_append(sb, "        a.set((int) i, v);\n    }\n");
+    sb_append(sb, "\n    static <T> void _subPush(java.util.List<T> a, T v) "
+                  "{ a.add(v); }\n");
+    sb_append(sb, "\n    static <T> T _subPop(java.util.List<T> a) {\n");
+    sb_append(sb, "        if (a.isEmpty()) _subDie(\"pop from empty array\");\n");
+    sb_append(sb, "        return a.remove(a.size() - 1);\n    }\n");
+    sb_append(sb, "\n    static void _subDieIndex(long i, int n) {\n");
+    sb_append(sb, "        System.err.println(\"RuntimeError: array index \" + i\n");
+    sb_append(sb, "            + \" out of bounds [0, \" + n + \")\");\n");
+    sb_append(sb, "        System.exit(70);\n    }\n");
 
     /* Integer division by zero throws ArithmeticException in Java; SUB
        reports a runtime error and exits 70, the same as the interpreter. */
@@ -2106,6 +2228,10 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
                 } else {
                     sb_append(sb, "0..<10");
                 }
+                sb_append(sb, " {\n");
+            } else if (node->condition) {
+                sb_append(sb, "for %s in ", node->value ? node->value : "i");
+                generate_expr_swift(sb, node->condition);
                 sb_append(sb, " {\n");
             } else {
                 sb_append(sb, "for %s in 0..<10 {\n", node->value ? node->value : "i");
@@ -2385,6 +2511,10 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
                 } else {
                     sb_append(sb, "0 until 10");
                 }
+                sb_append(sb, ") {\n");
+            } else if (node->condition) {
+                sb_append(sb, "for (%s in ", node->value ? node->value : "i");
+                generate_expr_kotlin(sb, node->condition);
                 sb_append(sb, ") {\n");
             } else {
                 sb_append(sb, "for (%s in 0 until 10) {\n", node->value ? node->value : "i");
