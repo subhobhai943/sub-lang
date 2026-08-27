@@ -143,7 +143,9 @@ static int run_cc(const char *cc, const char *opt,
                   const char *out, const char *src) {
     const char *argv[] = { cc, opt, "-o", out, src, "-lm", NULL };
 #ifdef _WIN32
-    intptr_t rc = _spawnvp(_P_WAIT, cc, (char *const *)argv);
+    /* MinGW's _spawnvp takes const char *const *; POSIX execvp below takes
+       char *const *. The array is never written either way. */
+    intptr_t rc = _spawnvp(_P_WAIT, cc, (const char *const *)argv);
     return rc < 0 ? 127 : (int)rc;
 #else
     pid_t pid = fork();

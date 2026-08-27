@@ -24,6 +24,7 @@
 #define _GNU_SOURCE
 #include "interpreter.h"
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -101,12 +102,17 @@ static void runtime_error(const char *fmt, ...) {
    counting calls: a fixed call limit can't be right on both an 8 MiB Linux
    stack and a 1 MiB Windows one, and it silently stops guarding whenever a
    frame grows. */
-static char  *g_stack_base   = NULL;
-static size_t g_stack_budget = 0;
+/* The base is kept as an integer, not a pointer. It is only ever used to
+   subtract one stack address from another and is never dereferenced, and
+   storing it as a char* made newer gcc report -Wdangling-pointer for
+   holding the address of a local past its lifetime - which would fail the
+   -Werror build the moment a runner picked up that compiler. */
+static uintptr_t g_stack_base   = 0;
+static size_t    g_stack_budget = 0;
 
 static void interp_stack_guard_init(void) {
     char probe;
-    g_stack_base = &probe;
+    g_stack_base = (uintptr_t)&probe;
 
     size_t limit = (size_t)1 << 20;  /* Windows default thread stack: 1 MiB */
 #ifndef _WIN32
@@ -124,10 +130,11 @@ static void interp_stack_guard_init(void) {
 
 static void interp_check_stack(void) {
     char probe;
+    uintptr_t here = (uintptr_t)&probe;
     if (!g_stack_base) interp_stack_guard_init();
-    size_t used = (size_t)(g_stack_base > &probe
-                           ? g_stack_base - &probe
-                           : &probe - g_stack_base);
+    size_t used = (size_t)(g_stack_base > here
+                           ? g_stack_base - here
+                           : here - g_stack_base);
     if (used > g_stack_budget)
         runtime_error("max recursion depth exceeded");
 }
