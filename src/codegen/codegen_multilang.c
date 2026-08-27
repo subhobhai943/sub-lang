@@ -64,7 +64,8 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
         {"sqrt","Math.sqrt(",")"},    {"floor","Math.floor(",")"},
         {"ceil","Math.ceil(",")"},    {"round","_subRound(",")"},
         {"upper","(",").toUpperCase()"}, {"lower","(",").toLowerCase()"},
-        {"trim","(",").trim()"},      {NULL,NULL,NULL}
+        {"trim","(",").trim()"},      {"pop","_subPop(",")"},
+        {NULL,NULL,NULL}
     };
     static const BuiltinSpelling java[] = {
         {"str","_subStr(",")"},        {"to_string","_subStr(",")"},
@@ -118,6 +119,7 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
         {"len","(",").length"},        {"length","(",").length"},
         {"abs","(",").abs"},           {"sqrt","Math.sqrt(",")"},
         {"upper","(",").upcase"},      {"lower","(",").downcase"},
+        {"pop","_sub_pop(",")"},
         {"trim","(",").strip"},
         {"floor","(",").floor"},       {"ceil","(",").ceil"},
         {"round","(",").round"},       {NULL,NULL,NULL}
@@ -150,7 +152,9 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
    and every target that has no function by that name failed to build. */
 static const BuiltinSpelling* builtin_spelling_multi(TargetLang lang, const char *name) {
     static const BuiltinSpelling js[] = {
-        {"min","Math.min(",")"},   {"max","Math.max(",")"},   {NULL,NULL,NULL}
+        {"min","Math.min(",")"},   {"max","Math.max(",")"},
+        {"push","_subPush(",")"},  {"append","_subPush(",")"},
+        {NULL,NULL,NULL}
     };
     static const BuiltinSpelling java[] = {
         {"min","Math.min(",")"},   {"max","Math.max(",")"},   {NULL,NULL,NULL}
@@ -167,9 +171,14 @@ static const BuiltinSpelling* builtin_spelling_multi(TargetLang lang, const char
         {"min","min(",")"},        {"max","max(",")"},        {NULL,NULL,NULL}
     };
     static const BuiltinSpelling ruby[] = {
-        {"min","[","].min"},       {"max","[","].max"},       {NULL,NULL,NULL}
+        {"min","[","].min"},       {"max","[","].max"},
+        {"push","_sub_push(",")"}, {"append","_sub_push(",")"},
+        {NULL,NULL,NULL}
     };
-    static const BuiltinSpelling py[] = { {NULL,NULL,NULL} };
+    static const BuiltinSpelling py[] = {
+        {"push","_sub_push(",")"}, {"append","_sub_push(",")"},
+        {NULL,NULL,NULL}
+    };
 
     const BuiltinSpelling *table;
     switch (lang) {
@@ -475,17 +484,20 @@ static int both_int_operands(ASTNode *node) {
            infer_expr_type(node->right) == TYPE_INT;
 }
 
-/* Emit `arg` wrapped in the target's %g formatter when it is statically a
-   float, and plainly otherwise. Languages with one numeric type (JavaScript)
-   or with no runtime type to dispatch on (Go, Rust) cannot decide this at
-   run time, so it is decided here, from the same inferred type every other
-   backend uses. */
-static void gen_float_aware(StringBuilder *sb, ASTNode *arg,
-                            const char *fmt_fn, ExprGen gen) {
-    int is_float = (infer_expr_type(arg) == TYPE_FLOAT);
-    if (is_float) sb_append(sb, "%s(", fmt_fn);
+/* Emit `arg` wrapped in whichever of the target's formatters its static type
+   calls for: `fmt_fn` for a float, `arr_fn` for an array, nothing otherwise.
+   Languages with one numeric type (JavaScript) or with no runtime type to
+   dispatch on (Go, Rust) cannot decide this at run time, so it is decided
+   here, from the same inferred type every other backend uses. Either name
+   may be NULL when the target has no such formatter. */
+static void gen_printable(StringBuilder *sb, ASTNode *arg, const char *fmt_fn,
+                          const char *arr_fn, ExprGen gen) {
+    DataType t = infer_expr_type(arg);
+    const char *wrap = (t == TYPE_FLOAT) ? fmt_fn
+                     : (t == TYPE_ARRAY) ? arr_fn : NULL;
+    if (wrap) sb_append(sb, "%s(", wrap);
     gen(sb, arg);
-    if (is_float) sb_append(sb, ")");
+    if (wrap) sb_append(sb, ")");
 }
 
 /* True when either side of an arithmetic operator is known to be a float. */
@@ -785,6 +797,12 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
                 } else if (strcmp(fn, "round") == 0) {
                     /* not Python's round(): see _sub_round in the preamble */
                     sb_append(sb, "_sub_round(");
+                } else if (strcmp(fn, "push") == 0 || strcmp(fn, "append") == 0) {
+                    /* list.append is a method, and SUB's push evaluates to
+                       null rather than to the list */
+                    sb_append(sb, "_sub_push(");
+                } else if (strcmp(fn, "pop") == 0) {
+                    sb_append(sb, "_sub_pop(");
                 } else if (strcmp(fn, "type") == 0) {
                     sb_append(sb, "(lambda x: 'int' if isinstance(x, int) and not isinstance(x, bool) else ('float' if isinstance(x, float) else ('string' if isinstance(x, str) else ('bool' if isinstance(x, bool) else ('array' if isinstance(x, list) else ('null' if x is None else type(x).__name__))))))(");
                 } else {
@@ -1065,6 +1083,10 @@ char* codegen_python(ASTNode *ast, const char *source) {
        said 0.333333. */
     sb_append(sb, "    if isinstance(v, float):\n");
     sb_append(sb, "        return \"%%g\" %% v\n");
+    /* SUB prints an array as [a, b, c] with no quotes around strings;
+       Python's str() of a list quotes them. */
+    sb_append(sb, "    if isinstance(v, list):\n");
+    sb_append(sb, "        return '[' + ', '.join(_sub_str(x) for x in v) + ']'\n");
     sb_append(sb, "    return str(v)\n");
     /* SUB divides and takes the remainder the way C, Java, Go and the
        interpreter do: truncated toward zero, so -7 / 2 is -3 and -7 % 3 is
@@ -1084,7 +1106,11 @@ char* codegen_python(ASTNode *ast, const char *source) {
     sb_append(sb, "    return a / b\n");
     sb_append(sb, "\n\ndef _sub_fmod(a, b):\n");
     sb_append(sb, "    if b == 0: _sub_die('modulo by zero')\n");
-    sb_append(sb, "    return math.fmod(a, b)");
+    sb_append(sb, "    return math.fmod(a, b)\n");
+    sb_append(sb, "\n\ndef _sub_push(a, v):\n    a.append(v)\n");
+    sb_append(sb, "\n\ndef _sub_pop(a):\n");
+    sb_append(sb, "    if not a: _sub_die('pop from empty array')\n");
+    sb_append(sb, "    return a.pop()");
     sb_append(sb, "\n\ndef _sub_print(*a):\n");
     sb_append(sb, "    print(*[_sub_str(x) for x in a])\n\n");
     sb_append(sb, "def _sub_add(a, b):\n");
@@ -1184,7 +1210,8 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
                 sb_append(sb, as_str ? "String(" : "console.log(");
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
-                    gen_float_aware(sb, node->children[i], "_subFmt", generate_expr_js);
+                    gen_printable(sb, node->children[i], "_subFmt", "_subStr",
+                                  generate_expr_js);
                 }
                 sb_append(sb, ")");
                 break;
@@ -1392,7 +1419,8 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
             if (is_print_builtin(node->value)) {
                 sb_append(sb, "console.log(");
                 if (node->child_count > 0)
-                    gen_float_aware(sb, node->children[0], "_subFmt", generate_expr_js);
+                    gen_printable(sb, node->children[0], "_subFmt", "_subStr",
+                                  generate_expr_js);
                 sb_append(sb, ")");
             } else {
                 generate_expr_js(sb, node);
@@ -1454,6 +1482,22 @@ char* codegen_javascript(ASTNode *ast, const char *source) {
     sb_append(sb, "    }\n");
     sb_append(sb, "    if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\\.$/, '');\n");
     sb_append(sb, "    return s;\n");
+    sb_append(sb, "}\n\n");
+    /* One place that turns a value into SUB's spelling of it: true/false
+       rather than JavaScript's, null rather than undefined, [a, b] with no
+       quotes, and %g for a non-integral number. */
+    sb_append(sb, "function _subStr(v) {\n");
+    sb_append(sb, "    if (v === null || v === undefined) return 'null';\n");
+    sb_append(sb, "    if (typeof v === 'boolean') return v ? 'true' : 'false';\n");
+    sb_append(sb, "    if (Array.isArray(v)) return '[' + v.map(_subStr).join(', ') + ']';\n");
+    sb_append(sb, "    if (typeof v === 'number')\n");
+    sb_append(sb, "        return Number.isInteger(v) ? String(v) : _subFmt(v);\n");
+    sb_append(sb, "    return String(v);\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subPush(a, v) { a.push(v); }\n\n");
+    sb_append(sb, "function _subPop(a) {\n");
+    sb_append(sb, "    if (a.length === 0) _subDie('pop from empty array');\n");
+    sb_append(sb, "    return a.pop();\n");
     sb_append(sb, "}\n\n");
     sb_append(sb, "function _subDie(msg) {\n");
     sb_append(sb, "    console.error('RuntimeError: ' + msg);\n");
@@ -3032,6 +3076,8 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
     sb_append(sb, "  return \"null\" if v.nil?\n");
     /* printf's %g, matching the interpreter: six significant digits. */
     sb_append(sb, "  return sprintf(\"%%g\", v) if v.is_a?(Float)\n");
+    sb_append(sb, "  return '[' + v.map { |x| _sub_str(x) }.join(', ') + ']' "
+                  "if v.is_a?(Array)\n");
     sb_append(sb, "  v.to_s\nend\n");
     /* Ruby's / and % floor like Python's; SUB truncates toward zero.
        Dividing by zero is a runtime error with status 70 in every backend. */
@@ -3051,6 +3097,10 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
     sb_append(sb, "\ndef _sub_fmod(a, b)\n");
     sb_append(sb, "  _sub_die('modulo by zero') if b == 0\n");
     sb_append(sb, "  a.to_f.remainder(b.to_f)\nend\n");
+    sb_append(sb, "\ndef _sub_push(a, v)\n  a.push(v)\n  nil\nend\n");
+    sb_append(sb, "\ndef _sub_pop(a)\n");
+    sb_append(sb, "  _sub_die('pop from empty array') if a.empty?\n");
+    sb_append(sb, "  a.pop\nend\n");
     sb_append(sb, "\ndef _sub_pow(a, b)\n");
     sb_append(sb, "  r = a ** b\n");
     sb_append(sb, "  r.is_a?(Rational) ? r.to_f : r\nend\n");
@@ -3263,8 +3313,8 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
                     if (node->children)
-                        gen_float_aware(sb, node->children[i], "_sub_fmt",
-                                        generate_expr_go);
+                        gen_printable(sb, node->children[i], "_sub_fmt",
+                                      "_sub_str", generate_expr_go);
                 }
                 sb_append(sb, ")");
             } else {
