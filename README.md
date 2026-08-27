@@ -152,12 +152,15 @@ through memory - so it gives up roughly 4x against `gcc -O2` while still
 running about 90x faster than the interpreter. What it buys is that nothing
 else has to be installed.
 
-**Not yet in the machine-code backend:** arrays and objects, classes,
-`input()`, string slicing (`substring`, `char_at`, `replace`, `split`,
-`join`), `try`/`catch`, `switch`, `do`/`while`, iterating anything other than
-`range(...)`, and functions of more than six parameters. Programs using these
-compile through the C backend automatically, and `subc` names the construct
-that forced the fallback rather than failing silently.
+**Not yet in the machine-code backend:** objects, classes, `input()`, string
+slicing (`substring`, `char_at`, `replace`, `split`, `join`), `try`/`catch`,
+`switch`, `do`/`while`, iterating a string, and functions of more than six
+parameters. Programs using these compile through the C backend
+automatically, and `subc` names the construct that forced the fallback
+rather than failing silently.
+
+Arrays are supported: literals, indexing, indexed assignment, `len`,
+`push`/`append`, `pop`, and `for x in a`.
 
 ### 2. Direct Interpreter (`subi`)
 
@@ -552,6 +555,24 @@ before that, `7 / 0` raised SIGFPE in C, printed `Infinity` in JavaScript,
 threw in Python and produced `0` in the native backend. Every backend now
 routes `/` and `%` through a small generated helper, so this is also the one
 place to change if a program wants IEEE infinities instead.
+
+**An array is a value.** Binding one copies it; `push` and `pop` change the
+array they are given:
+
+```
+let a = [1, 2]
+let b = a
+push(b, 3)
+println(a)      # [1, 2]
+println(b)      # [1, 2, 3]
+```
+
+Indexing out of range, and popping an empty array, are runtime errors with
+exit status 70 - not a silent zero and not a language-specific exception:
+
+```
+RuntimeError: array index 5 out of bounds [0, 3)
+```
 
 **Floats print with six significant digits** (`printf`'s `%g`), trailing
 zeros dropped, switching to exponent form outside `1e-4 … 1e+6`:
