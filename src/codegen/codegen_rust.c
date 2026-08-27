@@ -60,6 +60,29 @@ static const RustBuiltin* rust_builtin_multi(const char *name) {
     return NULL;
 }
 
+/* A Vec spelled for a value position, where Rust wants a turbofish:
+   Vec::<i64>::from(...), not Vec<i64>::from(...). rust_type() covers the
+   declaration positions. */
+static const char* rust_array_ctor(DataType elem) {
+    switch (elem) {
+    case TYPE_FLOAT:  return "Vec::<f64>";
+    case TYPE_STRING: return "Vec::<String>";
+    case TYPE_BOOL:   return "Vec::<bool>";
+    default:          return "Vec::<i64>";
+    }
+}
+
+/* Which _sub_arr_* formatter prints this element type. Rust has no way to
+   dispatch on it at run time here, and a float element has to go through
+   the %g formatter rather than Display. */
+static const char* rust_array_fmt(DataType elem) {
+    switch (elem) {
+    case TYPE_FLOAT:  return "_sub_arr_f";
+    case TYPE_BOOL:   return "_sub_arr_b";
+    default:          return "_sub_arr_d";   /* Display: integers, strings */
+    }
+}
+
 static const char* rust_type(DataType t, int is_param) {
     (void)is_param;
     switch (t) {
@@ -159,6 +182,7 @@ static char* escape_string_for_rust(const char *raw) {
 }
 
 static void generate_expr_rust(StringBuilder *sb, ASTNode *node);
+static void generate_expr_rust_as(StringBuilder *sb, ASTNode *node, DataType want);
 
 static ASTNode* block_first(ASTNode *node) {
     if (!node) return NULL;
@@ -313,6 +337,17 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
 
         case AST_ASSIGN_STMT:
             indent_code(sb, indent);
+            if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                sb_append(sb, "_sub_put(&mut ");
+                generate_expr_rust(sb, node->left->left);
+                sb_append(sb, ", ");
+                generate_expr_rust(sb, node->left->right);
+                sb_append(sb, ", ");
+                generate_expr_rust_as(sb, node->right,
+                                      infer_elem_type(node->left->left));
+                sb_append(sb, ");\n");
+                break;
+            }
             generate_expr_rust(sb, node->left);
             sb_append(sb, " = ");
             generate_expr_rust(sb, node->right);
@@ -325,6 +360,7 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
 }
 
 static void generate_expr_rust(StringBuilder *sb, ASTNode *node);
+static void generate_expr_rust_as(StringBuilder *sb, ASTNode *node, DataType want);
 
 /* Rust does not coerce an integer literal to f64, so `b == 0` against an f64
    and `safe_div(1.0, 0)` both fail to compile. Emit such a literal as a float
@@ -452,15 +488,44 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
             break;
         case AST_CALL_EXPR:
             {
-                if (node->value &&
+                if (node->value && node->child_count == 1 &&
                     (strcmp(node->value, "str") == 0 ||
-                     strcmp(node->value, "to_string") == 0) &&
-                    node->child_count == 1 &&
-                    infer_expr_type(node->children[0]) == TYPE_FLOAT) {
-                    sb_append(sb, "_sub_fmt(");
-                    generate_expr_rust(sb, node->children[0]);
-                    sb_append(sb, ")");
-                    break;
+                     strcmp(node->value, "to_string") == 0)) {
+                    DataType at = infer_expr_type(node->children[0]);
+                    if (at == TYPE_FLOAT || at == TYPE_ARRAY) {
+                        sb_append(sb, "%s(%s",
+                                  at == TYPE_FLOAT ? "_sub_fmt"
+                                    : rust_array_fmt(infer_elem_type(node->children[0])),
+                                  at == TYPE_ARRAY ? "&" : "");
+                        generate_expr_rust(sb, node->children[0]);
+                        sb_append(sb, ")");
+                        break;
+                    }
+                }
+                /* push / pop are methods on Vec, and len() of a Vec is not
+                   the len() the builtin table spells for a string. */
+                if (node->value && node->child_count >= 1 &&
+                    infer_expr_type(node->children[0]) == TYPE_ARRAY) {
+                    if ((!strcmp(node->value, "push") ||
+                         !strcmp(node->value, "append")) && node->child_count >= 2) {
+                        generate_expr_rust(sb, node->children[0]);
+                        sb_append(sb, ".push(");
+                        generate_expr_rust_as(sb, node->children[1],
+                                              infer_elem_type(node->children[0]));
+                        sb_append(sb, ")");
+                        break;
+                    }
+                    if (!strcmp(node->value, "pop")) {
+                        sb_append(sb, "_sub_pop_arr(&mut ");
+                        generate_expr_rust(sb, node->children[0]);
+                        sb_append(sb, ")");
+                        break;
+                    }
+                    if (!strcmp(node->value, "len") || !strcmp(node->value, "length")) {
+                        generate_expr_rust(sb, node->children[0]);
+                        sb_append(sb, ".len() as i64");
+                        break;
+                    }
                 }
                 const RustBuiltin *rb = rust_builtin(node->value);
                 if (rb && node->child_count == 1) {
@@ -483,10 +548,16 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
             if (is_print_builtin(node->value)) {
                 sb_append(sb, "println!(\"{}\", ");
                 if (node->child_count > 0) {
-                    int flt = (infer_expr_type(node->children[0]) == TYPE_FLOAT);
-                    if (flt) sb_append(sb, "_sub_fmt(");
-                    generate_expr_rust(sb, node->children[0]);
-                    if (flt) sb_append(sb, ")");
+                    ASTNode *a = node->children[0];
+                    DataType at = infer_expr_type(a);
+                    const char *wrap = at == TYPE_FLOAT ? "_sub_fmt"
+                                     : at == TYPE_ARRAY
+                                       ? rust_array_fmt(infer_elem_type(a))
+                                       : NULL;
+                    if (wrap) sb_append(sb, "%s(%s", wrap,
+                                        at == TYPE_ARRAY ? "&" : "");
+                    generate_expr_rust(sb, a);
+                    if (wrap) sb_append(sb, ")");
                 }
                 sb_append(sb, ")");
             } else {
@@ -504,14 +575,19 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                 sb_append(sb, ")");
             }
             break;
-        case AST_ARRAY_LITERAL:
-            sb_append(sb, "vec![");
+        case AST_ARRAY_LITERAL: {
+            /* An empty vec! has no element type to infer from, and one
+               holding integer literals defaults to i32 where the rest of
+               the program uses i64 - so the type is always written out. */
+            DataType elem = infer_elem_type(node);
+            sb_append(sb, "%s::from([", rust_array_ctor(elem));
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
-                generate_expr_rust(sb, node->children[i]);
+                generate_expr_rust_as(sb, node->children[i], elem);
             }
-            sb_append(sb, "]");
+            sb_append(sb, "])");
             break;
+        }
         case AST_OBJECT_LITERAL:
             sb_append(sb, "HashMap::from([");
             for (int i = 0; i < node->child_count; i++) {
@@ -531,10 +607,11 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, ".%s", node->value ? node->value : "");
             break;
         case AST_ARRAY_ACCESS:
+            sb_append(sb, "_sub_get(&");
             generate_expr_rust(sb, node->left);
-            sb_append(sb, "[");
+            sb_append(sb, ", ");
             generate_expr_rust(sb, node->right);
-            sb_append(sb, "]");
+            sb_append(sb, ")");
             break;
         default:
             break;
@@ -552,6 +629,41 @@ char* codegen_rust(ASTNode *ast, const char *source) {
        so one helper serves both the integer and the floating-point call. */
     sb_append(sb, "#[allow(dead_code)] fn _sub_str<T: std::fmt::Display>(v: T) -> String "
                   "{ v.to_string() }\n");
+
+    /* Arrays. SUB spells one [a, b, c] with no quotes on strings, and
+       indexing or popping out of range stops the program the way the
+       interpreter does rather than panicking with Rust's own message. */
+    sb_append(sb, "#[allow(dead_code)] fn _sub_arr_d<T: std::fmt::Display>(a: &Vec<T>) -> String "
+                  "{ let mut s = String::from(\"[\"); "
+                  "for (i, v) in a.iter().enumerate() "
+                  "{ if i > 0 { s.push_str(\", \") } s.push_str(&v.to_string()) } "
+                  "s + \"]\" }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_arr_f(a: &Vec<f64>) -> String "
+                  "{ let mut s = String::from(\"[\"); "
+                  "for (i, v) in a.iter().enumerate() "
+                  "{ if i > 0 { s.push_str(\", \") } s.push_str(&_sub_fmt(*v)) } "
+                  "s + \"]\" }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_arr_b(a: &Vec<bool>) -> String "
+                  "{ let mut s = String::from(\"[\"); "
+                  "for (i, v) in a.iter().enumerate() "
+                  "{ if i > 0 { s.push_str(\", \") } "
+                  "s.push_str(if *v { \"true\" } else { \"false\" }) } "
+                  "s + \"]\" }\n");
+    /* Reads and writes both go through a helper rather than being spelled
+       as a[i]: the bounds check needs a.len(), and writing
+       a[_sub_idx(i, a.len())] = v borrows a mutably and immutably at once,
+       which the borrow checker refuses. */
+    sb_append(sb, "#[allow(dead_code)] fn _sub_idx(i: i64, n: usize) -> usize {\n");
+    sb_append(sb, "    if i < 0 || i as usize >= n { eprintln!("
+                  "\"RuntimeError: array index {} out of bounds [0, {})\", i, n); "
+                  "std::process::exit(70) }\n    i as usize\n}\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_get<T: Clone>(a: &Vec<T>, i: i64) -> T "
+                  "{ let k = _sub_idx(i, a.len()); a[k].clone() }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_put<T>(a: &mut Vec<T>, i: i64, v: T) "
+                  "{ let k = _sub_idx(i, a.len()); a[k] = v; }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_pop_arr<T>(a: &mut Vec<T>) -> T "
+                  "{ match a.pop() { Some(v) => v, "
+                  "None => _sub_die(\"pop from empty array\") } }\n\n");
     sb_append(sb, "#[allow(dead_code)] fn _sub_floor(x: f64) -> i64 "
                   "{ x.floor() as i64 }\n");
     sb_append(sb, "#[allow(dead_code)] fn _sub_ceil(x: f64) -> i64 "
