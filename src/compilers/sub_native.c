@@ -19,6 +19,7 @@
 #include <process.h>
 #else
 #include <unistd.h>
+#include <sys/wait.h>
 #endif
 
 /* Helper: derive output name from input filename, or use user_out if provided */
@@ -132,19 +133,29 @@ static void with_exe_suffix(const char *name, char *out, size_t n) {
     snprintf(out, n, "%s%s", name, has_ext ? "" : ext);
 }
 
-/* Reject anything that would let an output name reach the shell. Only the
-   --via-c path runs a command, but the check is cheap and applies to both. */
-static int output_name_is_safe(const char *name) {
-    for (const char *p = name; *p; p++) {
-        if (!isalnum((unsigned char)*p) &&
-            *p != '_' && *p != '-' && *p != '.' && *p != '/') {
-            fprintf(stderr, "Error: Output name contains unsafe characters: "
-                            "'%c'. Only alphanumeric, underscore, dash, dot "
-                            "and slash are allowed.\n", *p);
-            return 0;
-        }
+/* Run the C compiler as a process rather than as a shell command line.
+   Handing a string to system() meant quoting the paths, and any character
+   the shell treats specially had to be rejected outright - which refused
+   every absolute Windows path, because "D:/..." contains a colon. Spawning
+   the compiler directly removes the quoting and the need to filter at all:
+   there is no shell to inject into. */
+static int run_cc(const char *cc, const char *opt,
+                  const char *out, const char *src) {
+    const char *argv[] = { cc, opt, "-o", out, src, "-lm", NULL };
+#ifdef _WIN32
+    intptr_t rc = _spawnvp(_P_WAIT, cc, (char *const *)argv);
+    return rc < 0 ? 127 : (int)rc;
+#else
+    pid_t pid = fork();
+    if (pid < 0) return 127;
+    if (pid == 0) {
+        execvp(cc, (char *const *)argv);
+        _exit(127);              /* only reached when cc is not on PATH */
     }
-    return 1;
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return 127;
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 127;
+#endif
 }
 
 static int build_via_c(ASTNode *ast, const char *out_with_ext,
@@ -165,10 +176,7 @@ static int build_via_c(ASTNode *ast, const char *out_with_ext,
 
     const char *opt = opt_level >= 2 ? "-O2" : opt_level == 1 ? "-O1" : "-O0";
     const char *cc  = sub_host_cc();
-    char cmd[2048];
-    snprintf(cmd, sizeof(cmd), "%s %s -o \"%s\" \"%s\" -lm",
-             cc, opt, out_with_ext, tmp_c);
-    int ret = system(cmd);
+    int ret = run_cc(cc, opt, out_with_ext, tmp_c);
     remove(tmp_c);
     if (ret != 0) {
         fprintf(stderr, "Compilation failed. Make sure %s is installed "
@@ -180,7 +188,10 @@ static int build_via_c(ASTNode *ast, const char *out_with_ext,
 
 int compile_to_native(const char *input_file, const char *output_name,
                       bool verbose, int opt_level, Backend backend) {
-    if (!output_name_is_safe(output_name)) return 1;
+    if (!output_name || !*output_name) {
+        fprintf(stderr, "Error: empty output name.\n");
+        return 1;
+    }
 
     Token *tokens = NULL; int ntok = 0; char *source = NULL;
     ASTNode *ast = front_end(input_file, verbose, &tokens, &ntok, &source);
@@ -471,26 +482,16 @@ int main(int argc, char *argv[]) {
         // If it is a platform target that compiles to C under the hood, compile to machine code directly
         if (target->kind == TARGET_KIND_PLATFORM && 
             (target->platform == PLATFORM_LINUX || target->platform == PLATFORM_WINDOWS || target->platform == PLATFORM_MACOS)) {
-            /* Validate base_name and output_file contain no shell metacharacters */
-            const char *check_names[] = { base_name, output_file, NULL };
-            for (int ci = 0; check_names[ci]; ci++) {
-                for (const char *p = check_names[ci]; *p; p++) {
-                    if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-' && *p != '.' && *p != '/') {
-                        fprintf(stderr, "Error: Output name contains unsafe characters: '%c'\n", *p);
-                        free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast); free(output_code);
-                        return 1;
-                    }
-                }
-            }
-            char compile_cmd[1024];
+            char bin_name[512];
             const char *bin_ext = (target->platform == PLATFORM_WINDOWS) ? ".exe" : "";
-            snprintf(compile_cmd, sizeof(compile_cmd), "gcc -O2 -o \"%s%s\" \"%s\" -lm", base_name, bin_ext, output_file);
+            snprintf(bin_name, sizeof(bin_name), "%s%s", base_name, bin_ext);
             printf("\nCompiling intermediate C code to native machine code...\n");
-            int ret = system(compile_cmd);
+            int ret = run_cc(sub_host_cc(), "-O2", bin_name, output_file);
             if (ret == 0) {
-                printf("\u2705 Machine code compiled successfully: ./%s%s\n", base_name, bin_ext);
+                printf("\u2705 Machine code compiled successfully: ./%s\n", bin_name);
             } else {
-                fprintf(stderr, "Warning: gcc compilation failed. Make sure gcc is installed.\n");
+                fprintf(stderr, "Warning: %s compilation failed. Make sure it "
+                                "is installed.\n", sub_host_cc());
             }
         } else {
             printf("\nNext steps:\n");

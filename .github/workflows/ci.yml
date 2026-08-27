@@ -132,9 +132,12 @@ jobs:
           rc=$?
           cat ci.log
           if [ "$rc" -ne 0 ]; then
-            tail -n 30 ci.log | while IFS= read -r line; do
-              [ -n "$line" ] && echo "::error::$line"
-            done
+            # One multi-line annotation rather than one per line: GitHub caps
+            # and de-duplicates annotations, which was dropping the middle of
+            # a Python traceback. %0A is how a newline is escaped here.
+            msg=$(tail -n 60 ci.log | sed -e 's/%/%25/g' -e 's/\r$//' \
+                  | awk '{printf "%s%%0A", $0}')
+            echo "::error::$msg"
           fi
           exit $rc
           SH
