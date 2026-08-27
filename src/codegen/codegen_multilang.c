@@ -111,6 +111,7 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
         {"floor","int64(math.Floor(","))"}, {"ceil","int64(math.Ceil(","))"},
         {"round","int64(math.Round(","))"},
         {"upper","strings.ToUpper(",")"}, {"lower","strings.ToLower(",")"},
+        {"pop","_sub_pop(",")"},
         {"trim","strings.TrimSpace(",")"}, {NULL,NULL,NULL}
     };
     static const BuiltinSpelling ruby[] = {
@@ -160,7 +161,9 @@ static const BuiltinSpelling* builtin_spelling_multi(TargetLang lang, const char
         {"min","Math.min(",")"},   {"max","Math.max(",")"},   {NULL,NULL,NULL}
     };
     static const BuiltinSpelling swift[] = {
-        {"min","min(",")"},        {"max","max(",")"},        {NULL,NULL,NULL}
+        {"min","min(",")"},        {"max","max(",")"},
+        {"push","_sub_push(",")"},  {"append","_sub_push(",")"},
+        {NULL,NULL,NULL}
     };
     static const BuiltinSpelling kotlin[] = {
         {"min","kotlin.math.min(",")"}, {"max","kotlin.math.max(",")"},
@@ -168,7 +171,9 @@ static const BuiltinSpelling* builtin_spelling_multi(TargetLang lang, const char
     };
     static const BuiltinSpelling go[] = {
         /* min and max are predeclared functions in Go 1.21 and later. */
-        {"min","min(",")"},        {"max","max(",")"},        {NULL,NULL,NULL}
+        {"min","min(",")"},        {"max","max(",")"},
+        {"push","_sub_push(",")"},  {"append","_sub_push(",")"},
+        {NULL,NULL,NULL}
     };
     static const BuiltinSpelling ruby[] = {
         {"min","[","].min"},       {"max","[","].max"},
@@ -252,8 +257,22 @@ static const char* go_type(DataType t) {
         case TYPE_FLOAT:  return "float64";
         case TYPE_BOOL:   return "bool";
         case TYPE_STRING: return "string";
-        case TYPE_ARRAY:  return "[]int64";
+        /* A SUB array is a *pointer to* a slice. append() returns a new
+           slice header, so push could not otherwise change the caller's
+           array; going through a pointer keeps `push(a, x); println(a)`
+           meaning what it means everywhere else. Only used where the element
+           type is unknown - go_array_type() names the real one. */
+        case TYPE_ARRAY:  return "*[]int64";
         default:          return "interface{}";
+    }
+}
+
+static const char* go_array_type(DataType elem) {
+    switch (elem) {
+    case TYPE_FLOAT:  return "*[]float64";
+    case TYPE_STRING: return "*[]string";
+    case TYPE_BOOL:   return "*[]bool";
+    default:          return "*[]int64";
     }
 }
 
@@ -3290,6 +3309,17 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
         case AST_CALL_EXPR: {
             const char *func_name = node->value ? node->value : "fn";
             {
+                /* Ahead of the table: len() and str() of an array need the
+                   array helpers, not the string spellings the table holds. */
+                if (node->value && node->child_count == 1 &&
+                    (!strcmp(node->value, "len") || !strcmp(node->value, "length") ||
+                     !strcmp(node->value, "str") || !strcmp(node->value, "to_string")) &&
+                    infer_expr_type(node->children[0]) == TYPE_ARRAY) {
+                    sb_append(sb, node->value[0] == 'l' ? "_sub_len(" : "_sub_arr(");
+                    generate_expr_go(sb, node->children[0]);
+                    sb_append(sb, ")");
+                    break;
+                }
                 const BuiltinSpelling *bs = builtin_spelling(LANG_GO, node->value);
                 if (bs && node->child_count == 1) {
                     sb_append(sb, "%s", bs->prefix);
@@ -3314,7 +3344,7 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
                     if (i > 0) sb_append(sb, ", ");
                     if (node->children)
                         gen_printable(sb, node->children[i], "_sub_fmt",
-                                      "_sub_str", generate_expr_go);
+                                      "_sub_arr", generate_expr_go);
                 }
                 sb_append(sb, ")");
             } else {
@@ -3334,8 +3364,10 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
             break;
         }
 
-        case AST_ARRAY_LITERAL:
-            sb_append(sb, "[]interface{}{");
+        case AST_ARRAY_LITERAL: {
+            /* &[]T{...} - addressable, so push can append through it. */
+            const char *t = go_array_type(infer_elem_type(node));
+            sb_append(sb, "&%s{", t + 1);          /* skip the leading '*' */
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
                 if (node->children)
@@ -3343,6 +3375,7 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
             }
             sb_append(sb, "}");
             break;
+        }
 
         case AST_OBJECT_LITERAL:
             sb_append(sb, "map[string]interface{}{");
@@ -3362,10 +3395,11 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
             break;
 
         case AST_ARRAY_ACCESS:
+            sb_append(sb, "_sub_at(");
             generate_expr_go(sb, node->left);
-            sb_append(sb, "[");
+            sb_append(sb, ", ");
             generate_expr_go(sb, node->right);
-            sb_append(sb, "]");
+            sb_append(sb, ")");
             break;
 
         default:
@@ -3395,8 +3429,10 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
                 dt = infer_expr_type(node->right);
             sb_append(sb, "var %s", node->value ? node->value : "v");
             if (node->right) {
-                if (dt == TYPE_INT || dt == TYPE_FLOAT ||
-                    dt == TYPE_BOOL || dt == TYPE_STRING)
+                if (dt == TYPE_ARRAY)
+                    sb_append(sb, " %s", go_array_type(infer_elem_type(node->right)));
+                else if (dt == TYPE_INT || dt == TYPE_FLOAT ||
+                         dt == TYPE_BOOL || dt == TYPE_STRING)
                     sb_append(sb, " %s", go_type(dt));
                 sb_append(sb, " = ");
                 if (dt == TYPE_INT || dt == TYPE_FLOAT) {
@@ -3505,16 +3541,17 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
                     }
                     sb_append(sb, "; %s++ {\n", var);
                 } else {
-                    sb_append(sb, "for _, %s := range ",
+                    /* An array is a *[]T, so ranging over it dereferences. */
+                    sb_append(sb, "for _, %s := range *(",
                               node->value ? node->value : "item");
                     generate_expr_go(sb, range);
-                    sb_append(sb, " {\n");
+                    sb_append(sb, ") {\n");
                 }
             } else if (node->condition) {
-                sb_append(sb, "for _, %s := range ",
+                sb_append(sb, "for _, %s := range *(",
                           node->value ? node->value : "item");
                 generate_expr_go(sb, node->condition);
-                sb_append(sb, " {\n");
+                sb_append(sb, ") {\n");
             } else {
                 sb_append(sb, "for %s := int64(0); %s < 10; %s++ {\n",
                           node->value ? node->value : "i",
@@ -3586,6 +3623,16 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
 
         case AST_ASSIGN_STMT:
             indent_go(sb, indent);
+            if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                sb_append(sb, "_sub_put(");
+                generate_expr_go(sb, node->left->left);
+                sb_append(sb, ", ");
+                generate_expr_go(sb, node->left->right);
+                sb_append(sb, ", ");
+                generate_expr_go(sb, node->right);
+                sb_append(sb, ")\n");
+                break;
+            }
             generate_expr_go(sb, node->left);
             sb_append(sb, " = ");
             generate_expr_go(sb, node->right);
@@ -3664,7 +3711,7 @@ char* codegen_go(ASTNode *ast, const char *source) {
 
     bool needs_divmod   = ast_uses_int_divmod(ast);
     bool needs_fmt      = ast_needs_fmt(ast) || needs_divmod;
-    bool needs_os       = needs_divmod;
+    bool needs_os       = true;   /* _sub_die always uses os.Exit */
     bool needs_math     = ast_uses_go_pkg(ast, "math") || needs_divmod;
     bool needs_strings  = ast_uses_go_pkg(ast, "strings");
     bool needs_strconv  = true;   /* _sub_fmt always uses it */
@@ -3686,6 +3733,30 @@ char* codegen_go(ASTNode *ast, const char *source) {
         sb_append(sb, ")\n\n");
     }
 
+    /* Arrays. Generic, so one set of helpers covers every element type.
+       Indexing and popping stop the program the way the interpreter does
+       rather than panicking with Go's own message. */
+    sb_append(sb, "func _sub_at[T any](a *[]T, i int64) T {\n");
+    sb_append(sb, "\tif a == nil || i < 0 || i >= int64(len(*a)) {\n");
+    sb_append(sb, "\t\tfmt.Fprintf(os.Stderr, \"RuntimeError: array index %%d "
+                  "out of bounds [0, %%d)\\n\", i, len(*a))\n");
+    sb_append(sb, "\t\tos.Exit(70)\n\t}\n\treturn (*a)[i]\n}\n\n");
+    sb_append(sb, "func _sub_put[T any](a *[]T, i int64, v T) {\n");
+    sb_append(sb, "\tif a == nil || i < 0 || i >= int64(len(*a)) {\n");
+    sb_append(sb, "\t\tfmt.Fprintf(os.Stderr, \"RuntimeError: array index %%d "
+                  "out of bounds [0, %%d)\\n\", i, len(*a))\n");
+    sb_append(sb, "\t\tos.Exit(70)\n\t}\n\t(*a)[i] = v\n}\n\n");
+    sb_append(sb, "func _sub_push[T any](a *[]T, v T) { *a = append(*a, v) }\n\n");
+    sb_append(sb, "func _sub_pop[T any](a *[]T) T {\n");
+    sb_append(sb, "\tif a == nil || len(*a) == 0 {\n\t\t_sub_die(\"pop from empty array\")\n\t}\n");
+    sb_append(sb, "\tv := (*a)[len(*a)-1]\n\t*a = (*a)[:len(*a)-1]\n\treturn v\n}\n\n");
+    sb_append(sb, "func _sub_len[T any](a *[]T) int64 "
+                  "{ if a == nil { return 0 }; return int64(len(*a)) }\n\n");
+    sb_append(sb, "func _sub_arr[T any](a *[]T) string {\n");
+    sb_append(sb, "\ts := \"[\"\n\tfor i, v := range *a {\n");
+    sb_append(sb, "\t\tif i > 0 {\n\t\t\ts += \", \"\n\t\t}\n");
+    sb_append(sb, "\t\ts += _sub_str(v)\n\t}\n\treturn s + \"]\"\n}\n\n");
+
     /* printf's %g, as the interpreter prints floats. Go's default float
        formatting prints every digit it needs to round-trip, so 1.0 / 3.0
        came out 0.3333333333333333. */
@@ -3695,12 +3766,15 @@ char* codegen_go(ASTNode *ast, const char *source) {
     sb_append(sb, "\tif d, ok := v.(float64); ok {\n\t\treturn _sub_fmt(d)\n\t}\n");
     sb_append(sb, "\treturn fmt.Sprint(v)\n}\n\n");
 
+    /* Both the array helpers and integer division report runtime errors, so
+       this is unconditional and os is always imported. */
+    sb_append(sb, "func _sub_die(msg string) {\n");
+    sb_append(sb, "\tfmt.Fprintln(os.Stderr, \"RuntimeError: \"+msg)\n");
+    sb_append(sb, "\tos.Exit(70)\n}\n\n");
+
     if (needs_divmod) {
         /* Go panics on integer division by zero; SUB reports a runtime error
            and exits 70, as the interpreter does. */
-        sb_append(sb, "func _sub_die(msg string) {\n");
-        sb_append(sb, "\tfmt.Fprintln(os.Stderr, \"RuntimeError: \"+msg)\n");
-        sb_append(sb, "\tos.Exit(70)\n}\n\n");
         sb_append(sb, "func _sub_idiv(a int64, b int64) int64 {\n");
         sb_append(sb, "\tif b == 0 {\n\t\t_sub_die(\"division by zero\")\n\t}\n");
         sb_append(sb, "\treturn a / b\n}\n\n");
