@@ -162,8 +162,16 @@ def test_transpile_and_run(sb_file, expected, lang, ext, runner):
 
 
 def main():
-    if not (os.path.exists(SUB) and os.path.exists(SUBC) and os.path.exists(SUBI)):
-        print("Error: sub/subc/subi not found. Run 'make all' first.")
+    missing = [p for p in (SUB, SUBC, SUBI) if not os.path.exists(p)]
+    if missing:
+        # Name the ones that are missing. "sub/subc/subi not found" does not
+        # say whether the build failed, whether the .exe suffix was expected,
+        # or which of the three is absent.
+        msg = ("not found: %s (looked next to %s; run `make all` first)"
+               % (", ".join(os.path.basename(m) for m in missing), ROOT_DIR))
+        print("Error: " + msg)
+        if ANNOTATE:
+            print(f"::error::{msg}")
         sys.exit(1)
 
     for fname, expected in FIXTURES:

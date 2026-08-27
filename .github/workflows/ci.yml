@@ -120,38 +120,45 @@ jobs:
             mingw-w64-x86_64-python
             make
 
-      # This job has never passed, and downloading a workflow log needs
-      # repository admin, so a failure here reports only "exit code 2".
-      # Annotations are public, so the compiler's own diagnostics are
-      # re-emitted as ::error:: lines and become readable.
-      - name: Build
+      # Downloading a workflow log needs repository admin, so a failing step
+      # in this job otherwise reports nothing but "exit code N". Annotations
+      # are readable without it, so every step here runs through a wrapper
+      # that re-emits the tail of its output as ::error:: lines.
+      - name: Set up failure reporting
         run: |
+          cat > ci-run.sh <<'SH'
           set +e
-          make all > build.log 2>&1
+          "$@" > ci.log 2>&1
           rc=$?
-          cat build.log
-          if [ $rc -ne 0 ]; then
-            grep -E "error:|Error [0-9]|undefined reference|No such file" build.log \
-              | head -20 \
-              | while IFS= read -r line; do echo "::error::$line"; done
+          cat ci.log
+          if [ "$rc" -ne 0 ]; then
+            tail -n 30 ci.log | while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error::$line"
+            done
           fi
           exit $rc
+          SH
+          chmod +x ci-run.sh
+
+      - name: Build
+        run: ./ci-run.sh make all
 
       - name: Executables carry the .exe suffix
         # subc appends it itself; this is the behaviour that used to be
         # missing and produced an unrunnable file on Windows.
         run: |
+          ls -l sub.exe subc.exe subi.exe
           ./subc.exe examples/fibonacci.sb -o fib_win
           test -f fib_win.exe || { echo "subc did not produce fib_win.exe"; exit 1; }
           ./fib_win.exe
 
       - name: Regression tests
-        run: python3 tests/run_tests.py
+        run: ./ci-run.sh python3 tests/run_tests.py
 
       - name: Conformance (targets available on this runner)
         # `native` skips itself here: the machine-code backend targets
         # x86-64 Linux, so on Windows subc goes through the C backend.
-        run: python3 tests/conformance.py native native-c c cpp python
+        run: ./ci-run.sh python3 tests/conformance.py native native-c c cpp python
 
   conformance:
     name: conformance (all language targets)
