@@ -209,14 +209,56 @@ static void val_free(SubVal v) {
 }
 
 /* Deep-copy a SubVal so that strings/arrays/objects are independently owned. */
+/* Copy a value for storage in an environment slot.
+   Arrays and objects used to be copied by sharing the pointer, on the theory
+   that "the original owner is responsible for freeing". Nothing tracked who
+   the original owner was, so two bindings to one array meant two calls to
+   val_free on the same block:
+
+       let a = [1, 2]
+       let b = a          # b shares a's SubArray
+       push(b, 3)
+       println(a)         # segfault at scope exit: double free
+
+   Copying properly makes a SUB array a value: assigning one copies it, and
+   push/pop mutate the binding they are given rather than everything that
+   ever shared it. env_get still hands out the live value, so push(a, x)
+   goes on modifying a in place. */
 static SubVal val_copy(SubVal v) {
     SubVal r = v;
     if (v.type == VAL_STRING && v.sv) {
         r.sv = strdup(v.sv);
+        return r;
     }
-    /* Arrays and objects: for now use shallow copy + bump ref would be ideal,
-       but deep copy is safest. For simplicity, share the pointer and accept
-       that the original owner is responsible for freeing. */
+    if (v.type == VAL_ARRAY && v.arr) {
+        SubArray *c = calloc(1, sizeof(SubArray));
+        if (!c) { r.arr = NULL; return r; }
+        c->count = c->capacity = v.arr->count;
+        if (c->capacity > 0) {
+            c->items = malloc((size_t)c->capacity * sizeof(SubVal));
+            if (!c->items) { c->count = c->capacity = 0; }
+            else for (int i = 0; i < v.arr->count; i++)
+                c->items[i] = val_copy(v.arr->items[i]);
+        }
+        r.arr = c;
+        return r;
+    }
+    if (v.type == VAL_OBJECT && v.obj) {
+        SubObject *c = calloc(1, sizeof(SubObject));
+        if (!c) { r.obj = NULL; return r; }
+        c->count = c->capacity = v.obj->count;
+        if (c->capacity > 0) {
+            c->keys   = calloc((size_t)c->capacity, sizeof(char *));
+            c->values = malloc((size_t)c->capacity * sizeof(SubVal));
+            if (!c->keys || !c->values) { c->count = c->capacity = 0; }
+            else for (int i = 0; i < v.obj->count; i++) {
+                c->keys[i]   = v.obj->keys[i] ? strdup(v.obj->keys[i]) : NULL;
+                c->values[i] = val_copy(v.obj->values[i]);
+            }
+        }
+        r.obj = c;
+        return r;
+    }
     return r;
 }
 
@@ -482,7 +524,7 @@ void env_define(Env *env, const char *name, SubVal val) {
     if (!env) return;
     EnvEntry *e = calloc(1, sizeof(EnvEntry));
     e->name = strdup(name);
-    e->val  = val_copy(val);  /* deep copy to avoid aliasing */
+    e->val  = val_copy(val);      /* see val_copy: a value, not a share */
     e->next = env->vars;
     env->vars = e;
 }
@@ -492,7 +534,7 @@ void env_set(Env *env, const char *name, SubVal val) {
         for (EnvEntry *e = s->vars; e; e = e->next)
             if (strcmp(e->name, name) == 0) {
                 val_free(e->val);
-                e->val = val_copy(val);  /* deep copy to avoid aliasing */
+                e->val = val_copy(val);  /* see val_copy */
                 return;
             }
     /* Variable not found - create in current scope */
