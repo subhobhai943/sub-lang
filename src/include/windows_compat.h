@@ -13,9 +13,22 @@
    start in a legacy codepage (CP437/850), not UTF-8. Call once at the very
    top of main(), before anything is printed. */
 #ifdef _WIN32
-#include <windows.h>
+/* SetConsoleOutputCP is declared by hand rather than by including
+   <windows.h>. winnt.h's TOKEN_INFORMATION_CLASS has an enumerator spelled
+   TokenType, which cannot coexist with SUB's TokenType typedef - so every
+   Windows build failed on the first file it compiled:
+
+     winnt.h:4146:7: error: 'TokenType' redeclared as different kind of symbol
+
+   Including it for one function also drags in windows.h's macro set -
+   min, max, ERROR, CONST, IN, OUT, interface - into every translation
+   unit that wants Windows console setup. One declaration avoids all of it.
+   65001 is CP_UTF8; the function lives in kernel32, which MinGW and MSVC
+   both link by default. */
+int __stdcall SetConsoleOutputCP(unsigned int code_page);
+
 static inline void sub_console_init_utf8(void) {
-    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleOutputCP(65001);
 }
 #else
 static inline void sub_console_init_utf8(void) {}
