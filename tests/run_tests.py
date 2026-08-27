@@ -50,15 +50,30 @@ FIXTURES = [
 
 failures = []
 
+# GitHub Actions renders ::error:: lines as annotations, which are visible
+# on the run without downloading the log - downloading a log needs
+# repository admin, so on this repo a failure otherwise reports nothing but
+# "exit code 1".
+ANNOTATE = bool(os.environ.get("GITHUB_ACTIONS"))
+
+
+def fail(label, detail=""):
+    """Record a failure, print it, and annotate it when running in CI."""
+    print(f"  FAIL {label}")
+    if detail:
+        for line in str(detail).strip().splitlines():
+            print(f"       {line}")
+    failures.append(label)
+    if ANNOTATE:
+        flat = " ".join(str(detail).split())[:800]
+        print(f"::error::{label}{': ' + flat if flat else ''}")
+
 
 def check_suffix(actual, expected, label):
     if actual.rstrip("\n").endswith(expected.rstrip("\n")):
         print(f"  OK   {label}")
         return True
-    print(f"  FAIL {label}")
-    print(f"       expected (suffix): {expected!r}")
-    print(f"       actual:            {actual!r}")
-    failures.append(label)
+    fail(label, f"expected (suffix): {expected!r} | actual: {actual!r}")
     return False
 
 
@@ -67,7 +82,12 @@ def run(cmd, cwd=None):
         result = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True,
                                  encoding="utf-8", errors="replace", timeout=30)
-        return result.returncode, result.stdout
+        # On Windows the C runtime writes "\n" as "\r\n", so every expected
+        # value in this file - written with "\n" - failed to match even when
+        # the program was correct. The line ending is not part of what the
+        # program means, so it is normalised away rather than duplicated
+        # into every fixture.
+        return result.returncode, result.stdout.replace("\r\n", "\n")
     except (subprocess.TimeoutExpired, OSError) as e:
         return 1, str(e)
 
@@ -91,8 +111,7 @@ def test_interpreter(sb_file, expected):
     rc, out = run([SUBI, sb_file])
     label = f"subi: {os.path.basename(sb_file)}"
     if rc != 0:
-        print(f"  FAIL {label} (exit {rc})\n       {out}")
-        failures.append(label)
+        fail(label, f"exit {rc}: {out}")
         return
     check_suffix(out, expected, label)
 
@@ -105,13 +124,11 @@ def test_native_compile(sb_file, expected):
     out_name = os.path.join(ROOT_DIR, "_regtest_bin")
     rc, out = run([SUBC, sb_file, "-o", out_name])
     if rc != 0:
-        print(f"  FAIL {label} (compile exit {rc})\n       {out}")
-        failures.append(label)
+        fail(label, f"compile exit {rc}: {out}")
         return
     bin_path = out_name + EXE
     if not os.path.exists(bin_path):
-        print(f"  FAIL {label} (binary not produced: {bin_path})")
-        failures.append(label)
+        fail(label, f"binary not produced: {bin_path}")
         return
     rc, run_out = run([bin_path])
     os.remove(bin_path)
@@ -119,8 +136,7 @@ def test_native_compile(sb_file, expected):
     if os.path.exists(c_file):
         os.remove(c_file)
     if rc != 0:
-        print(f"  FAIL {label} (run exit {rc})\n       {run_out}")
-        failures.append(label)
+        fail(label, f"run exit {rc}: {run_out}")
         return
     check_suffix(run_out, expected, label)
 
@@ -131,8 +147,7 @@ def test_transpile_and_run(sb_file, expected, lang, ext, runner):
     out_file = os.path.join(ROOT_DIR, stem + ext)
     rc, out = run([SUB, sb_file, lang])
     if rc != 0 or not os.path.exists(out_file):
-        print(f"  FAIL {label} (transpile failed, exit {rc})\n       {out}")
-        failures.append(label)
+        fail(label, f"transpile failed, exit {rc}: {out}")
         return
     if runner is None or not tool_available(runner[0]):
         print(f"  SKIP {label} (transpiled OK; runtime '{runner[0] if runner else '?'}' not available)")
@@ -141,8 +156,7 @@ def test_transpile_and_run(sb_file, expected, lang, ext, runner):
     rc, run_out = run(runner + [out_file])
     os.remove(out_file)
     if rc != 0:
-        print(f"  FAIL {label} (run exit {rc})\n       {run_out}")
-        failures.append(label)
+        fail(label, f"run exit {rc}: {run_out}")
         return
     check_suffix(run_out, expected, label)
 
@@ -174,11 +188,9 @@ def main():
                     check_suffix(run_out, expected, label)
                     os.remove(bin_path)
                 else:
-                    print(f"  FAIL {label} (g++ compile failed)\n       {out}")
-                    failures.append(label)
+                    fail(label, f"g++ compile failed: {out}")
             else:
-                print(f"  FAIL {label} (transpile failed)\n       {out}")
-                failures.append(label)
+                fail(label, f"transpile failed: {out}")
             if os.path.exists(cpp_file):
                 os.remove(cpp_file)
         else:

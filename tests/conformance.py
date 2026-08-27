@@ -35,6 +35,10 @@ SUBC = os.path.join(ROOT, "subc" + EXE)
 
 TIMEOUT = 30
 
+# GitHub Actions renders ::error:: lines as annotations, which are readable
+# on the run itself; downloading a workflow log needs repository admin.
+ANNOTATE = bool(os.environ.get("GITHUB_ACTIONS"))
+
 
 def have(tool):
     """A target with no `need` has no external dependency at all."""
@@ -205,6 +209,9 @@ def main():
             print("  [%s] %-11s %s" % (mark, target, detail))
             if status == "fail":
                 failures.append((name, target, detail))
+                if ANNOTATE:
+                    flat = " ".join(detail.split())[:800]
+                    print("::error::%s [%s] %s" % (name, target, flat))
             elif status == "skip":
                 skipped.append((name, target, detail))
             else:
