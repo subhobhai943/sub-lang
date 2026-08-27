@@ -216,117 +216,16 @@ jobs:
   # ─────────────────────────────────────────────
   # 3. Build Windows MSI installer
   # ─────────────────────────────────────────────
+  # Shared with CI, which builds it on every push, so a release is never the
+  # first time the installer has been put together.
   build-windows-msi:
     name: build (windows-x86_64 MSI)
     needs: verify
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          update: true
-          install: >-
-            mingw-w64-x86_64-gcc
-            make
-          msystem: MINGW64
-
-      - name: Build all tools
-        shell: msys2 {0}
-        run: |
-          make clean
-          make all
-
-      - name: Smoke test all tools
-        shell: msys2 {0}
-        run: |
-          echo 'let x = 42' > smoke.sb
-          echo 'print(x)' >> smoke.sb
-          ./sub.exe smoke.sb python
-          ./subc.exe smoke.sb -o smoke_bin
-          ./smoke_bin.exe
-          ./subi.exe smoke.sb
-
-      - name: Stage binaries for WiX
-        shell: pwsh
-        run: |
-          # WiX resolves Source paths relative to the .wxs file location.
-          # Copy everything the installer needs into installer\windows\ so
-          # the bare filenames in the wxs Source attributes resolve correctly.
-          $dest = "installer\windows"
-          Copy-Item sub.exe, subc.exe, subi.exe, LICENSE, README.md -Destination $dest -Force
-          Write-Host "Staged files:"
-          Get-ChildItem $dest
-
-      - name: Install WiX Toolset v4
-        shell: pwsh
-        run: |
-          dotnet tool install --global wix --version 4.0.5
-          echo "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Add the WiX UI extension
-        shell: pwsh
-        run: wix extension add --global WixToolset.UI.wixext/4.0.5
-
-      - name: Build MSI
-        shell: pwsh
-        run: |
-          # The version goes in as a preprocessor variable. This step used to
-          # rewrite sub-lang.wxs with a regular expression first, which meant
-          # the file that shipped was never the file in the repository.
-          # -bindpath so the licence RTF, the icon and the staged binaries
-          # all resolve regardless of the working directory.
-          wix build installer\windows\sub-lang.wxs `
-            -bindpath installer\windows `
-            -d Version=${{ needs.verify.outputs.wix }} `
-            -ext WixToolset.UI.wixext `
-            -o sub-lang-${{ needs.verify.outputs.version }}-windows-x86_64.msi
-          if (-not (Test-Path "sub-lang-${{ needs.verify.outputs.version }}-windows-x86_64.msi")) {
-            throw "wix build reported success but produced no .msi"
-          }
-
-      - name: Check the MSI
-        shell: pwsh
-        run: |
-          # An MSI that installs nothing still builds, so look inside: the
-          # three tools have to be in there, and the recorded version has to
-          # be the one being released.
-          $msi = Get-ChildItem *.msi | Select-Object -First 1
-          Write-Host ("{0}  {1:N0} bytes" -f $msi.Name, $msi.Length)
-          $installer = New-Object -ComObject WindowsInstaller.Installer
-          $db = $installer.GetType().InvokeMember(
-                  "OpenDatabase", "InvokeMethod", $null, $installer, @($msi.FullName, 0))
-          function Query($sql) {
-            $view = $db.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $db, @($sql))
-            $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null)
-            $rows = @()
-            while ($true) {
-              $rec = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
-              if (-not $rec) { break }
-              $rows += $rec.GetType().InvokeMember("StringData", "GetProperty", $null, $rec, @(1))
-            }
-            return $rows
-          }
-          $files = Query "SELECT FileName FROM File"
-          Write-Host "Files in the package: $($files -join ', ')"
-          foreach ($want in @("sub.exe", "subc.exe", "subi.exe")) {
-            if (-not ($files -match [regex]::Escape($want))) { throw "$want is missing from the MSI" }
-          }
-          $ver = Query "SELECT Value FROM Property WHERE Property='ProductVersion'"
-          Write-Host "ProductVersion: $ver"
-          if ($ver -ne "${{ needs.verify.outputs.wix }}") {
-            throw "MSI ProductVersion is $ver, expected ${{ needs.verify.outputs.wix }}"
-          }
-
-      - name: Upload MSI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-msi
-          path: "*.msi"
-          retention-days: 5
+    uses: ./.github/workflows/msi.yml
+    with:
+      version: ${{ needs.verify.outputs.version }}
+      wix_version: ${{ needs.verify.outputs.wix }}
+      upload: true
 
   # ─────────────────────────────────────────────
   # 4. Create GitHub Release

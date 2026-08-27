@@ -255,6 +255,14 @@ jobs:
       - name: Native backend needs no toolchain
         run: python3 tests/native_backend.py
 
+  # The installer is only otherwise built when a tag is pushed, which is the
+  # worst moment to find out it does not build.
+  installer:
+    name: windows installer
+    uses: ./.github/workflows/msi.yml
+    with:
+      upload: false
+
   syntax:
     name: examples use the canonical syntax
     runs-on: ubuntu-latest
