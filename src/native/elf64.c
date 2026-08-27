@@ -95,7 +95,11 @@ int elf64_write(const char *path, const Buf *text, size_t entry_off) {
     buf_free(&out);
     if (wrote != total || !closed_ok) return -1;
 
-    /* An executable the user cannot execute is not an executable. */
+#ifndef _WIN32
+    /* An executable the user cannot execute is not an executable. Windows
+       has no execute bit, and this backend does not target it anyway; the
+       file still has to compile there because subc links it in. */
     if (chmod(path, 0755) != 0) return -1;
+#endif
     return 0;
 }

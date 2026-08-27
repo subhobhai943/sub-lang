@@ -1,8 +1,19 @@
 # SUB Language Compiler Makefile
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c11 -O2 -Isrc/include -Isrc/core -Isrc/codegen -Isrc/native -I.
+
+# gnu11 rather than c11: the sources use POSIX (strdup, strcasecmp, getpid)
+# and say so with _GNU_SOURCE. glibc honours that even under -std=c11, but
+# MinGW keys off __STRICT_ANSI__ instead and hides those declarations, so a
+# strict-ANSI build only ever worked on Linux and macOS.
+CFLAGS = -Wall -Wextra -std=gnu11 -O2 -Isrc/include -Isrc/core -Isrc/codegen -Isrc/native -I.
 LDFLAGS = -lm
+
+# Extra flags for callers who want to add to the build rather than replace it.
+# CI uses `make EXTRA_CFLAGS=-Werror` so it never has to restate the include
+# paths - restating them meant adding a source directory silently broke the
+# warnings job while the ordinary build kept working.
+CFLAGS += $(EXTRA_CFLAGS)
 
 # Source files for the main compiler/transpiler (sub)
 COMPILER_SRC = src/compilers/sub.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c

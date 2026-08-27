@@ -43,7 +43,7 @@ jobs:
             os: macos-latest
             cc: clang
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install clang
         if: matrix.cc == 'clang' && runner.os == 'Linux'
@@ -55,9 +55,15 @@ jobs:
       - name: Reject new compiler warnings
         # The tree builds warning-free; keep it that way rather than letting
         # warnings accumulate until they hide a real one.
+        #
+        # EXTRA_CFLAGS adds to the Makefile's flags instead of replacing
+        # them. Spelling the whole CFLAGS line out here meant it drifted:
+        # adding src/native to the build left this job compiling without
+        # -Isrc/native, so it failed on a missing header while every other
+        # job was fine.
         run: |
           make clean
-          make CC=${{ matrix.cc }} CFLAGS="-Wall -Wextra -Werror -std=c11 -O2 -Isrc/include -Isrc/core -Isrc/codegen -I." all
+          make CC=${{ matrix.cc }} EXTRA_CFLAGS=-Werror all
 
       - name: Tools start and report a version
         # --help and --version must succeed: asking for help is not an error,
@@ -103,7 +109,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -114,8 +120,17 @@ jobs:
             mingw-w64-x86_64-python
             make
 
-      - name: Build
-        run: make all
+      # Three steps rather than one `make all`: this job has never passed,
+      # and the workflow log is not readable without repository admin, so
+      # the step name has to carry the information instead.
+      - name: Build the transpiler (sub.exe)
+        run: make compiler
+
+      - name: Build the native compiler (subc.exe)
+        run: make native_compiler
+
+      - name: Build the interpreter (subi.exe)
+        run: make interpreter
 
       - name: Executables carry the .exe suffix
         # subc appends it itself; this is the behaviour that used to be
@@ -137,17 +152,18 @@ jobs:
     name: conformance (all language targets)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
 
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache: false
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -170,8 +186,28 @@ jobs:
             printf '%-8s %s\n' "$t" "$(command -v $t || echo MISSING)"
           done
 
-      - name: Conformance across every installed target
-        run: python3 tests/conformance.py
+      # One step per target. A single combined step reports only "exit
+      # code 1", which does not say which language disagreed.
+      - name: Conformance - native (machine code)
+        run: python3 tests/conformance.py native
+      - name: Conformance - native (via C)
+        run: python3 tests/conformance.py native-c
+      - name: Conformance - python
+        run: python3 tests/conformance.py python
+      - name: Conformance - javascript
+        run: python3 tests/conformance.py javascript
+      - name: Conformance - ruby
+        run: python3 tests/conformance.py ruby
+      - name: Conformance - c
+        run: python3 tests/conformance.py c
+      - name: Conformance - cpp
+        run: python3 tests/conformance.py cpp
+      - name: Conformance - rust
+        run: python3 tests/conformance.py rust
+      - name: Conformance - go
+        run: python3 tests/conformance.py go
+      - name: Conformance - java
+        run: python3 tests/conformance.py java
 
       - name: Native backend needs no toolchain
         run: python3 tests/native_backend.py
@@ -180,7 +216,7 @@ jobs:
     name: examples use the canonical syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build
         run: make all
