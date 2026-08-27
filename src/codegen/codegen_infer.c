@@ -217,6 +217,8 @@ static int type_is_unresolved(DataType t) {
     return t == TYPE_UNKNOWN || t == TYPE_AUTO;
 }
 
+DataType infer_elem_type(ASTNode *expr);
+
 static DataType param_type_in_current_fn(const char *name) {
     if (!g_current_fn || !name) return TYPE_UNKNOWN;
     for (int i = 0; i < g_current_fn->child_count; i++) {
@@ -320,6 +322,12 @@ DataType infer_expr_type(ASTNode *expr) {
             if (callee) result = callee->data_type;
             break;
         }
+
+        case AST_ARRAY_ACCESS:
+            /* a[i] has the array's element type. Without this the C backend
+               picked its printf format from the node's stale annotation. */
+            result = infer_elem_type(expr->left);
+            break;
 
         case AST_IDENTIFIER:
             /* The semantic pass annotates identifiers it could resolve;

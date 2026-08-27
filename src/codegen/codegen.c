@@ -301,6 +301,32 @@ static const char* sanitize_c_identifier(const char *name, char *buf, size_t buf
     return name;
 }
 
+/* An array slot is 64 bits whatever it holds, so a value going in has to be
+   spelled as one: a double by its bit pattern, a string by its pointer. */
+static void gen_elem_in(StringBuilder *sb, ASTNode *value, DataType elem) {
+    if (elem == TYPE_FLOAT)       sb_append(sb, "sub_bits((double)(");
+    else if (elem == TYPE_STRING) sb_append(sb, "(long long)(intptr_t)(");
+    else                          sb_append(sb, "(long long)(");
+    generate_expression(sb, value);
+    sb_append(sb, elem == TYPE_FLOAT ? "))" : ")");
+}
+
+/* ... and coming back out, spelled as whatever it actually is. */
+static void gen_elem_out_open(StringBuilder *sb, DataType elem) {
+    if (elem == TYPE_FLOAT)       sb_append(sb, "sub_dbl(");
+    else if (elem == TYPE_STRING) sb_append(sb, "(char*)(intptr_t)(");
+    else                          sb_append(sb, "(");
+}
+
+static int elem_kind_code(DataType elem) {
+    switch (elem) {
+    case TYPE_FLOAT:  return 1;
+    case TYPE_STRING: return 2;
+    case TYPE_BOOL:   return 3;
+    default:          return 0;
+    }
+}
+
 /* Generate expression code */
 static void generate_expression(StringBuilder *sb, ASTNode *node) {
     if (!node) return;
@@ -446,13 +472,16 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
             break;
 
         case AST_ARRAY_LITERAL:
-            sb_append(sb, "sub_array_of(%ld", (long)node->child_count);
-            for (int i = 0; i < node->child_count; i++) {
-                sb_append(sb, ", (long)(");
-                generate_expression(sb, node->children[i]);
+            {
+                DataType elem = infer_elem_type(node);
+                sb_append(sb, "sub_array_of(%d, %ld", elem_kind_code(elem),
+                          (long)node->child_count);
+                for (int i = 0; i < node->child_count; i++) {
+                    sb_append(sb, ", ");
+                    gen_elem_in(sb, node->children[i], elem);
+                }
                 sb_append(sb, ")");
             }
-            sb_append(sb, ")");
             break;
 
         case AST_OBJECT_LITERAL:
@@ -460,12 +489,14 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
             break;
 
         case AST_ARRAY_ACCESS:
-            if (node->data_type == TYPE_STRING || (node->left && node->left->type == AST_IDENTIFIER && strcmp(node->left->value, "parts") == 0)) {
-                sb_append(sb, "(const char*)sub_array_get((SubArray*)(");
+            if (1) {
+                DataType elem = infer_elem_type(node->left);
+                gen_elem_out_open(sb, elem);
+                sb_append(sb, "sub_array_get((SubArray*)(");
                 generate_expression(sb, node->left);
                 sb_append(sb, "), (long)(");
                 generate_expression(sb, node->right);
-                sb_append(sb, "))");
+                sb_append(sb, ")))");
             } else {
                 sb_append(sb, "sub_array_get((SubArray*)(");
                 generate_expression(sb, node->left);
@@ -522,10 +553,12 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                 if (method && strcmp(method, "push") == 0) {
                     sb_append(sb, "sub_array_push((SubArray*)(");
                     generate_expression(sb, node->left->left);
-                    sb_append(sb, "), (long)(");
-                    if (node->child_count > 0) generate_expression(sb, node->children[0]);
+                    sb_append(sb, "), ");
+                    if (node->child_count > 0)
+                        gen_elem_in(sb, node->children[0],
+                                    infer_elem_type(node->left->left));
                     else sb_append(sb, "0");
-                    sb_append(sb, "))");
+                    sb_append(sb, ")");
                 } else if (method && strcmp(method, "pop") == 0) {
                     sb_append(sb, "sub_array_pop((SubArray*)(");
                     generate_expression(sb, node->left->left);
@@ -648,10 +681,11 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                                how min(3, 9) came out as 1.03365e-317. */
                             {
                                 DataType it = infer_expr_type(arg);
-                                if (it == TYPE_STRING)     fmt = "%s";
-                                else if (it == TYPE_FLOAT) fmt = "%g";
-                                else if (it == TYPE_BOOL)  fmt = "%s";
-                                else if (it == TYPE_INT)   fmt = "%ld";
+                                if (it == TYPE_STRING)      fmt = "%s";
+                                else if (it == TYPE_FLOAT)  fmt = "%g";
+                                else if (it == TYPE_BOOL)   fmt = "%s";
+                                else if (it == TYPE_ARRAY)  fmt = "%s";
+                                else if (it == TYPE_INT)    fmt = "%ld";
                             }
                             /* SUB spells booleans true/false, so C must print
                                the words rather than 1/0 - otherwise the same
@@ -672,11 +706,14 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                                4294967295. Cast to the format's exact type. */
                             int cast_long   = !is_bool && (at == TYPE_INT);
                             int cast_double = !is_bool && (at == TYPE_FLOAT);
+                            int as_array    = !is_bool && (at == TYPE_ARRAY);
                             if (is_bool)          sb_append(sb, "((");
                             else if (cast_long)   sb_append(sb, "(long)(");
                             else if (cast_double) sb_append(sb, "(double)(");
+                            else if (as_array)    sb_append(sb, "sub_array_str((SubArray*)(");
                             generate_expression(sb, arg);
                             if (is_bool) sb_append(sb, ") ? \"true\" : \"false\")");
+                            else if (as_array) sb_append(sb, "))");
                             else if (cast_long || cast_double) sb_append(sb, ")");
                             if (i + 1 < node->child_count) {
                                 sb_append(sb, ", ");
@@ -765,10 +802,14 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     else if (strcmp(fn, "push") == 0) {
                         sb_append(sb, "sub_array_push((SubArray*)(");
                         if (node->child_count > 0) generate_expression(sb, node->children[0]);
-                        sb_append(sb, "), (long)(");
-                        if (node->child_count > 1) generate_expression(sb, node->children[1]);
+                        sb_append(sb, "), ");
+                        if (node->child_count > 1)
+                            gen_elem_in(sb, node->children[1],
+                                        node->child_count > 0
+                                          ? infer_elem_type(node->children[0])
+                                          : TYPE_INT);
                         else sb_append(sb, "0");
-                        sb_append(sb, "))");
+                        sb_append(sb, ")");
                     }
                     else if (strcmp(fn, "pop") == 0) {
                         sb_append(sb, "sub_array_pop((SubArray*)(");
@@ -1086,9 +1127,9 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
                 generate_expression(sb, node->left->left);
                 sb_append(sb, "), (long)(");
                 generate_expression(sb, node->left->right);
-                sb_append(sb, "), (long)(");
-                generate_expression(sb, node->right);
-                sb_append(sb, "));\n");
+                sb_append(sb, "), ");
+                gen_elem_in(sb, node->right, infer_elem_type(node->left->left));
+                sb_append(sb, ");\n");
             } else if (node->left && node->left->type == AST_MEMBER_ACCESS) {
                 sb_append(sb, "if ((SubObject*)(");
                 generate_expression(sb, node->left->left);
@@ -1236,7 +1277,14 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "#include <stddef.h>\n");
     sb_append(sb, "#include <math.h>\n");
     sb_append(sb, "#include <ctype.h>\n");
-    sb_append(sb, "#include <stdarg.h>\n\n");
+    sb_append(sb, "#include <stdarg.h>\n");
+    sb_append(sb, "#include <stdint.h>\n\n");
+    /* Forward declarations: the array helpers are emitted before these are
+       defined, and both report a runtime error the interpreter also
+       reports. */
+    sb_append(sb, "static void sub_die(const char *msg);\n");
+    sb_append(sb, "static void sub_die_index(long idx, long count);\n");
+    sb_append(sb, "static inline char* sub_strdup(const char *s);\n\n");
     
     sb_append(sb, "/* Memory Management Helpers */\n");
     sb_append(sb, "#ifndef SUB_STRSAFE\n");
@@ -1263,66 +1311,106 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "}\n\n");
     
     sb_append(sb, "/* Dynamic Array Structure */\n");
+    /* Elements are 64-bit slots, not longs: a double is stored as its bit
+       pattern and a string as its pointer, so one array type carries every
+       element type SUB has. `kind` records which, because printing an array
+       is the one operation with no static type to hand. */
     sb_append(sb, "typedef struct SubArray {\n");
     sb_append(sb, "    long count;\n");
     sb_append(sb, "    long capacity;\n");
-    sb_append(sb, "    long *items;\n");
+    sb_append(sb, "    int  kind;   /* 0 int, 1 float, 2 string, 3 bool */\n");
+    sb_append(sb, "    long long *items;\n");
     sb_append(sb, "} SubArray;\n\n");
+    sb_append(sb, "static inline long long sub_bits(double d) "
+                  "{ long long v; memcpy(&v, &d, sizeof v); return v; }\n");
+    sb_append(sb, "static inline double sub_dbl(long long v) "
+                  "{ double d; memcpy(&d, &v, sizeof d); return d; }\n\n");
     
     sb_append(sb, "static inline SubArray* sub_array_create(void) {\n");
     sb_append(sb, "    SubArray *a = (SubArray*)malloc(sizeof(SubArray));\n");
     sb_append(sb, "    if (!a) return NULL;\n");
     sb_append(sb, "    a->count = 0;\n");
     sb_append(sb, "    a->capacity = 8;\n");
-    sb_append(sb, "    a->items = (long*)malloc(sizeof(long) * a->capacity);\n");
+    sb_append(sb, "    a->kind = 0;\n");
+    sb_append(sb, "    a->items = (long long*)malloc(sizeof(long long) * a->capacity);\n");
     sb_append(sb, "    return a;\n");
     sb_append(sb, "}\n\n");
     
-    sb_append(sb, "static inline SubArray* sub_array_of(long n, ...) {\n");
+    sb_append(sb, "static inline SubArray* sub_array_of(int kind, long n, ...) {\n");
     sb_append(sb, "    SubArray *a = sub_array_create();\n");
     sb_append(sb, "    if (!a) return NULL;\n");
+    sb_append(sb, "    a->kind = kind;\n");
     sb_append(sb, "    if (n > a->capacity) {\n");
     sb_append(sb, "        a->capacity = n < 8 ? 8 : n * 2;\n");
-    sb_append(sb, "        a->items = (long*)realloc(a->items, sizeof(long) * a->capacity);\n");
+    sb_append(sb, "        a->items = (long long*)realloc(a->items, sizeof(long long) * a->capacity);\n");
     sb_append(sb, "    }\n");
     sb_append(sb, "    va_list args;\n");
     sb_append(sb, "    va_start(args, n);\n");
     sb_append(sb, "    for (long i = 0; i < n; i++) {\n");
-    sb_append(sb, "        a->items[a->count++] = va_arg(args, long);\n");
+    sb_append(sb, "        a->items[a->count++] = va_arg(args, long long);\n");
     sb_append(sb, "    }\n");
     sb_append(sb, "    va_end(args);\n");
     sb_append(sb, "    return a;\n");
     sb_append(sb, "}\n\n");
     
-    sb_append(sb, "static inline void sub_array_push(SubArray *a, long val) {\n");
+    sb_append(sb, "static inline void sub_array_push(SubArray *a, long long val) {\n");
     sb_append(sb, "    if (!a) return;\n");
     sb_append(sb, "    if (a->count >= a->capacity) {\n");
     sb_append(sb, "        a->capacity = a->capacity ? a->capacity * 2 : 8;\n");
-    sb_append(sb, "        a->items = (long*)realloc(a->items, sizeof(long) * a->capacity);\n");
+    sb_append(sb, "        a->items = (long long*)realloc(a->items, sizeof(long long) * a->capacity);\n");
     sb_append(sb, "    }\n");
     sb_append(sb, "    a->items[a->count++] = val;\n");
     sb_append(sb, "}\n\n");
     
-    sb_append(sb, "static inline long sub_array_pop(SubArray *a) {\n");
-    sb_append(sb, "    if (!a || a->count <= 0) return 0;\n");
+    /* Out of range and popping an empty array stop the program the way the
+       interpreter does, rather than returning 0 and carrying on. */
+    sb_append(sb, "static inline long long sub_array_pop(SubArray *a) {\n");
+    sb_append(sb, "    if (!a || a->count <= 0) sub_die(\"pop from empty array\");\n");
     sb_append(sb, "    return a->items[--a->count];\n");
     sb_append(sb, "}\n\n");
     
-    sb_append(sb, "static inline long sub_array_get(SubArray *a, long idx) {\n");
-    sb_append(sb, "    if (!a || idx < 0 || idx >= a->count) return 0;\n");
+    sb_append(sb, "static void sub_die_index(long idx, long count) {\n");
+    sb_append(sb, "    fprintf(stderr, \"RuntimeError: array index %%ld out of "
+                  "bounds [0, %%ld)\\n\", idx, count);\n");
+    sb_append(sb, "    exit(70);\n}\n");
+    sb_append(sb, "static inline long long sub_array_get(SubArray *a, long idx) {\n");
+    sb_append(sb, "    if (!a) sub_die(\"index of a non-array\");\n");
+    sb_append(sb, "    if (idx < 0 || idx >= a->count) sub_die_index(idx, a->count);\n");
     sb_append(sb, "    return a->items[idx];\n");
     sb_append(sb, "}\n\n");
     
-    sb_append(sb, "static inline void sub_array_set(SubArray *a, long idx, long val) {\n");
-    sb_append(sb, "    if (!a) return;\n");
-    sb_append(sb, "    if (idx >= a->capacity) {\n");
-    sb_append(sb, "        long new_cap = (idx + 1) * 2;\n");
-    sb_append(sb, "        a->items = (long*)realloc(a->items, sizeof(long) * new_cap);\n");
-    sb_append(sb, "        for (long i = a->capacity; i < new_cap; i++) a->items[i] = 0;\n");
-    sb_append(sb, "        a->capacity = new_cap;\n");
-    sb_append(sb, "    }\n");
-    sb_append(sb, "    if (idx >= a->count) a->count = idx + 1;\n");
+    /* Assigning past the end is an error, not a grow: the interpreter
+       refuses it and a backend that silently extended the array would mean
+       the same program had two different lengths. */
+    sb_append(sb, "static inline void sub_array_set(SubArray *a, long idx, long long val) {\n");
+    sb_append(sb, "    if (!a) sub_die(\"index of a non-array\");\n");
+    sb_append(sb, "    if (idx < 0 || idx >= a->count) sub_die_index(idx, a->count);\n");
     sb_append(sb, "    a->items[idx] = val;\n");
+    sb_append(sb, "}\n\n");
+
+    /* "[a, b, c]", the interpreter's spelling, with no quotes on strings. */
+    sb_append(sb, "static char* sub_array_str(SubArray *a) {\n");
+    sb_append(sb, "    if (!a) return sub_strdup(\"[]\");\n");
+    sb_append(sb, "    size_t cap = 64, len = 1;\n");
+    sb_append(sb, "    char *out = (char*)malloc(cap);\n");
+    sb_append(sb, "    if (!out) return sub_strdup(\"[]\");\n");
+    sb_append(sb, "    strcpy(out, \"[\");\n");
+    sb_append(sb, "    for (long i = 0; i < a->count; i++) {\n");
+    sb_append(sb, "        char buf[64];\n");
+    sb_append(sb, "        const char *piece = buf;\n");
+    sb_append(sb, "        if (a->kind == 1) snprintf(buf, sizeof buf, \"%%g\", sub_dbl(a->items[i]));\n");
+    sb_append(sb, "        else if (a->kind == 2) { piece = (const char*)(intptr_t)a->items[i];\n");
+    sb_append(sb, "                                if (!piece) piece = \"null\"; }\n");
+    sb_append(sb, "        else if (a->kind == 3) piece = a->items[i] ? \"true\" : \"false\";\n");
+    sb_append(sb, "        else snprintf(buf, sizeof buf, \"%%lld\", a->items[i]);\n");
+    sb_append(sb, "        size_t need = strlen(piece) + 4;\n");
+    sb_append(sb, "        while (len + need > cap) { cap *= 2; out = (char*)realloc(out, cap); }\n");
+    sb_append(sb, "        if (i) { strcpy(out + len, \", \"); len += 2; }\n");
+    sb_append(sb, "        strcpy(out + len, piece); len += strlen(piece);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    while (len + 2 > cap) { cap *= 2; out = (char*)realloc(out, cap); }\n");
+    sb_append(sb, "    strcpy(out + len, \"]\");\n");
+    sb_append(sb, "    return out;\n");
     sb_append(sb, "}\n\n");
     
     sb_append(sb, "static inline long sub_array_len(SubArray *a) {\n");
@@ -1346,7 +1434,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "            size_t clen = strlen(cand);\n");
     sb_append(sb, "            if (cur + clen < sizeof(buf) - 1) { strcat(buf, cand); cur += clen; }\n");
     sb_append(sb, "        } else {\n");
-    sb_append(sb, "            snprintf(temp, sizeof(temp), \"%%ld\", a->items[i]);\n");
+    sb_append(sb, "            snprintf(temp, sizeof(temp), \"%%lld\", a->items[i]);\n");
     sb_append(sb, "            size_t tlen = strlen(temp);\n");
     sb_append(sb, "            if (cur + tlen < sizeof(buf) - 1) { strcat(buf, temp); cur += tlen; }\n");
     sb_append(sb, "        }\n");
