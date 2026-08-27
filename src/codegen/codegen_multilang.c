@@ -1226,13 +1226,12 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
                                 strcmp(node->value, "str") == 0 ||
                                 strcmp(node->value, "to_string") == 0)) {
                 int as_str = (node->value[0] == 's' && node->value[1] == 't');
-                sb_append(sb, as_str ? "String(" : "console.log(");
+                sb_append(sb, as_str ? "_subStr(" : "console.log(_subStr(");
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
-                    gen_printable(sb, node->children[i], "_subFmt", "_subStr",
-                                  generate_expr_js);
+                    generate_expr_js(sb, node->children[i]);
                 }
-                sb_append(sb, ")");
+                sb_append(sb, as_str ? ")" : "))");
                 break;
             } else if (node->value) {
                 sb_append(sb, "%s(", node->value);
@@ -1436,11 +1435,16 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
             indent_code(sb, indent);
             // Map print to console.log
             if (is_print_builtin(node->value)) {
-                sb_append(sb, "console.log(");
+                /* Always hand console.log a string. Given a number, a
+                   boolean or an array it applies its own inspection
+                   formatting - which spells booleans and arrays differently
+                   from SUB, and wraps values in ANSI colour codes whenever
+                   FORCE_COLOR is set, even into a pipe. A program's output
+                   should not depend on either. */
+                sb_append(sb, "console.log(_subStr(");
                 if (node->child_count > 0)
-                    gen_printable(sb, node->children[0], "_subFmt", "_subStr",
-                                  generate_expr_js);
-                sb_append(sb, ")");
+                    generate_expr_js(sb, node->children[0]);
+                sb_append(sb, "))");
             } else {
                 generate_expr_js(sb, node);
             }
