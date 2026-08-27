@@ -249,13 +249,24 @@ static const char* swift_type(DataType t) {
     }
 }
 
+static const char* kotlin_elem_type(DataType elem) {
+    switch (elem) {
+    case TYPE_FLOAT:  return "Double";
+    case TYPE_STRING: return "String";
+    case TYPE_BOOL:   return "Boolean";
+    default:          return "Long";
+    }
+}
+
 static const char* kotlin_type(DataType t) {
     switch (t) {
         case TYPE_INT:    return "Long";
         case TYPE_FLOAT:  return "Double";
         case TYPE_BOOL:   return "Boolean";
         case TYPE_STRING: return "String";
-        case TYPE_ARRAY:  return "LongArray";
+        /* kotlin_array_type() names the element where it is known; this is
+           the fallback for a function that returns an array. */
+        case TYPE_ARRAY:  return "MutableList<Long>";
         case TYPE_VOID:   return "Unit";
         default:          return "Any";
     }
@@ -2159,6 +2170,25 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
             }
             break;
         case AST_IDENTIFIER: sb_append(sb, "%s", node->value ? node->value : "var"); break;
+        case AST_ARRAY_LITERAL: {
+            /* The element type is written out: an empty literal has nothing
+               for Swift to infer from, and Int is 64-bit here as in SUB. */
+            DataType elem = infer_elem_type(node);
+            sb_append(sb, "[%s]([", swift_type(elem));
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                generate_expr_swift_as(sb, node->children[i], elem);
+            }
+            sb_append(sb, "])");
+            break;
+        }
+        case AST_ARRAY_ACCESS:
+            sb_append(sb, "_subAt(");
+            generate_expr_swift(sb, node->left);
+            sb_append(sb, ", ");
+            generate_expr_swift(sb, node->right);
+            sb_append(sb, ")");
+            break;
         case AST_BINARY_EXPR:
             /* `x == null` / `x != null` become NaN tests (see the return
                statement, where null is emitted as the NaN sentinel). */
@@ -2193,6 +2223,32 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
             break;
         case AST_CALL_EXPR:
             {
+                /* Swift arrays are values, so mutating one needs inout. */
+                if (node->value && node->child_count >= 1 && node->children[0] &&
+                    infer_expr_type(node->children[0]) == TYPE_ARRAY) {
+                    DataType el = infer_elem_type(node->children[0]);
+                    if ((!strcmp(node->value, "push") ||
+                         !strcmp(node->value, "append")) && node->child_count >= 2) {
+                        sb_append(sb, "_subPush(&");
+                        generate_expr_swift(sb, node->children[0]);
+                        sb_append(sb, ", ");
+                        generate_expr_swift_as(sb, node->children[1], el);
+                        sb_append(sb, ")");
+                        break;
+                    }
+                    if (!strcmp(node->value, "pop")) {
+                        sb_append(sb, "_subPop(&");
+                        generate_expr_swift(sb, node->children[0]);
+                        sb_append(sb, ")");
+                        break;
+                    }
+                    if (!strcmp(node->value, "len") || !strcmp(node->value, "length")) {
+                        sb_append(sb, "(");
+                        generate_expr_swift(sb, node->children[0]);
+                        sb_append(sb, ").count");
+                        break;
+                    }
+                }
                 const BuiltinSpelling *bs = builtin_spelling(LANG_SWIFT, node->value);
                 if (bs && node->child_count == 1) {
                     sb_append(sb, "%s", bs->prefix);
@@ -2364,6 +2420,17 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             break;
         case AST_ASSIGN_STMT:
             indent_code(sb, indent);
+            if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                sb_append(sb, "_subPut(&");
+                generate_expr_swift(sb, node->left->left);
+                sb_append(sb, ", ");
+                generate_expr_swift(sb, node->left->right);
+                sb_append(sb, ", ");
+                generate_expr_swift_as(sb, node->right,
+                                       infer_elem_type(node->left->left));
+                sb_append(sb, ")\n");
+                break;
+            }
             generate_expr_swift(sb, node->left);
             sb_append(sb, " = ");
             generate_expr_swift(sb, node->right);
@@ -2393,7 +2460,25 @@ char* codegen_swift(ASTNode *ast, const char *source) {
     sb_append(sb, "func _subStr(_ v: Any) -> String {\n");
     sb_append(sb, "    if let d = v as? Double { return _subFmt(d) }\n");
     sb_append(sb, "    if let b = v as? Bool { return b ? \"true\" : \"false\" }\n");
+    /* String(describing:) quotes the strings inside an array; SUB does not. */
+    sb_append(sb, "    if let a = v as? [Any] "
+                  "{ return \"[\" + a.map { _subStr($0) }.joined(separator: \", \") + \"]\" }\n");
     sb_append(sb, "    return String(describing: v)\n}\n");
+    sb_append(sb, "func _subIdx(_ n: Int, _ i: Int) -> Int {\n");
+    sb_append(sb, "    let k = i < 0 ? i + n : i\n");
+    sb_append(sb, "    if k < 0 || k >= n {\n");
+    sb_append(sb, "        FileHandle.standardError.write((\"RuntimeError: array index \"\n");
+    sb_append(sb, "            + String(k) + \" out of bounds [0, \" + String(n) + \")\\n\")\n");
+    sb_append(sb, "            .data(using: .utf8)!)\n");
+    sb_append(sb, "        exit(70)\n    }\n    return k\n}\n");
+    sb_append(sb, "func _subAt<T>(_ a: [T], _ i: Int) -> T "
+                  "{ return a[_subIdx(a.count, i)] }\n");
+    sb_append(sb, "func _subPut<T>(_ a: inout [T], _ i: Int, _ v: T) "
+                  "{ a[_subIdx(a.count, i)] = v }\n");
+    sb_append(sb, "func _subPush<T>(_ a: inout [T], _ v: T) { a.append(v) }\n");
+    sb_append(sb, "func _subPop<T>(_ a: inout [T]) -> T {\n");
+    sb_append(sb, "    if a.isEmpty { _subDie(\"pop from empty array\") }\n");
+    sb_append(sb, "    return a.removeLast()\n}\n");
     sb_append(sb, "func _subPrint(_ v: Any) { print(_subStr(v)) }\n\n");
     sb_append(sb, "func _subDie(_ msg: String) -> Never {\n");
     sb_append(sb, "    FileHandle.standardError.write("
@@ -2442,6 +2527,23 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
             }
             break;
         case AST_IDENTIFIER: sb_append(sb, "%s", node->value ? node->value : "var"); break;
+        case AST_ARRAY_LITERAL: {
+            DataType elem = infer_elem_type(node);
+            sb_append(sb, "mutableListOf<%s>(", kotlin_elem_type(elem));
+            for (int i = 0; i < node->child_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                generate_expr_kotlin_as(sb, node->children[i], elem);
+            }
+            sb_append(sb, ")");
+            break;
+        }
+        case AST_ARRAY_ACCESS:
+            sb_append(sb, "_subAt(");
+            generate_expr_kotlin(sb, node->left);
+            sb_append(sb, ", ");
+            generate_expr_kotlin(sb, node->right);
+            sb_append(sb, ")");
+            break;
         case AST_BINARY_EXPR:
             /* `x == null` / `x != null` become NaN tests (see the return
                statement, where null is emitted as the NaN sentinel). */
@@ -2476,6 +2578,32 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
             break;
         case AST_CALL_EXPR:
             {
+                /* Ahead of the table, whose len() spells String.length. */
+                if (node->value && node->child_count >= 1 && node->children[0] &&
+                    infer_expr_type(node->children[0]) == TYPE_ARRAY) {
+                    DataType el = infer_elem_type(node->children[0]);
+                    if ((!strcmp(node->value, "push") ||
+                         !strcmp(node->value, "append")) && node->child_count >= 2) {
+                        sb_append(sb, "_subPush(");
+                        generate_expr_kotlin(sb, node->children[0]);
+                        sb_append(sb, ", ");
+                        generate_expr_kotlin_as(sb, node->children[1], el);
+                        sb_append(sb, ")");
+                        break;
+                    }
+                    if (!strcmp(node->value, "pop")) {
+                        sb_append(sb, "_subPop(");
+                        generate_expr_kotlin(sb, node->children[0]);
+                        sb_append(sb, ")");
+                        break;
+                    }
+                    if (!strcmp(node->value, "len") || !strcmp(node->value, "length")) {
+                        sb_append(sb, "(");
+                        generate_expr_kotlin(sb, node->children[0]);
+                        sb_append(sb, ").size.toLong()");
+                        break;
+                    }
+                }
                 const BuiltinSpelling *bs = builtin_spelling(LANG_KOTLIN, node->value);
                 if (bs && node->child_count == 1) {
                     sb_append(sb, "%s", bs->prefix);
@@ -2647,6 +2775,17 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
             break;
         case AST_ASSIGN_STMT:
             indent_code(sb, indent);
+            if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                sb_append(sb, "_subPut(");
+                generate_expr_kotlin(sb, node->left->left);
+                sb_append(sb, ", ");
+                generate_expr_kotlin(sb, node->left->right);
+                sb_append(sb, ", ");
+                generate_expr_kotlin_as(sb, node->right,
+                                        infer_elem_type(node->left->left));
+                sb_append(sb, ")\n");
+                break;
+            }
             generate_expr_kotlin(sb, node->left);
             sb_append(sb, " = ");
             generate_expr_kotlin(sb, node->right);
@@ -2687,7 +2826,23 @@ char* codegen_kotlin(ASTNode *ast, const char *source) {
     sb_append(sb, "    null -> \"null\"\n");
     sb_append(sb, "    is Double -> _subFmt(v)\n");
     sb_append(sb, "    is Float -> _subFmt(v.toDouble())\n");
+    sb_append(sb, "    is List<*> -> v.joinToString(\", \", \"[\", \"]\") "
+                  "{ _subStr(it) }\n");
     sb_append(sb, "    else -> v.toString()\n}\n\n");
+    sb_append(sb, "fun _subIdx(n: Int, i: Long): Int {\n");
+    sb_append(sb, "    val k = if (i < 0) i + n else i\n");
+    sb_append(sb, "    if (k < 0 || k >= n) {\n");
+    sb_append(sb, "        System.err.println(\"RuntimeError: array index \" + k +\n");
+    sb_append(sb, "            \" out of bounds [0, \" + n + \")\")\n");
+    sb_append(sb, "        kotlin.system.exitProcess(70)\n    }\n");
+    sb_append(sb, "    return k.toInt()\n}\n\n");
+    sb_append(sb, "fun <T> _subAt(a: MutableList<T>, i: Long): T = a[_subIdx(a.size, i)]\n");
+    sb_append(sb, "fun <T> _subPut(a: MutableList<T>, i: Long, v: T) "
+                  "{ a[_subIdx(a.size, i)] = v }\n");
+    sb_append(sb, "fun <T> _subPush(a: MutableList<T>, v: T) { a.add(v) }\n");
+    sb_append(sb, "fun <T> _subPop(a: MutableList<T>): T {\n");
+    sb_append(sb, "    if (a.isEmpty()) _subDie(\"pop from empty array\")\n");
+    sb_append(sb, "    return a.removeAt(a.size - 1)\n}\n\n");
     sb_append(sb, "fun _subPrint(v: Any?) = println(_subStr(v))\n\n");
     sb_append(sb, "fun _subDie(msg: String): Nothing {\n");
     sb_append(sb, "    System.err.println(\"RuntimeError: \" + msg)\n");
@@ -2705,9 +2860,12 @@ char* codegen_kotlin(ASTNode *ast, const char *source) {
     sb_append(sb, "fun _subFmod(a: Double, b: Double): Double {\n");
     sb_append(sb, "    if (b == 0.0) _subDie(\"modulo by zero\")\n");
     sb_append(sb, "    return a %% b\n}\n\n");
+    /* kotlin.math.round breaks ties towards the even integer, so round(2.5)
+       came out 2 where SUB says 3. Half away from zero, spelled with floor
+       and ceil, is what C's round() does and what every other backend does. */
     sb_append(sb, "fun _subRound(x: Double): Long =\n");
-    sb_append(sb, "    if (x < 0) -kotlin.math.round(-x).toLong() "
-                  "else kotlin.math.round(x).toLong()\n\n");
+    sb_append(sb, "    if (x < 0) kotlin.math.ceil(x - 0.5).toLong() "
+                  "else kotlin.math.floor(x + 0.5).toLong()\n\n");
     char *e = extract_embedded_code(source, "kotlin");
     if (e) {
         sb_append(sb, "%s\n", e);

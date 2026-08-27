@@ -33,6 +33,9 @@ SUB = os.path.join(ROOT, "sub" + EXE)
 SUBI = os.path.join(ROOT, "subi" + EXE)
 SUBC = os.path.join(ROOT, "subc" + EXE)
 
+# Per-step limit. kotlinc starts a JVM and takes well over half a minute on
+# a cold run, so a target may raise it; everything else is fast enough that
+# 30s means "hung" rather than "busy".
 TIMEOUT = 30
 
 # GitHub Actions renders ::error:: lines as annotations, which are readable
@@ -84,19 +87,19 @@ TARGETS = {
     "swift":      dict(ext="swift", need="swiftc",
                        build=[["swiftc", "-o", "{exe}", "{src}"]],
                        run=["{exe}"]),
-    "kotlin":     dict(ext="kt",    need="kotlinc",
+    "kotlin":     dict(ext="kt",    need="kotlinc", timeout=300,
                        build=[["kotlinc", "{src}", "-include-runtime", "-d", "{exe}.jar"]],
                        run=["java", "-jar", "{exe}.jar"]),
 }
 
 
-def run(argv, cwd):
+def run(argv, cwd, timeout=TIMEOUT):
     try:
         p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
-                           timeout=TIMEOUT)
+                           timeout=timeout)
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
-        return -1, "", "timed out after %ds" % TIMEOUT
+        return -1, "", "timed out after %ds" % timeout
     except OSError as e:
         return -1, "", str(e)
 
@@ -155,15 +158,16 @@ def check(case, target, spec, workdir):
         return "fail", "expected generated file %s, none produced" % src
 
     exe = os.path.join(workdir, "%s_%s_bin" % (name, target))
+    limit = spec.get("timeout", TIMEOUT)
     for step in spec["build"]:
         argv = [a.format(src=src, exe=exe) for a in step]
-        rc, out, err = run(argv, workdir)
+        rc, out, err = run(argv, workdir, limit)
         if rc != 0:
             return "fail", "build failed: %s" % (err.strip() or out.strip())[:300]
 
     argv = [a.format(src=src, exe=exe + EXE if a == "{exe}" else exe)
             for a in spec["run"]]
-    rc, got, err = run(argv, workdir)
+    rc, got, err = run(argv, workdir, limit)
     return compare(got, rc, want, want_rc, err)
 
 

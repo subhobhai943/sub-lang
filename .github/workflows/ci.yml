@@ -190,6 +190,21 @@ jobs:
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal --no-self-update
 
+      # Kotlin and Swift were the two targets no runner could execute, so
+      # their share of every cross-backend change was reviewed by hand and
+      # never run. Both are installed here now.
+      - name: Install Kotlin
+        run: |
+          curl -sSLo /tmp/kotlin.zip \
+            https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
+          unzip -q /tmp/kotlin.zip -d /opt
+          echo /opt/kotlinc/bin >> "$GITHUB_PATH"
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '5.10'
+        continue-on-error: true
+
       - name: Build
         run: make all
 
@@ -197,7 +212,7 @@ jobs:
         # The harness skips a target whose toolchain is missing, so print the
         # roster: a shrinking target list should be visible, not silent.
         run: |
-          for t in python3 node ruby gcc g++ rustc go java; do
+          for t in python3 node ruby gcc g++ rustc go java kotlinc swiftc; do
             printf '%-8s %s\n' "$t" "$(command -v $t || echo MISSING)"
           done
 
@@ -223,6 +238,19 @@ jobs:
         run: python3 tests/conformance.py go
       - name: Conformance - java
         run: python3 tests/conformance.py java
+      - name: Conformance - kotlin
+        run: python3 tests/conformance.py kotlin
+      - name: Conformance - swift
+        # setup-swift is allowed to fail above, so check rather than assume.
+        # A warning annotation says plainly that swift went unexecuted; the
+        # harness itself treats "nothing ran" as a failure, which is the
+        # right default everywhere else.
+        run: |
+          if command -v swiftc >/dev/null; then
+            python3 tests/conformance.py swift
+          else
+            echo "::warning::swiftc is not installed on this runner - the swift backend was not executed"
+          fi
 
       - name: Native backend needs no toolchain
         run: python3 tests/native_backend.py
