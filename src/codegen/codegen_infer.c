@@ -136,6 +136,34 @@ static struct {
     int count;
 } g_vars;
 
+/* Element types of array-valued variables, kept beside the variable types
+   for the same reason: the declaration knows, and the use site does not. */
+static struct {
+    VarEntry items[MAX_TRACKED_VARS];
+    int count;
+} g_elems;
+
+static void elem_record(const char *name, DataType t) {
+    if (!name || t == TYPE_UNKNOWN) return;
+    for (int i = 0; i < g_elems.count; i++)
+        if (strcmp(g_elems.items[i].name, name) == 0) {
+            g_elems.items[i].type = type_merge(g_elems.items[i].type, t);
+            return;
+        }
+    if (g_elems.count >= MAX_TRACKED_VARS) return;
+    g_elems.items[g_elems.count].name = name;
+    g_elems.items[g_elems.count].type = t;
+    g_elems.count++;
+}
+
+static DataType elem_lookup(const char *name) {
+    if (!name) return TYPE_UNKNOWN;
+    for (int i = 0; i < g_elems.count; i++)
+        if (strcmp(g_elems.items[i].name, name) == 0)
+            return g_elems.items[i].type;
+    return TYPE_UNKNOWN;
+}
+
 static void var_record(const char *name, DataType t) {
     if (!name || t == TYPE_UNKNOWN) return;
     for (int i = 0; i < g_vars.count; i++) {
@@ -489,8 +517,24 @@ static void infer_var_decls(ASTNode *node) {
         if (!type_is_unresolved(t) && t != TYPE_VOID && t != TYPE_NULL)
             node->data_type = t;
     }
-    if (node->type == AST_VAR_DECL || node->type == AST_CONST_DECL)
+    if (node->type == AST_VAR_DECL || node->type == AST_CONST_DECL) {
         var_record(node->value, node->data_type);
+        /* An empty literal is recorded as nothing rather than as int: the
+           merge of int with a later push of a string is TYPE_GENERIC, which
+           is worse than having said nothing at all. */
+        int empty_literal = (node->right &&
+                             node->right->type == AST_ARRAY_LITERAL &&
+                             node->right->child_count == 0);
+        if (node->right && !empty_literal &&
+            infer_expr_type(node->right) == TYPE_ARRAY)
+            elem_record(node->value, infer_elem_type(node->right));
+    }
+    /* push(a, x) tells us what a holds just as surely as the literal does,
+       and it is often the only thing that does - `let a = []` says nothing. */
+    if (node->type == AST_CALL_EXPR && node->value && node->child_count >= 2 &&
+        (strcmp(node->value, "push") == 0 || strcmp(node->value, "append") == 0) &&
+        node->children[0] && node->children[0]->type == AST_IDENTIFIER)
+        elem_record(node->children[0]->value, infer_expr_type(node->children[1]));
 
     /* Track the enclosing function so initializers that mention parameters
        resolve the same way return expressions do. */
@@ -548,6 +592,35 @@ static struct {
     const char *names[MAX_TRACKED_FUNCTIONS];
     int count;
 } g_nullable;
+
+DataType infer_elem_type_of_var(const char *name) {
+    DataType t = elem_lookup(name);
+    return t == TYPE_GENERIC ? TYPE_UNKNOWN : t;
+}
+
+DataType infer_elem_type(ASTNode *expr) {
+    if (!expr) return TYPE_INT;
+
+    if (expr->type == AST_ARRAY_LITERAL) {
+        DataType t = TYPE_UNKNOWN;
+        for (int i = 0; i < expr->child_count; i++) {
+            DataType e = infer_expr_type(expr->children[i]);
+            if (e == TYPE_UNKNOWN || e == TYPE_NULL) continue;
+            t = type_merge(t, e);
+        }
+        return type_is_unresolved(t) ? TYPE_INT : t;
+    }
+
+    if (expr->type == AST_IDENTIFIER) {
+        DataType t = elem_lookup(expr->value);
+        if (!type_is_unresolved(t)) return t;
+        return TYPE_INT;
+    }
+
+    /* pop(a) yields an element, so its element type is one level further in;
+       nothing needs that yet, and int is the safe answer. */
+    return TYPE_INT;
+}
 
 int exponent_is_negative(ASTNode *expr) {
     if (!expr) return 0;
@@ -647,13 +720,19 @@ static void propagate_param_types_to_identifiers(ASTNode *fn, ASTNode *node) {
 }
 
 void infer_function_signatures(ASTNode *program) {
+    g_elems.count = 0;
     if (!program) return;
 
     g_fns.count = 0;
     g_vars.count = 0;
     g_expr_depth = 0;
     collect_functions(program);
-    if (g_fns.count == 0) return;
+    /* No early return when a program declares no functions. Everything below
+       that walks g_fns simply does nothing, but infer_var_decls and
+       propagate_var_types_to_identifiers still have work: a script with no
+       `fn` in it has variables whose types the backends need just as much.
+       Bailing out here left those unanalysed, which is why `let a = []`
+       followed by push(a, "x") produced an array of integers. */
 
     /* The parser stores the written-out type name in metadata whenever the
        source annotated a parameter, so a non-NULL metadata is already the

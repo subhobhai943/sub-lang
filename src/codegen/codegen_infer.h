@@ -34,6 +34,20 @@ void infer_function_signatures(ASTNode *program);
    Returns TYPE_UNKNOWN when nothing can be determined. */
 DataType infer_expr_type(ASTNode *expr);
 
+/* Element type of an array-valued expression - the type of `a[0]`, given
+   `a`. SUB arrays are homogeneous in practice, and a backend that emits a
+   concrete container type needs this to name it: without it C stored every
+   element as a long (so [1.5, 2.5] became [1, 2]) and C++ declared
+   std::vector<std::string> for a list of integers. Returns TYPE_INT when
+   nothing better can be worked out, matching what the rest of the
+   toolchain assumes for an unresolved numeric type. */
+DataType infer_elem_type(ASTNode *expr);
+
+/* Element type recorded for an array-valued variable, or TYPE_UNKNOWN when
+   none is known. `let a = []` says nothing about what a holds; a later
+   push(a, "x") says everything, and this is how a backend asks. */
+DataType infer_elem_type_of_var(const char *name);
+
 /* Return type a function body implies, ignoring any explicit annotation.
    TYPE_VOID when the body never returns a value. */
 DataType infer_return_type(ASTNode *body);

@@ -49,6 +49,11 @@ typedef struct { char *name; ASTNode *decl; } FnRec;
 
 static NCtx *C;
 
+/* Element type to give the next array literal, when the declaration it is
+   being bound to knows better than the literal does - `let a = []` followed
+   by push(a, "x"). Consumed by the literal that reads it. */
+static DataType g_literal_elem = TYPE_UNKNOWN;
+
 /* Current function being emitted. */
 static struct {
     Local   *locals; int nloc, cloc;
@@ -268,7 +273,9 @@ static DataType elem_type_of(ASTNode *n) {
     }
     if (n->type == AST_IDENTIFIER) {
         Local *l = loc_find(n->value);
-        if (l && l->type == TYPE_ARRAY) return l->elem;
+        if (l && l->type == TYPE_ARRAY && l->elem != TYPE_UNKNOWN) return l->elem;
+        DataType t = infer_elem_type_of_var(n->value);
+        if (t != TYPE_UNKNOWN) return t;
     }
     return TYPE_INT;
 }
@@ -905,7 +912,9 @@ static void gen_expr(ASTNode *n) {
     }
 
     case AST_ARRAY_LITERAL: {
-        DataType elem = elem_type_of(n);
+        DataType elem = g_literal_elem != TYPE_UNKNOWN ? g_literal_elem
+                                                       : elem_type_of(n);
+        g_literal_elem = TYPE_UNKNOWN;
         e_mov_r_imm64(T, RDI, (uint64_t)(n->child_count ? n->child_count : 4));
         e_mov_r_imm64(T, RSI, (uint64_t)array_kind(elem));
         nc_call_rt(C, RT_ARR_NEW);
@@ -1126,9 +1135,16 @@ static void gen_stmt(ASTNode *n) {
                                 ? n->data_type : rt);
         Local *l = loc_add(n->value, t);
         l->type = t;
-        if (t == TYPE_ARRAY) l->elem = elem_type_of(n->right);
+        if (t == TYPE_ARRAY) {
+            /* What the variable is later pushed to beats what the literal
+               shows, which for an empty literal is nothing. */
+            DataType shared = infer_elem_type_of_var(n->value);
+            l->elem = (shared != TYPE_UNKNOWN) ? shared : elem_type_of(n->right);
+            g_literal_elem = l->elem;
+        }
         if (n->right) {
             gen_bind(n->right, t);
+            g_literal_elem = TYPE_UNKNOWN;
             e_mov_mem_r(T, RBP, slot_disp(l), RAX);
         } else {
             e_xor_r_r(T, RAX, RAX);
