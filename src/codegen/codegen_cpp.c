@@ -25,6 +25,15 @@ typedef struct {
    so the caller checks the inferred argument type before using this. */
 typedef struct { const char *sub_name, *prefix, *suffix; } CppBuiltin;
 
+static const char* cpp_array_type(DataType elem) {
+    switch (elem) {
+    case TYPE_FLOAT:  return "std::vector<double>";
+    case TYPE_STRING: return "std::vector<std::string>";
+    case TYPE_BOOL:   return "std::vector<bool>";
+    default:          return "std::vector<long long>";
+    }
+}
+
 static const CppBuiltin* cpp_builtin(const char *name) {
     static const CppBuiltin table[] = {
         {"str","std::to_string(",")"},   {"to_string","std::to_string(",")"},
@@ -161,39 +170,6 @@ static char* escape_string_for_cpp(const char *raw) {
 static void generate_expr_cpp(StringBuilder *sb, ASTNode *node);
 static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent);
 
-/* Check if AST uses string types (to decide on #include <string>) */
-static bool ast_needs_string(ASTNode *node) {
-    if (!node) return false;
-    if (node->type == AST_LITERAL && node->data_type == TYPE_STRING) return true;
-    if (ast_needs_string(node->left)) return true;
-    if (ast_needs_string(node->right)) return true;
-    if (ast_needs_string(node->condition)) return true;
-    if (ast_needs_string(node->body)) return true;
-    if (ast_needs_string(node->next)) return true;
-    if (node->children) {
-        for (int i = 0; i < node->child_count; i++) {
-            if (ast_needs_string(node->children[i])) return true;
-        }
-    }
-    return false;
-}
-
-static bool ast_needs_vector(ASTNode *node) {
-    if (!node) return false;
-    if (node->type == AST_ARRAY_LITERAL) return true;
-    if (ast_needs_vector(node->left)) return true;
-    if (ast_needs_vector(node->right)) return true;
-    if (ast_needs_vector(node->condition)) return true;
-    if (ast_needs_vector(node->body)) return true;
-    if (ast_needs_vector(node->next)) return true;
-    if (node->children) {
-        for (int i = 0; i < node->child_count; i++) {
-            if (ast_needs_vector(node->children[i])) return true;
-        }
-    }
-    return false;
-}
-
 static bool ast_needs_map(ASTNode *node) {
     if (!node) return false;
     if (node->type == AST_OBJECT_LITERAL) return true;
@@ -328,10 +304,49 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
                     break;
                 }
             }
+            /* push/pop/len/str of an array want the array helpers, not the
+               string spellings in the builtin table. */
+            if (node->value && node->child_count >= 1 && node->children[0] &&
+                infer_expr_type(node->children[0]) == TYPE_ARRAY) {
+                if ((!strcmp(node->value, "push") || !strcmp(node->value, "append")) &&
+                    node->child_count >= 2) {
+                    sb_append(sb, "sub_push(");
+                    generate_expr_cpp(sb, node->children[0]);
+                    sb_append(sb, ", ");
+                    if (infer_elem_type(node->children[0]) == TYPE_STRING)
+                        sb_append(sb, "std::string(");
+                    generate_expr_cpp(sb, node->children[1]);
+                    if (infer_elem_type(node->children[0]) == TYPE_STRING)
+                        sb_append(sb, ")");
+                    sb_append(sb, ")");
+                    break;
+                }
+                if (!strcmp(node->value, "pop")) {
+                    sb_append(sb, "sub_pop(");
+                    generate_expr_cpp(sb, node->children[0]);
+                    sb_append(sb, ")");
+                    break;
+                }
+                if (!strcmp(node->value, "len") || !strcmp(node->value, "length")) {
+                    sb_append(sb, "(long long)(");
+                    generate_expr_cpp(sb, node->children[0]);
+                    sb_append(sb, ").size()");
+                    break;
+                }
+                if (!strcmp(node->value, "str") || !strcmp(node->value, "to_string")) {
+                    sb_append(sb, "sub_arr_str(");
+                    generate_expr_cpp(sb, node->children[0]);
+                    sb_append(sb, ")");
+                    break;
+                }
+            }
             if (is_print_builtin(fn)) {
                 sb_append(sb, "std::cout << ");
                 if (node->child_count > 0) {
+                    int arr = (infer_expr_type(node->children[0]) == TYPE_ARRAY);
+                    if (arr) sb_append(sb, "sub_arr_str(");
                     generate_expr_cpp(sb, node->children[0]);
+                    if (arr) sb_append(sb, ")");
                 } else {
                     sb_append(sb, "\"\"");
                 }
@@ -352,14 +367,20 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
             break;
         }
 
-        case AST_ARRAY_LITERAL:
-            sb_append(sb, "std::vector<std::string>{");
+        case AST_ARRAY_LITERAL: {
+            /* The element type was hard-coded to std::string, so a list of
+               integers did not compile at all. */
+            DataType elem = infer_elem_type(node);
+            sb_append(sb, "%s{", cpp_array_type(elem));
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
+                if (elem == TYPE_STRING) sb_append(sb, "std::string(");
                 generate_expr_cpp(sb, node->children[i]);
+                if (elem == TYPE_STRING) sb_append(sb, ")");
             }
             sb_append(sb, "}");
             break;
+        }
 
         case AST_OBJECT_LITERAL:
             sb_append(sb, "std::map<std::string, std::string>{");
@@ -380,10 +401,11 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
             break;
 
         case AST_ARRAY_ACCESS:
+            sb_append(sb, "sub_at(");
             generate_expr_cpp(sb, node->left);
-            sb_append(sb, "[");
+            sb_append(sb, ", ");
             generate_expr_cpp(sb, node->right);
-            sb_append(sb, "]");
+            sb_append(sb, ")");
             break;
 
         default:
@@ -580,7 +602,11 @@ static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent) {
             if (is_print_builtin(node->value)) {
                 sb_append(sb, "std::cout << ");
                 if (node->child_count > 0) {
+                    /* std::ostream has no operator<< for a vector. */
+                    int arr = (infer_expr_type(node->children[0]) == TYPE_ARRAY);
+                    if (arr) sb_append(sb, "sub_arr_str(");
                     generate_expr_cpp(sb, node->children[0]);
+                    if (arr) sb_append(sb, ")");
                 } else {
                     sb_append(sb, "\"\"");
                 }
@@ -593,6 +619,16 @@ static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent) {
 
         case AST_ASSIGN_STMT:
             indent_code(sb, indent);
+            if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                sb_append(sb, "sub_at(");
+                generate_expr_cpp(sb, node->left->left);
+                sb_append(sb, ", ");
+                generate_expr_cpp(sb, node->left->right);
+                sb_append(sb, ") = ");
+                generate_expr_cpp(sb, node->right);
+                sb_append(sb, ";\n");
+                break;
+            }
             generate_expr_cpp(sb, node->left);
             sb_append(sb, " = ");
             generate_expr_cpp(sb, node->right);
@@ -707,12 +743,11 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
     sb_append(sb, "#include <algorithm>\n");
     sb_append(sb, "#include <cctype>\n");
     sb_append(sb, "#include <cstdlib>\n");
-    if (ast_needs_string(ast)) {
-        sb_append(sb, "#include <string>\n");
-    }
-    if (ast_needs_vector(ast)) {
-        sb_append(sb, "#include <vector>\n");
-    }
+    /* <string> and <vector> unconditionally: the array helpers below are
+       templates over std::vector<T> and are emitted whether or not the
+       program uses an array, and a template still has to name its types. */
+    sb_append(sb, "#include <string>\n");
+    sb_append(sb, "#include <vector>\n");
     if (ast_needs_map(ast)) {
         sb_append(sb, "#include <map>\n");
     }
@@ -738,6 +773,36 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
     sb_append(sb, "static double sub_fmod(double a, double b) {\n");
     sb_append(sb, "    if (b == 0) sub_die(\"modulo by zero\");\n");
     sb_append(sb, "    return std::fmod(a, b);\n}\n\n");
+
+    /* Arrays. Templates, so one set of helpers covers every element type.
+       sub_at returns a reference so it serves reads and writes alike. */
+    sb_append(sb, "[[noreturn]] static void sub_die_index(long long i, size_t n) {\n");
+    sb_append(sb, "    std::cerr << \"RuntimeError: array index \" << i\n");
+    sb_append(sb, "              << \" out of bounds [0, \" << n << \")\" << std::endl;\n");
+    sb_append(sb, "    std::exit(70);\n}\n");
+    sb_append(sb, "template <class T> T& sub_at(std::vector<T> &a, long long i) {\n");
+    sb_append(sb, "    if (i < 0 || (size_t)i >= a.size()) sub_die_index(i, a.size());\n");
+    sb_append(sb, "    return a[(size_t)i];\n}\n");
+    /* Two template parameters: with one, push_back(a, 4) deduces T as both
+       long long (from the vector) and int (from the literal) and fails. */
+    sb_append(sb, "template <class T, class U> void sub_push(std::vector<T> &a, U v) "
+                  "{ a.push_back(T(v)); }\n");
+    sb_append(sb, "template <class T> T sub_pop(std::vector<T> &a) {\n");
+    sb_append(sb, "    if (a.empty()) sub_die(\"pop from empty array\");\n");
+    sb_append(sb, "    T v = a.back(); a.pop_back(); return v;\n}\n");
+    sb_append(sb, "static std::string sub_elem_str(const std::string &v) { return v; }\n");
+    sb_append(sb, "static std::string sub_elem_str(bool v) "
+                  "{ return v ? \"true\" : \"false\"; }\n");
+    sb_append(sb, "static std::string sub_elem_str(double v) {\n");
+    sb_append(sb, "    char b[64]; snprintf(b, sizeof b, \"%%g\", v); return b;\n}\n");
+    sb_append(sb, "static std::string sub_elem_str(long long v) "
+                  "{ return std::to_string(v); }\n");
+    sb_append(sb, "template <class T> std::string sub_arr_str(const std::vector<T> &a) {\n");
+    sb_append(sb, "    std::string s = \"[\";\n");
+    sb_append(sb, "    for (size_t i = 0; i < a.size(); i++) {\n");
+    sb_append(sb, "        if (i) s += \", \";\n");
+    sb_append(sb, "        s += sub_elem_str(a[i]);\n");
+    sb_append(sb, "    }\n    return s + \"]\";\n}\n\n");
 
     /* Two-pass approach: functions first, then main() with top-level statements */
     StringBuilder *main_sb = sb_create();
