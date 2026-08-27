@@ -440,16 +440,21 @@ ui.window(title="SUB App", width=800, height=600) {
 | **Go** | `./sub file.sb go` | `file.go` | ✅ executed in CI |
 | **Java** | `./sub file.sb java` | `SubProgram.java` | ✅ executed in CI |
 | **Ruby** | `./sub file.sb ruby` | `file.rb` | ✅ executed in CI |
-| **Kotlin** | `./sub file.sb kotlin` | `file.kt` | ⚠️ reviewed, not executed |
-| **Swift** | `./sub file.sb swift` | `file.swift` | ⚠️ reviewed, not executed |
+| **Kotlin** | `./sub file.sb kotlin` | `file.kt` | ✅ executed in CI |
+| **Swift** | `./sub file.sb swift` | `file.swift` | ✅ executed in CI |
 | **TypeScript** | `./sub file.sb ts` | `file.ts` | ⚠️ shares the JS backend |
 | **Assembly (x86-64)** | `./sub file.sb asm` | `file.asm` | ⚠️ incomplete - see below |
 | **CSS** | `./sub file.sb css` | `file.css` | ⚠️ UI declarations only |
 
 "Executed in CI" means the conformance suite compiles and runs the generated
-code and diffs its output against the interpreter. The rest are generated but
-not run automatically - install `swiftc` / `kotlinc` and re-run the suite to
-cover those two.
+code and diffs its output against the interpreter, on every push. Ten of the
+thirteen targets are covered that way; the remaining three are generated but
+never run, and the notes below say what that costs.
+
+Kotlin and Swift were on the second list until recently, and the first run of
+each found faults that had been there all along - Kotlin's `round()` broke
+ties the wrong way and neither backend emitted anything at all for an array
+literal. Reviewing generated code is not the same as running it.
 
 Java is the one target whose filename is fixed rather than derived: the class
 must be named `SubProgram`, so the file must be `SubProgram.java`.
