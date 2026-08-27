@@ -654,6 +654,8 @@ char* codegen_rust(ASTNode *ast, const char *source) {
        a[_sub_idx(i, a.len())] = v borrows a mutably and immutably at once,
        which the borrow checker refuses. */
     sb_append(sb, "#[allow(dead_code)] fn _sub_idx(i: i64, n: usize) -> usize {\n");
+    sb_append(sb, "    let i = if i < 0 { i + n as i64 } else { i };"
+                  "   // a[-1] is the last\n");
     sb_append(sb, "    if i < 0 || i as usize >= n { eprintln!("
                   "\"RuntimeError: array index {} out of bounds [0, {})\", i, n); "
                   "std::process::exit(70) }\n    i as usize\n}\n");

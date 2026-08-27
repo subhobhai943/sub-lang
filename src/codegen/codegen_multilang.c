@@ -728,10 +728,11 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
             }
             break;
         case AST_ARRAY_ACCESS:
+            sb_append(sb, "_sub_at(");
             generate_expr_python(sb, node->left);
-            sb_append(sb, "[");
+            sb_append(sb, ", ");
             generate_expr_python(sb, node->right);
-            sb_append(sb, "]");
+            sb_append(sb, ")");
             break;
         case AST_CALL_EXPR:
             if (node->left && node->left->type == AST_MEMBER_ACCESS) {
@@ -1068,6 +1069,16 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_ASSIGN_STMT:
             indent_code(sb, indent);
+            if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                sb_append(sb, "_sub_put(");
+                generate_expr_python(sb, node->left->left);
+                sb_append(sb, ", ");
+                generate_expr_python(sb, node->left->right);
+                sb_append(sb, ", ");
+                generate_expr_python(sb, node->right);
+                sb_append(sb, ")\n");
+                break;
+            }
             generate_expr_python(sb, node->left);
             sb_append(sb, " = ");
             generate_expr_python(sb, node->right);
@@ -1140,6 +1151,24 @@ char* codegen_python(ASTNode *ast, const char *source) {
     sb_append(sb, "\n\ndef _sub_fmod(a, b):\n");
     sb_append(sb, "    if b == 0: _sub_die('modulo by zero')\n");
     sb_append(sb, "    return math.fmod(a, b)\n");
+    /* Indexing goes through a helper so that a negative index counts from
+       the end and an out-of-range one reports what the interpreter reports.
+       Left to the language, Python raised IndexError and exited 1 while
+       Ruby and JavaScript quietly produced null. */
+    sb_append(sb, "\n\ndef _sub_at(c, i):\n");
+    sb_append(sb, "    n = len(c)\n");
+    sb_append(sb, "    if i < 0: i += n\n");
+    sb_append(sb, "    if i < 0 or i >= n:\n");
+    sb_append(sb, "        if isinstance(c, str):\n");
+    sb_append(sb, "            _sub_die('string index %%d out of bounds' %% i)\n");
+    sb_append(sb, "        _sub_die('array index %%d out of bounds [0, %%d)' %% (i, n))\n");
+    sb_append(sb, "    return c[i]\n");
+    sb_append(sb, "\n\ndef _sub_put(a, i, v):\n");
+    sb_append(sb, "    n = len(a)\n");
+    sb_append(sb, "    if i < 0: i += n\n");
+    sb_append(sb, "    if i < 0 or i >= n:\n");
+    sb_append(sb, "        _sub_die('array index %%d out of bounds [0, %%d)' %% (i, n))\n");
+    sb_append(sb, "    a[i] = v\n");
     sb_append(sb, "\n\ndef _sub_push(a, v):\n    a.append(v)\n");
     sb_append(sb, "\n\ndef _sub_pop(a):\n");
     sb_append(sb, "    if not a: _sub_die('pop from empty array')\n");
@@ -1283,10 +1312,11 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, ".%s", node->value ? node->value : "");
             break;
         case AST_ARRAY_ACCESS:
+            sb_append(sb, "_subAt(");
             generate_expr_js(sb, node->left);
-            sb_append(sb, "[");
+            sb_append(sb, ", ");
             generate_expr_js(sb, node->right);
-            sb_append(sb, "]");
+            sb_append(sb, ")");
             break;
         default:
             break;
@@ -1467,6 +1497,16 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_ASSIGN_STMT:
             indent_code(sb, indent);
+            if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                sb_append(sb, "_subPut(");
+                generate_expr_js(sb, node->left->left);
+                sb_append(sb, ", ");
+                generate_expr_js(sb, node->left->right);
+                sb_append(sb, ", ");
+                generate_expr_js(sb, node->right);
+                sb_append(sb, ");\n");
+                break;
+            }
             generate_expr_js(sb, node->left);
             sb_append(sb, " = ");
             generate_expr_js(sb, node->right);
@@ -1531,6 +1571,20 @@ char* codegen_javascript(ASTNode *ast, const char *source) {
     sb_append(sb, "        return Number.isInteger(v) ? String(v) : _subFmt(v);\n");
     sb_append(sb, "    return String(v);\n");
     sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subAt(c, i) {\n");
+    sb_append(sb, "    const n = c.length;\n");
+    sb_append(sb, "    if (i < 0) i += n;\n");
+    sb_append(sb, "    if (i < 0 || i >= n)\n");
+    sb_append(sb, "        _subDie(typeof c === 'string'\n");
+    sb_append(sb, "            ? `string index ${i} out of bounds`\n");
+    sb_append(sb, "            : `array index ${i} out of bounds [0, ${n})`);\n");
+    sb_append(sb, "    return c[i];\n}\n\n");
+    sb_append(sb, "function _subPut(a, i, v) {\n");
+    sb_append(sb, "    const n = a.length;\n");
+    sb_append(sb, "    if (i < 0) i += n;\n");
+    sb_append(sb, "    if (i < 0 || i >= n)\n");
+    sb_append(sb, "        _subDie(`array index ${i} out of bounds [0, ${n})`);\n");
+    sb_append(sb, "    a[i] = v;\n}\n\n");
     sb_append(sb, "function _subPush(a, v) { a.push(v); }\n\n");
     sb_append(sb, "function _subPop(a) {\n");
     sb_append(sb, "    if (a.length === 0) _subDie('pop from empty array');\n");
@@ -2010,12 +2064,14 @@ char* codegen_java(ASTNode *ast, const char *source) {
     /* Arrays. Generic, so one set covers every element type. Out of range
        and popping an empty list report the interpreter's message and exit
        70 rather than throwing Java's own exception. */
-    sb_append(sb, "\n    static <T> T _subAt(java.util.List<T> a, long i) {\n");
-    sb_append(sb, "        if (i < 0 || i >= a.size()) _subDieIndex(i, a.size());\n");
-    sb_append(sb, "        return a.get((int) i);\n    }\n");
-    sb_append(sb, "\n    static <T> void _subPut(java.util.List<T> a, long i, T v) {\n");
-    sb_append(sb, "        if (i < 0 || i >= a.size()) _subDieIndex(i, a.size());\n");
-    sb_append(sb, "        a.set((int) i, v);\n    }\n");
+    sb_append(sb, "\n    static int _subIdx(int n, long i) {\n");
+    sb_append(sb, "        if (i < 0) i += n;          // a[-1] is the last\n");
+    sb_append(sb, "        if (i < 0 || i >= n) _subDieIndex(i, n);\n");
+    sb_append(sb, "        return (int) i;\n    }\n");
+    sb_append(sb, "\n    static <T> T _subAt(java.util.List<T> a, long i) "
+                  "{ return a.get(_subIdx(a.size(), i)); }\n");
+    sb_append(sb, "\n    static <T> void _subPut(java.util.List<T> a, long i, T v) "
+                  "{ a.set(_subIdx(a.size(), i), v); }\n");
     sb_append(sb, "\n    static <T> void _subPush(java.util.List<T> a, T v) "
                   "{ a.add(v); }\n");
     sb_append(sb, "\n    static <T> T _subPop(java.util.List<T> a) {\n");
@@ -2998,10 +3054,11 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, ".%s", node->value ? node->value : "");
             break;
         case AST_ARRAY_ACCESS:
+            sb_append(sb, "_sub_at(");
             generate_expr_ruby(sb, node->left);
-            sb_append(sb, "[");
+            sb_append(sb, ", ");
             generate_expr_ruby(sb, node->right);
-            sb_append(sb, "]");
+            sb_append(sb, ")");
             break;
 
         default:
@@ -3185,6 +3242,16 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_ASSIGN_STMT:
             indent_ruby(sb, indent);
+            if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                sb_append(sb, "_sub_put(");
+                generate_expr_ruby(sb, node->left->left);
+                sb_append(sb, ", ");
+                generate_expr_ruby(sb, node->left->right);
+                sb_append(sb, ", ");
+                generate_expr_ruby(sb, node->right);
+                sb_append(sb, ")\n");
+                break;
+            }
             generate_expr_ruby(sb, node->left);
             sb_append(sb, " = ");
             generate_expr_ruby(sb, node->right);
@@ -3250,6 +3317,17 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
     sb_append(sb, "\ndef _sub_fmod(a, b)\n");
     sb_append(sb, "  _sub_die('modulo by zero') if b == 0\n");
     sb_append(sb, "  a.to_f.remainder(b.to_f)\nend\n");
+    sb_append(sb, "\ndef _sub_at(c, i)\n");
+    sb_append(sb, "  n = c.length\n  i += n if i < 0\n");
+    sb_append(sb, "  if i < 0 || i >= n\n");
+    sb_append(sb, "    _sub_die(c.is_a?(String) ? \"string index #{i} out of bounds\" :\n");
+    sb_append(sb, "             \"array index #{i} out of bounds [0, #{n})\")\n  end\n");
+    sb_append(sb, "  c[i]\nend\n");
+    sb_append(sb, "\ndef _sub_put(a, i, v)\n");
+    sb_append(sb, "  n = a.length\n  i += n if i < 0\n");
+    sb_append(sb, "  if i < 0 || i >= n\n");
+    sb_append(sb, "    _sub_die(\"array index #{i} out of bounds [0, #{n})\")\n  end\n");
+    sb_append(sb, "  a[i] = v\nend\n");
     sb_append(sb, "\ndef _sub_push(a, v)\n  a.push(v)\n  nil\nend\n");
     sb_append(sb, "\ndef _sub_pop(a)\n");
     sb_append(sb, "  _sub_die('pop from empty array') if a.empty?\n");
@@ -3870,16 +3948,16 @@ char* codegen_go(ASTNode *ast, const char *source) {
     /* Arrays. Generic, so one set of helpers covers every element type.
        Indexing and popping stop the program the way the interpreter does
        rather than panicking with Go's own message. */
-    sb_append(sb, "func _sub_at[T any](a *[]T, i int64) T {\n");
+    sb_append(sb, "func _sub_idx[T any](a *[]T, i int64) int64 {\n");
+    sb_append(sb, "\tif i < 0 {\n\t\ti += int64(len(*a))\n\t}   // a[-1] is the last\n");
     sb_append(sb, "\tif a == nil || i < 0 || i >= int64(len(*a)) {\n");
     sb_append(sb, "\t\tfmt.Fprintf(os.Stderr, \"RuntimeError: array index %%d "
                   "out of bounds [0, %%d)\\n\", i, len(*a))\n");
-    sb_append(sb, "\t\tos.Exit(70)\n\t}\n\treturn (*a)[i]\n}\n\n");
-    sb_append(sb, "func _sub_put[T any](a *[]T, i int64, v T) {\n");
-    sb_append(sb, "\tif a == nil || i < 0 || i >= int64(len(*a)) {\n");
-    sb_append(sb, "\t\tfmt.Fprintf(os.Stderr, \"RuntimeError: array index %%d "
-                  "out of bounds [0, %%d)\\n\", i, len(*a))\n");
-    sb_append(sb, "\t\tos.Exit(70)\n\t}\n\t(*a)[i] = v\n}\n\n");
+    sb_append(sb, "\t\tos.Exit(70)\n\t}\n\treturn i\n}\n\n");
+    sb_append(sb, "func _sub_at[T any](a *[]T, i int64) T "
+                  "{ return (*a)[_sub_idx(a, i)] }\n\n");
+    sb_append(sb, "func _sub_put[T any](a *[]T, i int64, v T) "
+                  "{ (*a)[_sub_idx(a, i)] = v }\n\n");
     sb_append(sb, "func _sub_push[T any](a *[]T, v T) { *a = append(*a, v) }\n\n");
     sb_append(sb, "func _sub_pop[T any](a *[]T) T {\n");
     sb_append(sb, "\tif a == nil || len(*a) == 0 {\n\t\t_sub_die(\"pop from empty array\")\n\t}\n");

@@ -1373,19 +1373,21 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    fprintf(stderr, \"RuntimeError: array index %%ld out of "
                   "bounds [0, %%ld)\\n\", idx, count);\n");
     sb_append(sb, "    exit(70);\n}\n");
-    sb_append(sb, "static inline long long sub_array_get(SubArray *a, long idx) {\n");
+    /* A negative index counts from the end: a[-1] is the last element. */
+    sb_append(sb, "static inline long sub_array_idx(SubArray *a, long idx) {\n");
     sb_append(sb, "    if (!a) sub_die(\"index of a non-array\");\n");
+    sb_append(sb, "    if (idx < 0) idx += a->count;\n");
     sb_append(sb, "    if (idx < 0 || idx >= a->count) sub_die_index(idx, a->count);\n");
-    sb_append(sb, "    return a->items[idx];\n");
+    sb_append(sb, "    return idx;\n}\n");
+    sb_append(sb, "static inline long long sub_array_get(SubArray *a, long idx) {\n");
+    sb_append(sb, "    return a->items[sub_array_idx(a, idx)];\n");
     sb_append(sb, "}\n\n");
     
     /* Assigning past the end is an error, not a grow: the interpreter
        refuses it and a backend that silently extended the array would mean
        the same program had two different lengths. */
     sb_append(sb, "static inline void sub_array_set(SubArray *a, long idx, long long val) {\n");
-    sb_append(sb, "    if (!a) sub_die(\"index of a non-array\");\n");
-    sb_append(sb, "    if (idx < 0 || idx >= a->count) sub_die_index(idx, a->count);\n");
-    sb_append(sb, "    a->items[idx] = val;\n");
+    sb_append(sb, "    a->items[sub_array_idx(a, idx)] = val;\n");
     sb_append(sb, "}\n\n");
 
     /* "[a, b, c]", the interpreter's spelling, with no quotes on strings. */

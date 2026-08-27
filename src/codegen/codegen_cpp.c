@@ -781,6 +781,7 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
     sb_append(sb, "              << \" out of bounds [0, \" << n << \")\" << std::endl;\n");
     sb_append(sb, "    std::exit(70);\n}\n");
     sb_append(sb, "template <class T> T& sub_at(std::vector<T> &a, long long i) {\n");
+    sb_append(sb, "    if (i < 0) i += (long long)a.size();   /* a[-1] is the last */\n");
     sb_append(sb, "    if (i < 0 || (size_t)i >= a.size()) sub_die_index(i, a.size());\n");
     sb_append(sb, "    return a[(size_t)i];\n}\n");
     /* Two template parameters: with one, push_back(a, 4) deduces T as both

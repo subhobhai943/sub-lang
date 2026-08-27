@@ -1109,6 +1109,12 @@ static void emit_arr_new(NCtx *c) {
    Out of range stops the program the way the interpreter does. */
 static void emit_arr_bounds(NCtx *c) {
     e_mov_r_mem(T, RCX, RDI, ARR_COUNT);
+    /* A negative index counts from the end, as it does in the interpreter:
+       a[-1] is the last element. The reported index is the adjusted one. */
+    e_test_r_r(T, RSI, RSI);
+    size_t nonneg = e_jcc(T, CC_NS);
+    e_add_r_r(T, RSI, RCX);
+    here(c, nonneg);
     e_cmp_r_imm(T, RSI, 0);
     size_t low = e_jcc(T, CC_L);
     e_cmp_r_r(T, RSI, RCX);
