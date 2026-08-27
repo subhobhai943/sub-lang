@@ -1063,6 +1063,277 @@ static void emit_f2s(NCtx *c) {
     e_ret(T);
 }
 
+
+/* ----------------------------------------------------------------
+   Arrays
+   ----------------------------------------------------------------
+   The header holds count, capacity, element kind and a pointer to the
+   elements. Keeping the elements in a separate block means growing an array
+   never moves its header, so a variable that holds one still points at it
+   after a push - which is what `push(a, x); println(a)` requires.
+   ---------------------------------------------------------------- */
+
+static void emit_arr_new(NCtx *c) {
+    e_push(T, R12); e_push(T, R13);
+    e_mov_r_r(T, R12, RDI);              /* capacity */
+    e_mov_r_r(T, R13, RSI);              /* element kind */
+
+    e_mov_r_imm64(T, RDI, ARR_HEADER);
+    nc_call_rt(c, RT_ALLOC);
+    e_push(T, RAX);                      /* header */
+
+    /* Always allocate room for at least one element, so the first push does
+       not have to special-case a null data pointer. */
+    e_mov_r_r(T, RDI, R12);
+    e_test_r_r(T, RDI, RDI);
+    size_t have_cap = e_jcc(T, CC_NE);
+    e_mov_r_imm64(T, RDI, 4);
+    e_mov_r_r(T, R12, RDI);
+    here(c, have_cap);
+    e_shl_r_imm8(T, RDI, 3);             /* capacity * 8 bytes */
+    nc_call_rt(c, RT_ALLOC);
+    e_mov_r_r(T, RCX, RAX);              /* data block */
+    e_pop(T, RAX);                       /* header */
+
+    e_xor_r_r(T, RDX, RDX);
+    e_mov_mem_r(T, RAX, ARR_COUNT, RDX);
+    e_mov_mem_r(T, RAX, ARR_CAP,  R12);
+    e_mov_mem_r(T, RAX, ARR_KIND, R13);
+    e_mov_mem_r(T, RAX, ARR_DATA, RCX);
+
+    e_pop(T, R13); e_pop(T, R12);
+    e_ret(T);
+}
+
+/* Shared bounds check: index in RSI against the count of the array in RDI.
+   Out of range stops the program the way the interpreter does. */
+static void emit_arr_bounds(NCtx *c) {
+    e_mov_r_mem(T, RCX, RDI, ARR_COUNT);
+    e_cmp_r_imm(T, RSI, 0);
+    size_t low = e_jcc(T, CC_L);
+    e_cmp_r_r(T, RSI, RCX);
+    size_t high = e_jcc(T, CC_GE);
+    size_t ok = e_jmp(T);
+    here(c, low); here(c, high);
+    /* Same wording as the interpreter: "array index 10 out of bounds [0, 3)".
+       An index and a count say what went wrong; "out of bounds" alone does
+       not. */
+    e_push(T, R12);
+    e_mov_r_r(T, R12, RCX);              /* count */
+    e_mov_r_r(T, RDI, RSI);
+    nc_call_rt(c, RT_I2S);
+    e_mov_r_r(T, RSI, RAX);
+    nc_load_cstr(c, RDI, "array index ");
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, RDI, RAX);
+    nc_load_cstr(c, RSI, " out of bounds [0, ");
+    nc_call_rt(c, RT_CONCAT);
+    e_push(T, RAX);
+    e_mov_r_r(T, RDI, R12);
+    nc_call_rt(c, RT_I2S);
+    e_mov_r_r(T, RSI, RAX);
+    e_pop(T, RDI);
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, RDI, RAX);
+    nc_load_cstr(c, RSI, ")");
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, RDI, RAX);
+    nc_call_rt(c, RT_DIE);
+    e_pop(T, R12);
+    here(c, ok);
+}
+
+static void emit_arr_get(NCtx *c) {
+    emit_arr_bounds(c);
+    e_mov_r_mem(T, RCX, RDI, ARR_DATA);
+    e_mov_r_r(T, RDX, RSI);
+    e_shl_r_imm8(T, RDX, 3);
+    e_add_r_r(T, RCX, RDX);
+    e_mov_r_mem(T, RAX, RCX, 0);
+    e_ret(T);
+}
+
+static void emit_arr_set(NCtx *c) {
+    e_push(T, RDX);
+    emit_arr_bounds(c);
+    e_pop(T, RDX);
+    e_mov_r_mem(T, RCX, RDI, ARR_DATA);
+    e_mov_r_r(T, RAX, RSI);
+    e_shl_r_imm8(T, RAX, 3);
+    e_add_r_r(T, RCX, RAX);
+    e_mov_mem_r(T, RCX, 0, RDX);
+    e_ret(T);
+}
+
+static void emit_arr_push(NCtx *c) {
+    e_push(T, R12); e_push(T, R13); e_push(T, R14);
+    e_mov_r_r(T, R12, RDI);              /* array */
+    e_mov_r_r(T, R13, RSI);              /* value */
+
+    e_mov_r_mem(T, RCX, R12, ARR_COUNT);
+    e_mov_r_mem(T, RDX, R12, ARR_CAP);
+    e_cmp_r_r(T, RCX, RDX);
+    size_t fits = e_jcc(T, CC_L);
+
+    /* Full: allocate a block of twice the capacity and copy into it. The
+       header is left where it is, so every reference to this array stays
+       valid. */
+    e_mov_r_r(T, R14, RDX);
+    e_shl_r_imm8(T, R14, 1);
+    e_test_r_r(T, R14, R14);
+    size_t nonzero = e_jcc(T, CC_NE);
+    e_mov_r_imm64(T, R14, 4);
+    here(c, nonzero);
+
+    e_mov_r_r(T, RDI, R14);
+    e_shl_r_imm8(T, RDI, 3);
+    nc_call_rt(c, RT_ALLOC);
+
+    e_mov_r_mem(T, RSI, R12, ARR_DATA);  /* old block */
+    e_mov_r_r(T, RCX, RAX);              /* new block */
+    e_mov_r_mem(T, RDX, R12, ARR_COUNT);
+    size_t copy = T->len;
+    e_test_r_r(T, RDX, RDX);
+    size_t copied = e_jcc(T, CC_E);
+    e_mov_r_mem(T, R8, RSI, 0);
+    e_mov_mem_r(T, RCX, 0, R8);
+    e_add_r_imm(T, RSI, 8);
+    e_add_r_imm(T, RCX, 8);
+    e_sub_r_imm(T, RDX, 1);
+    size_t back = e_jmp(T); e_patch_rel32(T, back, copy);
+    here(c, copied);
+
+    e_mov_mem_r(T, R12, ARR_DATA, RAX);
+    e_mov_mem_r(T, R12, ARR_CAP, R14);
+    here(c, fits);
+
+    e_mov_r_mem(T, RCX, R12, ARR_DATA);
+    e_mov_r_mem(T, RDX, R12, ARR_COUNT);
+    e_mov_r_r(T, RAX, RDX);
+    e_shl_r_imm8(T, RAX, 3);
+    e_add_r_r(T, RCX, RAX);
+    e_mov_mem_r(T, RCX, 0, R13);
+    e_add_r_imm(T, RDX, 1);
+    e_mov_mem_r(T, R12, ARR_COUNT, RDX);
+
+    e_pop(T, R14); e_pop(T, R13); e_pop(T, R12);
+    e_ret(T);
+}
+
+static void emit_arr_pop(NCtx *c) {
+    e_mov_r_mem(T, RCX, RDI, ARR_COUNT);
+    e_test_r_r(T, RCX, RCX);
+    size_t nonempty = e_jcc(T, CC_NE);
+    e_push(T, RDI);
+    nc_load_cstr(c, RDI, "pop from empty array");
+    nc_call_rt(c, RT_DIE);
+    e_pop(T, RDI);
+    here(c, nonempty);
+    e_sub_r_imm(T, RCX, 1);
+    e_mov_mem_r(T, RDI, ARR_COUNT, RCX);
+    e_mov_r_mem(T, RDX, RDI, ARR_DATA);
+    e_shl_r_imm8(T, RCX, 3);
+    e_add_r_r(T, RDX, RCX);
+    e_mov_r_mem(T, RAX, RDX, 0);
+    e_ret(T);
+}
+
+/* A SUB array is a value: binding one copies it, so that `let b = a` leaves
+   a alone when b is pushed to. The interpreter does the same (see val_copy);
+   without this the native backend would share the header and diverge. */
+static void emit_arr_copy(NCtx *c) {
+    e_push(T, R12); e_push(T, R13);
+    e_mov_r_r(T, R12, RDI);
+    e_mov_r_mem(T, RDI, R12, ARR_COUNT);
+    e_mov_r_mem(T, RSI, R12, ARR_KIND);
+    nc_call_rt(c, RT_ARR_NEW);
+    e_mov_r_r(T, R13, RAX);
+
+    e_mov_r_mem(T, RSI, R12, ARR_DATA);
+    e_mov_r_mem(T, RCX, R13, ARR_DATA);
+    e_mov_r_mem(T, RDX, R12, ARR_COUNT);
+    e_mov_mem_r(T, R13, ARR_COUNT, RDX);
+    size_t loop = T->len;
+    e_test_r_r(T, RDX, RDX);
+    size_t done = e_jcc(T, CC_E);
+    e_mov_r_mem(T, R8, RSI, 0);
+    e_mov_mem_r(T, RCX, 0, R8);
+    e_add_r_imm(T, RSI, 8);
+    e_add_r_imm(T, RCX, 8);
+    e_sub_r_imm(T, RDX, 1);
+    size_t back = e_jmp(T); e_patch_rel32(T, back, loop);
+    here(c, done);
+
+    e_mov_r_r(T, RAX, R13);
+    e_pop(T, R13); e_pop(T, R12);
+    e_ret(T);
+}
+
+/* "[a, b, c]" - the interpreter's spelling, with no quotes around strings. */
+static void emit_arr_str(NCtx *c) {
+    e_push(T, RBX); e_push(T, R12); e_push(T, R13); e_push(T, R14);
+    e_mov_r_r(T, R12, RDI);              /* array */
+
+    nc_load_cstr(c, RDI, "[");
+    e_mov_r_r(T, RBX, RDI);              /* accumulated string */
+
+    e_xor_r_r(T, R13, R13);              /* index */
+    size_t loop = T->len;
+    e_mov_r_mem(T, RCX, R12, ARR_COUNT);
+    e_cmp_r_r(T, R13, RCX);
+    size_t done = e_jcc(T, CC_GE);
+
+    e_test_r_r(T, R13, R13);
+    size_t first = e_jcc(T, CC_E);
+    e_mov_r_r(T, RDI, RBX);
+    nc_load_cstr(c, RSI, ", ");
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, RBX, RAX);
+    here(c, first);
+
+    /* element -> text, by the kind recorded in the header */
+    e_mov_r_mem(T, RCX, R12, ARR_DATA);
+    e_mov_r_r(T, RDX, R13);
+    e_shl_r_imm8(T, RDX, 3);
+    e_add_r_r(T, RCX, RDX);
+    e_mov_r_mem(T, RDI, RCX, 0);
+    e_mov_r_mem(T, R14, R12, ARR_KIND);
+
+    e_cmp_r_imm(T, R14, AK_FLOAT);
+    size_t not_f = e_jcc(T, CC_NE);
+    nc_call_rt(c, RT_F2S);
+    size_t have = e_jmp(T);
+    here(c, not_f);
+    e_cmp_r_imm(T, R14, AK_STRING);
+    size_t not_s = e_jcc(T, CC_NE);
+    e_mov_r_r(T, RAX, RDI);              /* already text */
+    size_t have2 = e_jmp(T);
+    here(c, not_s);
+    e_cmp_r_imm(T, R14, AK_BOOL);
+    size_t not_b = e_jcc(T, CC_NE);
+    nc_call_rt(c, RT_B2S);
+    size_t have3 = e_jmp(T);
+    here(c, not_b);
+    nc_call_rt(c, RT_I2S);
+    here(c, have); here(c, have2); here(c, have3);
+
+    e_mov_r_r(T, RSI, RAX);
+    e_mov_r_r(T, RDI, RBX);
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, RBX, RAX);
+
+    e_add_r_imm(T, R13, 1);
+    size_t again = e_jmp(T); e_patch_rel32(T, again, loop);
+    here(c, done);
+
+    e_mov_r_r(T, RDI, RBX);
+    nc_load_cstr(c, RSI, "]");
+    nc_call_rt(c, RT_CONCAT);
+
+    e_pop(T, R14); e_pop(T, R13); e_pop(T, R12); e_pop(T, RBX);
+    e_ret(T);
+}
+
 /* ----------------------------------------------------------------
    Driver
    ---------------------------------------------------------------- */
@@ -1088,6 +1359,13 @@ void nc_emit_runtime(NCtx *c) {
         { RT_FPOW,    emit_fpow    },
         { RT_FMOD,    emit_fmod    },
         { RT_FDIV,    emit_fdiv    },
+        { RT_ARR_NEW,  emit_arr_new  },
+        { RT_ARR_GET,  emit_arr_get  },
+        { RT_ARR_SET,  emit_arr_set  },
+        { RT_ARR_PUSH, emit_arr_push },
+        { RT_ARR_POP,  emit_arr_pop  },
+        { RT_ARR_STR,  emit_arr_str  },
+        { RT_ARR_COPY, emit_arr_copy },
     };
     int n = (int)(sizeof(routines) / sizeof(routines[0]));
     for (int i = 0; i < n; i++) {

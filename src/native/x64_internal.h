@@ -38,8 +38,32 @@ typedef enum {
     RT_FPOW,       /* rdi=a bits, rsi=b bits     -> rax=bits       */
     RT_FMOD,       /* rdi=a bits, rsi=b bits     -> rax=bits       */
     RT_FDIV,       /* rdi=a bits, rsi=b bits     -> rax=bits       */
+
+    /* Arrays. The header is fixed-size and the elements live in a separate
+       block, so growing an array never moves the header - a variable holding
+       one keeps working after a push, and so does a second variable that was
+       handed the same array. */
+    RT_ARR_NEW,    /* rdi=capacity, rsi=elem kind -> rax=array      */
+    RT_ARR_GET,    /* rdi=array, rsi=index        -> rax=element    */
+    RT_ARR_SET,    /* rdi=array, rsi=index, rdx=value               */
+    RT_ARR_PUSH,   /* rdi=array, rsi=value                          */
+    RT_ARR_POP,    /* rdi=array                   -> rax=element    */
+    RT_ARR_STR,    /* rdi=array                   -> rax=ptr        */
+    RT_ARR_COPY,   /* rdi=array                   -> rax=new array  */
     RT_COUNT
 } RtId;
+
+/* Array header layout, in bytes from the array pointer. */
+#define ARR_COUNT  0
+#define ARR_CAP    8
+#define ARR_KIND   16
+#define ARR_DATA   24
+#define ARR_HEADER 32
+
+/* What an array's elements are, so the runtime can print them. Codegen
+   knows the element type statically; the runtime needs it too because
+   printing an array is the one operation that has to format them. */
+enum { AK_INT = 0, AK_FLOAT = 1, AK_STRING = 2, AK_BOOL = 3 };
 
 typedef struct { size_t site; int id; }      RtFix;
 typedef struct { size_t site; char *name; }  FnFix;

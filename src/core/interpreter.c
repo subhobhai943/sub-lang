@@ -1091,7 +1091,8 @@ SubVal eval(ASTNode *node, Env *env) {
             long long idx = val_as_int(idx_val);
             if (idx < 0) idx += (long long)arr_val.arr->count;
             if (idx < 0 || idx >= arr_val.arr->count) {
-                runtime_error("array index %lld out of bounds", idx);
+                runtime_error("array index %lld out of bounds [0, %d)",
+                              idx, arr_val.arr->count);
                 return NULL_VAL;
             }
             SubVal *item = &arr_val.arr->items[idx];

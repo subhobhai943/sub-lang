@@ -1,0 +1,35 @@
+# Arrays: literals, indexing, mutation, growth and iteration.
+# The interpreter prints an array as [a, b, c] with no quotes around
+# strings, so every backend has to as well.
+let a = [1, 2, 3]
+println(a)
+println(len(a))
+println(a[0])
+println(a[2])
+
+a[1] = 99
+println(a)
+
+push(a, 4)
+println(a)
+println(pop(a))
+println(a)
+
+let total = 0
+for x in a {
+    total = total + x
+}
+println(total)
+
+let words = ["alpha", "beta"]
+println(words)
+println(words[1])
+println(len(words))
+
+let nums = [1.5, 2.5]
+println(nums)
+println(nums[0] + nums[1])
+
+let empty = []
+println(empty)
+println(len(empty))

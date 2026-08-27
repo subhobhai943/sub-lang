@@ -34,7 +34,10 @@
    transpiler backends use, so the two agree. */
 #define NULL_F64  0x7FF8000000000000ULL
 
-typedef struct { char *name; int slot; DataType type; } Local;
+/* `elem` is meaningful only when type is TYPE_ARRAY: SUB arrays are
+   homogeneous in practice, and the element type decides how an element is
+   loaded, stored and printed. */
+typedef struct { char *name; int slot; DataType type; DataType elem; } Local;
 
 typedef struct LoopCtx {
     struct LoopCtx *prev;
@@ -100,8 +103,18 @@ static Local *loc_add(const char *name, DataType t) {
     e->name = strdup(name ? name : "_");
     e->slot = F.nloc;
     e->type = t;
+    e->elem = TYPE_INT;
     F.nloc++;
     return e;
+}
+
+/* A name no SUB program can write, for the array and index a `for x in a`
+   loop needs to hold across iterations. */
+static Local *loc_add_hidden(const char *what) {
+    static int n = 0;
+    char buf[32];
+    snprintf(buf, sizeof(buf), " %s%d", what, n++);
+    return loc_add(buf, TYPE_INT);
 }
 
 static int32_t slot_disp(const Local *l) { return -8 * (l->slot + 1); }
@@ -163,6 +176,8 @@ static int builtin_fixed_type(const char *name, DataType *out) {
     return 0;
 }
 
+static DataType elem_type_of(ASTNode *n);
+
 static DataType num_merge(DataType a, DataType b) {
     if (a == TYPE_FLOAT || b == TYPE_FLOAT) return TYPE_FLOAT;
     return TYPE_INT;
@@ -171,6 +186,10 @@ static DataType num_merge(DataType a, DataType b) {
 static DataType ty(ASTNode *n) {
     if (!n) return TYPE_UNKNOWN;
     switch (n->type) {
+    case AST_ARRAY_LITERAL:
+        return TYPE_ARRAY;
+    case AST_ARRAY_ACCESS:
+        return elem_type_of(n->left);
     case AST_IDENTIFIER: {
         Local *l = loc_find(n->value);
         if (l && l->type != TYPE_UNKNOWN) return l->type;
@@ -210,6 +229,11 @@ static DataType ty(ASTNode *n) {
             DataType b = n->child_count > 1 ? ty(n->children[1]) : a;
             return num_merge(a, b);
         }
+        if (n->value && !strcmp(n->value, "pop") && n->child_count > 0)
+            return elem_type_of(n->children[0]);
+        if (n->value && (!strcmp(n->value, "push") ||
+                         !strcmp(n->value, "append")))
+            return TYPE_NULL;
         ASTNode *d = fn_find(n->value);
         if (d && d->data_type != TYPE_UNKNOWN && d->data_type != TYPE_AUTO)
             return d->data_type;
@@ -222,13 +246,51 @@ static DataType ty(ASTNode *n) {
     return t;
 }
 
+/* The element type of an array-valued expression. */
+static DataType elem_type_of(ASTNode *n) {
+    if (!n) return TYPE_INT;
+    if (n->type == AST_ARRAY_LITERAL) {
+        DataType t = TYPE_UNKNOWN;
+        for (int i = 0; i < n->child_count; i++) {
+            DataType e = ty(n->children[i]);
+            if (e == TYPE_UNKNOWN || e == TYPE_NULL) continue;
+            if (t == TYPE_UNKNOWN) { t = e; continue; }
+            if (t == e) continue;
+            if ((t == TYPE_INT && e == TYPE_FLOAT) ||
+                (t == TYPE_FLOAT && e == TYPE_INT)) { t = TYPE_FLOAT; continue; }
+            nc_fail(C, "an array mixing %s and %s elements is not supported by "
+                       "the native backend (line %d)",
+                    t == TYPE_STRING ? "text" : "numbers",
+                    e == TYPE_STRING ? "text" : "numbers", n->line);
+            return TYPE_INT;
+        }
+        return t == TYPE_UNKNOWN ? TYPE_INT : t;
+    }
+    if (n->type == AST_IDENTIFIER) {
+        Local *l = loc_find(n->value);
+        if (l && l->type == TYPE_ARRAY) return l->elem;
+    }
+    return TYPE_INT;
+}
+
+/* The tag stored in an array header, so the runtime can print elements. */
+static int array_kind(DataType elem) {
+    switch (elem) {
+    case TYPE_FLOAT:  return AK_FLOAT;
+    case TYPE_STRING: return AK_STRING;
+    case TYPE_BOOL:   return AK_BOOL;
+    default:          return AK_INT;
+    }
+}
+
 /* An unresolved type is compiled as an integer: that is what the semantic
    pass already assumes for un-annotated declarations, and it keeps a stray
    TYPE_UNKNOWN from silently producing a different representation here than
    in the other backends. */
 static DataType concrete(DataType t) {
     switch (t) {
-    case TYPE_FLOAT: case TYPE_STRING: case TYPE_BOOL: case TYPE_INT: return t;
+    case TYPE_FLOAT: case TYPE_STRING: case TYPE_BOOL:
+    case TYPE_INT:   case TYPE_ARRAY:  return t;
     default: return TYPE_INT;
     }
 }
@@ -295,7 +357,13 @@ static void convert(DataType from, DataType want, ASTNode *src) {
         e_mov_r_r(T, RDI, RAX);
         if (from == TYPE_FLOAT)      nc_call_rt(C, RT_F2S);
         else if (from == TYPE_BOOL)  nc_call_rt(C, RT_B2S);
+        else if (from == TYPE_ARRAY) nc_call_rt(C, RT_ARR_STR);
         else                         nc_call_rt(C, RT_I2S);
+        return;
+    }
+    if (from == TYPE_ARRAY || want == TYPE_ARRAY) {
+        nc_fail(C, "an array cannot be used as a number here (line %d)",
+                src ? src->line : 0);
         return;
     }
     if (from == TYPE_STRING) {
@@ -304,6 +372,17 @@ static void convert(DataType from, DataType want, ASTNode *src) {
         return;
     }
     nc_fail(C, "unsupported conversion at line %d", src ? src->line : 0);
+}
+
+/* Bind an array-valued expression: everything but a fresh literal is copied,
+   because binding a SUB array copies it. A literal has no other owner yet,
+   so copying it would be pure waste. */
+static void gen_bind(ASTNode *n, DataType want) {
+    gen_as(n, want);
+    if (concrete(want) == TYPE_ARRAY && n && n->type != AST_ARRAY_LITERAL) {
+        e_mov_r_r(T, RDI, RAX);
+        nc_call_rt(C, RT_ARR_COPY);
+    }
 }
 
 static void gen_as(ASTNode *n, DataType want) {
@@ -361,6 +440,11 @@ static void gen_truth(ASTNode *n) {
         e_setcc(T, CC_NE, RAX);          /* != 0, and NaN is unordered */
         e_setcc(T, CC_P, RCX);           /* ... which counts as true too */
         e_or_r_r(T, RAX, RCX);
+        e_movzx_r_r8(T, RAX, RAX);
+    } else if (t == TYPE_ARRAY) {
+        e_mov_r_mem(T, RAX, RAX, ARR_COUNT);
+        e_test_r_r(T, RAX, RAX);
+        e_setcc(T, CC_NE, RAX);
         e_movzx_r_r8(T, RAX, RAX);
     } else {
         e_test_r_r(T, RAX, RAX);
@@ -590,7 +674,7 @@ static void gen_user_call(ASTNode *n, ASTNode *decl) {
 
     for (int i = 0; i < argc; i++) {
         DataType pt = decl->children[i]->data_type;
-        gen_as(n->children[i], concrete(pt));
+        gen_bind(n->children[i], concrete(pt));
         e_push(T, RAX);
     }
     for (int i = argc - 1; i >= 0; i--) e_pop(T, ARG_REGS[i]);
@@ -702,14 +786,47 @@ static void gen_call(ASTNode *n) {
     if (!strcmp(fn, "float")) { if (a0) gen_as(a0, TYPE_FLOAT); else e_xor_r_r(T, RAX, RAX); return; }
 
     if (!strcmp(fn, "len")) {
-        if (concrete(ty(a0)) != TYPE_STRING) {
-            nc_fail(C, "len() of a non-string is not supported by the native "
-                       "backend (line %d)", n->line);
+        DataType at = concrete(ty(a0));
+        if (at == TYPE_ARRAY) {
+            gen_expr(a0);
+            e_mov_r_mem(T, RAX, RAX, ARR_COUNT);
+            return;
+        }
+        if (at != TYPE_STRING) {
+            nc_fail(C, "len() of a %s is not supported by the native "
+                       "backend (line %d)",
+                    at == TYPE_FLOAT ? "float" : "number", n->line);
             return;
         }
         gen_expr(a0);
         e_mov_r_r(T, RDI, RAX);
         nc_call_rt(C, RT_STRLEN);
+        return;
+    }
+
+    if ((!strcmp(fn, "push") || !strcmp(fn, "append")) && n->child_count >= 2) {
+        if (concrete(ty(a0)) != TYPE_ARRAY) {
+            nc_fail(C, "%s() needs an array (line %d)", fn, n->line);
+            return;
+        }
+        gen_expr(a0);
+        e_push(T, RAX);
+        gen_as(n->children[1], elem_type_of(a0));
+        e_mov_r_r(T, RSI, RAX);
+        e_pop(T, RDI);
+        nc_call_rt(C, RT_ARR_PUSH);
+        e_xor_r_r(T, RAX, RAX);          /* push() evaluates to null */
+        return;
+    }
+
+    if (!strcmp(fn, "pop") && a0) {
+        if (concrete(ty(a0)) != TYPE_ARRAY) {
+            nc_fail(C, "pop() needs an array (line %d)", n->line);
+            return;
+        }
+        gen_expr(a0);
+        e_mov_r_r(T, RDI, RAX);
+        nc_call_rt(C, RT_ARR_POP);
         return;
     }
     if (!strcmp(fn, "upper") || !strcmp(fn, "lower")) {
@@ -787,6 +904,32 @@ static void gen_expr(ASTNode *n) {
         break;
     }
 
+    case AST_ARRAY_LITERAL: {
+        DataType elem = elem_type_of(n);
+        e_mov_r_imm64(T, RDI, (uint64_t)(n->child_count ? n->child_count : 4));
+        e_mov_r_imm64(T, RSI, (uint64_t)array_kind(elem));
+        nc_call_rt(C, RT_ARR_NEW);
+        e_push(T, RAX);
+        for (int i = 0; i < n->child_count; i++) {
+            gen_as(n->children[i], elem);
+            e_mov_r_r(T, RSI, RAX);
+            e_mov_r_mem(T, RDI, RSP, 0);
+            nc_call_rt(C, RT_ARR_PUSH);
+        }
+        e_pop(T, RAX);
+        break;
+    }
+
+    case AST_ARRAY_ACCESS: {
+        gen_expr(n->left);
+        e_push(T, RAX);
+        gen_as(n->right, TYPE_INT);
+        e_mov_r_r(T, RSI, RAX);
+        e_pop(T, RDI);
+        nc_call_rt(C, RT_ARR_GET);
+        break;
+    }
+
     case AST_TERNARY_EXPR: {
         DataType t = concrete(ty(n));
         size_t els = gen_jump_if_false(n->condition);
@@ -827,7 +970,7 @@ static void gen_assign_to(const char *name, ASTNode *value, int line) {
                 name ? name : "?", line);
         return;
     }
-    gen_as(value, l->type);
+    gen_bind(value, l->type);
     e_mov_mem_r(T, RBP, slot_disp(l), RAX);
 }
 
@@ -874,9 +1017,50 @@ static void gen_for(ASTNode *n) {
     ASTNode *range = (n->child_count > 0 && n->children[0] &&
                       n->children[0]->type == AST_RANGE_EXPR)
                      ? n->children[0] : NULL;
+
+    /* `for x in <array>`: the array and the index live in hidden slots so
+       they survive the body, which is free to reassign anything visible. */
+    if (!range && n->condition && concrete(ty(n->condition)) == TYPE_ARRAY) {
+        DataType elem = elem_type_of(n->condition);
+        Local *arr = loc_add_hidden("arr");
+        Local *idx = loc_add_hidden("idx");
+        Local *var = loc_add(n->value ? n->value : "item", elem);
+        var->type = elem;
+        if (elem == TYPE_ARRAY) var->elem = TYPE_INT;
+
+        gen_expr(n->condition);
+        e_mov_mem_r(T, RBP, slot_disp(arr), RAX);
+        e_xor_r_r(T, RAX, RAX);
+        e_mov_mem_r(T, RBP, slot_disp(idx), RAX);
+
+        LoopCtx lc; loop_enter(&lc);
+        size_t top = C->text.len;
+        e_mov_r_mem(T, RAX, RBP, slot_disp(arr));
+        e_mov_r_mem(T, RAX, RAX, ARR_COUNT);
+        e_mov_r_mem(T, RCX, RBP, slot_disp(idx));
+        e_cmp_r_r(T, RCX, RAX);
+        size_t out = e_jcc(T, CC_GE);
+
+        e_mov_r_mem(T, RDI, RBP, slot_disp(arr));
+        e_mov_r_r(T, RSI, RCX);
+        nc_call_rt(C, RT_ARR_GET);
+        e_mov_mem_r(T, RBP, slot_disp(var), RAX);
+
+        gen_block(n->body);
+
+        size_t step = C->text.len;
+        e_mov_r_mem(T, RAX, RBP, slot_disp(idx));
+        e_add_r_imm(T, RAX, 1);
+        e_mov_mem_r(T, RBP, slot_disp(idx), RAX);
+        size_t back = e_jmp(T); e_patch_rel32(T, back, top);
+        here(out);
+        loop_leave(&lc, step, C->text.len);
+        return;
+    }
+
     if (!range) {
-        nc_fail(C, "the native backend only supports `for x in range(...)` "
-                   "loops (line %d)", n->line);
+        nc_fail(C, "the native backend supports `for x in range(...)` and "
+                   "`for x in <array>` (line %d)", n->line);
         return;
     }
     ASTNode *start = range->right ? range->left  : NULL;
@@ -933,12 +1117,18 @@ static void gen_stmt(ASTNode *n) {
 
     case AST_VAR_DECL:
     case AST_CONST_DECL: {
-        DataType t = concrete(n->data_type != TYPE_UNKNOWN && n->data_type != TYPE_AUTO
-                              ? n->data_type : ty(n->right));
+        /* ty() knows about array literals where the semantic pass does not,
+           so it wins when it says the initialiser is an array. */
+        DataType rt = ty(n->right);
+        DataType t = concrete(rt == TYPE_ARRAY ? TYPE_ARRAY
+                              : (n->data_type != TYPE_UNKNOWN &&
+                                 n->data_type != TYPE_AUTO)
+                                ? n->data_type : rt);
         Local *l = loc_add(n->value, t);
         l->type = t;
+        if (t == TYPE_ARRAY) l->elem = elem_type_of(n->right);
         if (n->right) {
-            gen_as(n->right, t);
+            gen_bind(n->right, t);
             e_mov_mem_r(T, RBP, slot_disp(l), RAX);
         } else {
             e_xor_r_r(T, RAX, RAX);
@@ -948,6 +1138,23 @@ static void gen_stmt(ASTNode *n) {
     }
 
     case AST_ASSIGN_STMT:
+        if (n->left && n->left->type == AST_ARRAY_ACCESS) {
+            ASTNode *acc = n->left;
+            if (concrete(ty(acc->left)) != TYPE_ARRAY) {
+                nc_fail(C, "indexed assignment needs an array (line %d)", n->line);
+                break;
+            }
+            gen_expr(acc->left);
+            e_push(T, RAX);
+            gen_as(acc->right, TYPE_INT);
+            e_push(T, RAX);
+            gen_as(n->right, elem_type_of(acc->left));
+            e_mov_r_r(T, RDX, RAX);
+            e_pop(T, RSI);
+            e_pop(T, RDI);
+            nc_call_rt(C, RT_ARR_SET);
+            break;
+        }
         if (n->left && n->left->type == AST_IDENTIFIER)
             gen_assign_to(n->left->value, n->right, n->line);
         else if (n->value)
