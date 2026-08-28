@@ -730,13 +730,17 @@ static int emit_special_binop(StringBuilder *sb, ASTNode *node,
                 break;
         }
         sb_append(sb, "%s(", fn);
-        /* Go has no implicit numeric conversion, so an integer operand of a
-           float division has to be converted at the call: round() yields an
-           int64, and `round(x * scale) / scale` would not compile without
-           this. The other targets promote on their own. */
-        int coerce = is_flt && (lang == LANG_GO || lang == LANG_KOTLIN);
-        const char *pre = lang == LANG_GO ? "float64(" : "(";
-        const char *post = lang == LANG_GO ? ")" : ").toDouble()";
+        /* Go, Kotlin and Swift have no implicit numeric conversion, so an
+           integer operand of a float division has to be converted at the
+           call: round() yields an integer, and `round(x * scale) / scale`
+           would not compile in any of the three. Java, C and the rest
+           promote on their own. */
+        int coerce = is_flt && (lang == LANG_GO || lang == LANG_KOTLIN ||
+                                lang == LANG_SWIFT);
+        const char *pre  = "(";
+        const char *post = ").toDouble()";
+        if (lang == LANG_GO)         { pre = "float64("; post = ")"; }
+        else if (lang == LANG_SWIFT) { pre = "Double(";  post = ")"; }
         if (coerce && infer_expr_type(node->left) != TYPE_FLOAT) {
             sb_append(sb, "%s", pre); gen(sb, node->left); sb_append(sb, "%s", post);
         } else {
