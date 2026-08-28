@@ -38,7 +38,7 @@ String variables are now first-class citizens in the native compiler.
 - **Runtime Helper**: `str_concat()` function provides string concatenation using `strlen`, `malloc`, and `strcpy` (codegen_x64.c:380-405)
 
 ### Example Usage:
-```sub
+```coffee
 var greeting = "Hello"
 var name = "World"
 print(greeting + " " + name)  # Output: Hello World

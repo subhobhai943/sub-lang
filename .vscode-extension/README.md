@@ -82,7 +82,7 @@ code --install-extension sub-language-support-1.1.0.vsix
 
 ## Example
 
-```sub
+```coffee
 # Hello World in SUB
 var greeting = "Hello, World!"
 

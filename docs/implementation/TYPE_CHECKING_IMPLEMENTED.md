@@ -75,28 +75,28 @@ This allows the IR generator to know exactly what types it's working with.
 - x && "text" → ERROR ✗
 
 #### Conditional Statements
-```sub
+```coffee
 if x > 5 then      # x > 5 must be bool ✓
     print("ok")
 end
 ```
 
 #### Assignments
-```sub
+```coffee
 var x = 5           # x inferred as int
 x = 10             # OK (int to int) ✓
 x = "hello"         # ERROR (string to int) ✗
 ```
 
 #### Array Access
-```sub
+```coffee
 var arr = [1,2,3]
 arr[0]              # OK (int index) ✓
 arr["index"]        # ERROR (string index) ✗
 ```
 
 #### Ternary Expressions
-```sub
+```coffee
 x > 5 ? 10 : 20    # OK (same type) ✓
 x > 5 ? 10 : "no"  # ERROR (int vs string) ✗
 ```

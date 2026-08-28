@@ -18,7 +18,7 @@ interpreted directly (`subi`), compiled to a native binary via a C backend
 
 ### 2.1 Comments
 
-```sub
+```coffee
 # Single-line comment
 ```
 
@@ -27,7 +27,7 @@ block-comment syntax.
 
 ### 2.2 Variables
 
-```sub
+```coffee
 var name = "John"
 var age = 25
 const MAX = 100
@@ -47,7 +47,7 @@ type-annotation syntax (`name:type`).
 
 ### 2.4 Functions
 
-```sub
+```coffee
 function add(a, b) {
     return a + b
 }
@@ -64,7 +64,7 @@ def subtract(a, b) {
 
 ### 2.5 Conditionals
 
-```sub
+```coffee
 if x > 5 {
     print("big")
 } elif x > 0 {
@@ -77,7 +77,7 @@ if x > 5 {
 Both brace-block (`{ }`) and `end`-block styles are accepted for any
 control-flow construct:
 
-```sub
+```coffee
 if x > 5
     print("big")
 else
@@ -87,7 +87,7 @@ end
 
 ### 2.6 Loops
 
-```sub
+```coffee
 for i in range(5) {
     print(i)
 }
@@ -119,7 +119,7 @@ while i < 5 {
 
 ### 2.8 Embedding Foreign Code
 
-```sub
+```coffee
 embed c
     #include <math.h>
     double square(double x) { return x * x; }

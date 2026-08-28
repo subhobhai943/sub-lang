@@ -1,160 +1,131 @@
-name: Syntax Highlighting Validation
+# Checks the claim that makes this configuration worth having: that GitHub
+# actually colours .sb files, and that the editor grammar still describes the
+# language the lexer parses.
+#
+# The previous version of this workflow validated that a JSON file parsed and
+# that .gitattributes contained the string "*.sb", then printed ".sb files
+# will be highlighted with SUB syntax". It passed for months while nothing was
+# highlighted at all: the attribute named a language -- SUB -- that Linguist
+# has never heard of, so GitHub ignored it and rendered .sb as plain text.
+# Every step below asserts something that would have caught that.
+name: Syntax Highlighting
 
 on:
   push:
     paths:
       - '**.sb'
+      - '**.md'
       - '.gitattributes'
-      - '.github/linguist/**'
-      - '.github/linguist.yml'
+      - '.vscode-extension/syntaxes/**'
+      - 'src/core/lexer.c'
+      - 'src/core/parser_enhanced.c'
+      - 'tests/grammar_keywords.py'
+      - '.github/workflows/syntax-highlighting.yml'
   pull_request:
-    paths:
-      - '**.sb'
-      - '.gitattributes'
-      - '.github/linguist/**'
-      - '.github/linguist.yml'
   workflow_dispatch:
 
 jobs:
-  validate-grammar:
-    name: Validate TextMate Grammar
+  github-highlighting:
+    name: GitHub renders .sb as a known language
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      
-      - name: Install validator
-        run: |
-          npm install -g ajv-cli
-      
-      - name: Validate grammar JSON
-        run: |
-          echo "Validating TextMate grammar file..."
-          if [ -f ".github/linguist/sub.tmLanguage.json" ]; then
-            # Check if file is valid JSON
-            cat .github/linguist/sub.tmLanguage.json | jq . > /dev/null
-            echo "Grammar file is valid JSON"
-          else
-            echo "Grammar file not found!"
-            exit 1
-          fi
-      
-      - name: Check grammar completeness
-        run: |
-          echo "Checking grammar coverage..."
-          grammar_file=".github/linguist/sub.tmLanguage.json"
-          
-          # Check for essential patterns
-          if grep -q '"keywords"' "$grammar_file" && \
-             grep -q '"strings"' "$grammar_file" && \
-             grep -q '"numbers"' "$grammar_file" && \
-             grep -q '"comments"' "$grammar_file"; then
-            echo "All essential patterns found"
-          else
-            echo "Warning: Some essential patterns may be missing"
-          fi
+      - uses: actions/checkout@v5
 
-  validate-linguist:
-    name: Validate Linguist Config
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.2'
-      
-      - name: Install GitHub Linguist
+          bundler-cache: false
+
+      - name: Install Linguist
+        run: gem install github-linguist --no-document
+
+      - name: The language .sb maps to must exist in Linguist
         run: |
-          gem install github-linguist
-      
-      - name: Validate .gitattributes
-        run: |
-          echo "Checking .gitattributes configuration..."
-          if [ -f ".gitattributes" ]; then
-            if grep -q "*.sb" ".gitattributes"; then
-              echo ".sb files configured in .gitattributes"
-            else
-              echo "Warning: .sb files not configured in .gitattributes"
-              exit 1
-            fi
-          else
-            echo "Error: .gitattributes not found"
+          set -euo pipefail
+          sample=$(git ls-files '*.sb' | head -1)
+          echo "sample file: $sample"
+          lang=$(git check-attr linguist-language -- "$sample" | sed 's/.*: //')
+          echo "linguist-language for .sb = $lang"
+          echo "lang=$lang" >> "$GITHUB_ENV"
+          if [ "$lang" = "unspecified" ]; then
+            echo "::error::.gitattributes sets no linguist-language for *.sb," \
+                 "so GitHub renders them as plain text."
             exit 1
           fi
-      
-      - name: Check linguist.yml
+          # The whole failure mode being guarded against: naming a language
+          # Linguist does not have is silently ignored, not an error.
+          ruby -e '
+            require "linguist"
+            name = ARGV[0]
+            lang = Linguist::Language.find_by_name(name) || Linguist::Language.find_by_alias(name)
+            if lang.nil?
+              warn "::error::Linguist has no language #{name.inspect}, so GitHub " \
+                   "ignores the .gitattributes override and .sb files render as plain text."
+              exit 1
+            end
+            puts "OK: #{lang.name} (grammar #{lang.tm_scope})"
+            if lang.tm_scope == "none"
+              warn "::error::#{lang.name} has no grammar, so it gets no highlighting."
+              exit 1
+            end
+          ' "$lang"
+
+      - name: Linguist agrees, on a real file
         run: |
-          echo "Checking linguist.yml configuration..."
-          if [ -f ".github/linguist.yml" ]; then
-            cat .github/linguist.yml | grep -A 10 "SUB:"
-            echo "Linguist configuration found"
-          else
-            echo "Warning: linguist.yml not found"
+          set -euo pipefail
+          # github-linguist reports what GitHub itself would report, reading
+          # the same .gitattributes. This is the end-to-end check: everything
+          # above could pass while the attribute failed to apply to the file.
+          sample=$(git ls-files '*.sb' | head -1)
+          out=$(github-linguist "$sample")
+          echo "$out"
+          if ! printf '%s' "$out" | grep -qi "language:[[:space:]]*$lang"; then
+            echo "::error::Linguist does not report $sample as $lang."
+            exit 1
           fi
 
-  test-syntax-highlighting:
-    name: Test Syntax Highlighting
+      - name: Markdown code fences name a language GitHub knows
+        run: |
+          set -euo pipefail
+          # ```sub is not a Linguist alias, so a fenced SUB example renders
+          # grey. Fences must use an alias of whatever *.sb maps to.
+          if grep -rn '^```sub$' --include='*.md' . ; then
+            echo "::error::Those fences use \`\`\`sub, which Linguist does not know," \
+                 "so the block renders unhighlighted. Use the alias that matches" \
+                 "the linguist-language set in .gitattributes."
+            exit 1
+          fi
+          echo "no unknown code fences"
+
+  editor-grammar:
+    name: Editor grammar matches the lexer
     runs-on: ubuntu-latest
-    needs: [validate-grammar, validate-linguist]
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Find .sb test files
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Grammar is valid JSON
+        run: python3 -c "import json; json.load(open('.vscode-extension/syntaxes/sub.tmLanguage.json'))"
+
+      - name: Grammar covers every keyword, and invents none
+        run: python3 tests/grammar_keywords.py
+
+      - name: The VS Code extension points at that grammar
         run: |
-          echo "Finding SUB language test files..."
-          sb_files=$(find . -name "*.sb" -type f | head -10)
-          echo "Found .sb files:"
-          echo "$sb_files"
-          
-          if [ -z "$sb_files" ]; then
-            echo "Warning: No .sb files found for testing"
-          else
-            echo "Found $(find . -name '*.sb' -type f | wc -l) .sb files"
-          fi
-      
-      - name: Display sample SUB code
-        run: |
-          echo "Sample SUB language code:"
-          if [ -f "tests/test_simple.sb" ]; then
-            echo "--- tests/test_simple.sb ---"
-            cat tests/test_simple.sb || echo "File not accessible"
-          elif [ -f "example.sb" ]; then
-            echo "--- example.sb ---"
-            cat example.sb || echo "File not accessible"
-          else
-            echo "No sample file found"
-          fi
-      
-      - name: Summary
-        run: |
-          echo ""
-          echo "=============================================="
-          echo "  Syntax Highlighting Validation Complete"
-          echo "=============================================="
-          echo ""
-          echo "Configuration Status:"
-          echo "  Grammar File: OK"
-          echo "  Linguist Config: OK"
-          echo "  .gitattributes: OK"
-          echo ""
-          echo "Next Steps:"
-          echo "  1. Push changes to GitHub"
-          echo "  2. GitHub will process linguist data"
-          echo "  3. .sb files will be highlighted with SUB syntax"
-          echo "  4. Language statistics will show SUB in repo"
-          echo ""
-          echo "Note: Syntax highlighting may take a few minutes"
-          echo "to appear after pushing changes."
-          echo "=============================================="
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, sys
+          pkg = json.load(open(".vscode-extension/package.json"))
+          grammars = pkg.get("contributes", {}).get("grammars", [])
+          paths = [g.get("path") for g in grammars]
+          if "./syntaxes/sub.tmLanguage.json" not in paths:
+              sys.exit("package.json does not load syntaxes/sub.tmLanguage.json; got %r" % paths)
+          langs = pkg.get("contributes", {}).get("languages", [])
+          exts = [e for l in langs for e in l.get("extensions", [])]
+          if ".sb" not in exts:
+              sys.exit("package.json does not claim .sb; got %r" % exts)
+          print("extension loads the grammar and claims .sb")
+          PY

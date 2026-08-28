@@ -1,337 +1,175 @@
-# SUB Language Syntax Highlighting on GitHub
+# Syntax highlighting for SUB
 
-This document explains how syntax highlighting is configured for SUB language (.sb files) on GitHub.
+Two different systems colour SUB code, and they work in completely different
+ways. Most confusion about highlighting comes from treating them as one.
 
----
-
-## 🌈 Overview
-
-The SUB language now has full syntax highlighting support on GitHub, making code more readable with color-coded:
-- **Keywords** (`#var`, `#function`, `#if`, etc.)
-- **Strings** ("text" and 'text')
-- **Numbers** (integers, floats, hex, binary)
-- **Comments** (// and /* */)
-- **Operators** (+, -, *, /, ==, !=, etc.)
-- **Built-in functions** (`#print`, `#input`, etc.)
-- **Booleans** (true, false, null)
+| Where | What colours it | Configured by |
+|---|---|---|
+| GitHub (files, diffs, code blocks) | GitHub Linguist, using a grammar **it** ships | `.gitattributes` |
+| VS Code | The SUB extension, using the grammar **in this repo** | `.vscode-extension/` |
 
 ---
 
-## 📚 Configuration Files
+## GitHub
 
-### 1. `.gitattributes`
+### What GitHub will and will not do
 
-Tells GitHub which files are SUB language files:
+GitHub highlights code with [Linguist][linguist], which knows a fixed set of
+languages listed in its own `languages.yml`, each paired with a grammar
+Linguist ships. **There is no way to give GitHub a grammar from inside your
+repository.** A `.tmLanguage.json` file committed here, however correct, is
+read by nothing on github.com.
+
+This is the part that is easy to get wrong, because getting it wrong is
+silent. `.gitattributes` used to say:
 
 ```gitattributes
 *.sb linguist-language=SUB linguist-detectable=true
 ```
 
-**Purpose**: Marks all `.sb` files as SUB language for statistics and highlighting.
+`SUB` is not a language Linguist has, so the override was ignored and `.sb`
+files rendered as plain grey text. Nothing errored; the setting simply did
+nothing. A repository can carry a broken highlighting setup for a long time
+without any signal that it is broken.
 
-### 2. `.github/linguist.yml`
+### What this repository does instead
 
-Defines the SUB language for GitHub Linguist:
+Point `.sb` at a language Linguist *does* have, and pick the one whose grammar
+fits SUB best:
 
-```yaml
-SUB:
-  type: programming
-  color: "#FF6B35"        # Orange color for language badge
-  extensions:
-    - ".sb"
-  tm_scope: source.sub
-  language_id: 999999999
-  aliases:
-    - sublang
-    - sub-lang
+```gitattributes
+*.sb linguist-language=CoffeeScript linguist-detectable=false
 ```
 
-**Purpose**: Registers SUB as a recognized programming language.
+CoffeeScript was measured, not guessed. Running thirteen candidate grammars
+over every `.sb` file in the repository and scoring them against the token
+stream SUB's own lexer produces:
 
-### 3. `.github/linguist/sub.tmLanguage.json`
+| Grammar | comments | strings | numbers | keywords | literals | overall |
+|---|---|---|---|---|---|---|
+| **CoffeeScript** | **100%** | **100%** | 90% | **72%** | 92% | **86%** |
+| Julia | 100% | 100% | 100% | 57% | 63% | 82% |
+| Swift | 0% | 100% | 100% | 77% | 63% | 80% |
+| TypeScript | 0% | 100% | 100% | 72% | 100% | 79% |
+| Rust | 0% | 100% | 100% | 69% | 63% | 77% |
+| Python | 100% | 100% | 100% | 39% | 0% | 73% |
+| Zig | 0% | 100% | 100% | 48% | 100% | 70% |
+| Go | 0% | 100% | 89% | 48% | 50% | 65% |
 
-TextMate grammar defining syntax patterns:
+The split is comments. SUB comments start with `#`, which rules out every
+C-family grammar however well its keywords line up — Rust has `fn` and `let`
+but would leave every comment in the file unhighlighted. CoffeeScript is the
+one grammar that gets `#` comments, strings, numbers *and* most of SUB's
+keywords (`let`, `if`, `else`, `for`, `in`, `while`, `return`, `break`,
+`continue`, `switch`, `case`, `do`, `true`, `false`, `null`), and it never
+mistakes SUB code for a string or a regex the way the Go grammar does.
 
-```json
-{
-  "name": "SUB",
-  "scopeName": "source.sub",
-  "fileTypes": ["sb"],
-  "patterns": [
-    { "include": "#keywords" },
-    { "include": "#strings" },
-    { "include": "#numbers" },
-    ...
-  ]
+`fn` is not a CoffeeScript keyword, but `fn name(...)` parses as a call there,
+so it still comes out coloured.
+
+### Why `linguist-detectable=false`
+
+The alias borrows CoffeeScript's grammar. It should not borrow its *name*.
+With detection left on, the repository's language bar would report a compiler
+written in C as a CoffeeScript project. Turning it off keeps `.sb` out of the
+statistics while keeping the highlighting.
+
+### Code blocks in Markdown
+
+Fenced blocks are matched against Linguist's language names and aliases too,
+so ```` ```sub ```` renders grey for the same reason. Use an alias of whatever
+`*.sb` maps to:
+
+````markdown
+```coffee
+let name = "SUB"
+
+fn greet(who) {
+    return "Hello, " + who + "!"
 }
+
+println(greet(name))
+```
+````
+
+### Getting SUB itself into the language bar
+
+The real fix is upstream: a language in Linguist gets its own name, its own
+colour, and its own grammar. Linguist's bar for accepting one is adoption —
+the language needs to be [in use across a substantial number of public
+repositories][linguist-new], with a grammar and a file extension that does not
+collide. `.sb` is currently unclaimed by any Linguist language, which is the
+easy half. Until the adoption half is met, the alias above is what works.
+
+---
+
+## VS Code
+
+`.vscode-extension/` is a real extension and its grammar really is used.
+`syntaxes/sub.tmLanguage.json` is the only grammar in this repository that
+anything loads.
+
+Its keyword lists are a hand-written second copy of the language, and copies
+drift. This one had: `and`, `or`, `not` and `export` — none of which SUB has —
+while missing `switch`, `**`, all six type keywords and the four
+embedded-language names. `tests/grammar_keywords.py` now compares the grammar
+against `kw_table` in `src/core/lexer.c` and fails on a mismatch in either
+direction, so adding a keyword to the lexer and forgetting the grammar breaks
+the build.
+
+```console
+$ python3 tests/grammar_keywords.py
+grammar covers all 56 keywords and invents none
 ```
 
-**Purpose**: Provides detailed syntax highlighting rules.
+Note that `switch`, `match`, `case`, `default` and `in` are recognised by the
+parser against an identifier's text rather than by the lexer as token types,
+so they are not in `kw_table`; the check keeps its own list of those and
+verifies the parser still spells them that way.
 
 ---
 
-## 🎨 Syntax Patterns
+## Language reference
 
-### Keywords
+What the grammar colours, and what SUB actually has:
 
-**Control Flow:**
-- `#if`, `#elif`, `#else`, `#end`
-- `#for`, `#while`, `#do`
-- `#break`, `#continue`, `#return`
+**Comments** — `#` to end of line, `//` to end of line, and `/* */` blocks
+(which nest). `#embed` and `#endembed` open an embedded block and are not
+comments.
 
-**Declarations:**
-- `#var` - Variable declaration
-- `#const` - Constant declaration
-- `#function` - Function declaration
+**Declarations** — `let`, `const`, `var`, `fn`, `function`, `def`, `class`,
+`extends`, `implements`, `import`. (`var`, `function` and `def` are
+deprecated spellings of `let` and `fn`; the compiler says so once per run.)
 
-**Special:**
-- `#embed`, `#endembed` - Embedded code blocks
-- `#ui` - UI components
-- `#import`, `#export` - Module system
+**Control flow** — `if`, `elif`, `else`, `for`, `while`, `do`, `end`,
+`break`, `continue`, `return`, `switch` (or `match`), `case`, `default`,
+`in`, `try`, `catch`, `finally`, `throw`.
 
-### Operators
+**Types** — `int`, `float`, `string`, `bool`, `auto`, `void`.
 
-**Arithmetic:** `+`, `-`, `*`, `/`, `%`
+**Literals** — `true`, `false`, `null` (`nil` is the deprecated spelling).
 
-**Comparison:** `==`, `!=`, `<`, `>`, `<=`, `>=`
+**Operators** — `+ - * / % **`, `== != < > <= >=`, `&& || !`,
+`= += -= *= /=`.
 
-**Logical:** `&&`, `||`, `!`, `and`, `or`, `not`
-
-**Bitwise:** `&`, `|`, `^`, `~`, `<<`, `>>`
-
-### Literals
-
-**Strings:**
-```sub
-"double quoted"
-'single quoted'
-"with \"escapes\""
-```
-
-**Numbers:**
-```sub
-42              # Integer
-3.14            # Float
-1.5e10          # Scientific notation
-0xFF            # Hexadecimal
-0b1010          # Binary
-```
-
-**Booleans:**
-```sub
-true
-false
-null
-nil
-```
+SUB has no `and`, `or` or `not` keywords; the logical operators are `&&`,
+`||` and `!`.
 
 ---
 
-## 🛠️ How It Works
+## Checking it
 
-### GitHub Linguist Process
+`.github/workflows/syntax-highlighting.yml` verifies all of the above on every
+push, and each step asserts something that would have caught the original
+breakage:
 
-1. **Detection**: GitHub scans repository for `.sb` files
-2. **Attribution**: `.gitattributes` marks them as SUB language
-3. **Grammar Loading**: TextMate grammar applied for highlighting
-4. **Statistics**: SUB counted in language statistics
-5. **Display**: Syntax highlighted on GitHub web interface
+- the language named in `.gitattributes` resolves in a real Linguist install,
+  and has a grammar
+- `github-linguist` classifies a real `.sb` file as something other than
+  plain text
+- no Markdown fence uses a language Linguist does not know
+- the grammar is valid JSON, covers every lexer keyword, and invents none
+- the VS Code manifest loads that grammar and claims `.sb`
 
-### Color Scheme
-
-The highlighting uses GitHub's default theme colors:
-
-| Element | Color (Light) | Color (Dark) |
-|---------|--------------|-------------|
-| Keywords | Blue | Light Blue |
-| Strings | Green | Light Green |
-| Numbers | Orange | Light Orange |
-| Comments | Gray | Light Gray |
-| Functions | Purple | Light Purple |
-| Operators | Red | Light Red |
-
----
-
-## ✅ Validation Workflow
-
-A GitHub Actions workflow automatically validates the syntax highlighting configuration:
-
-**Workflow:** `.github/workflows/syntax-highlighting.yml`
-
-**Checks:**
-- ✅ Grammar JSON validity
-- ✅ Pattern completeness
-- ✅ .gitattributes configuration
-- ✅ Linguist config presence
-- ✅ Sample file testing
-
-**Trigger:**
-- On push to `.sb` files
-- On changes to highlighting config
-- Manual workflow dispatch
-
----
-
-## 📝 Example
-
-### Before Highlighting
-
-```
-#var name = "World"
-#function greet(person)
-    #return "Hello, " + person
-#end
-#print(greet(name))
-```
-
-### After Highlighting
-
-Keywords in **blue**, strings in **green**, functions in **purple**:
-
-```sub
-#var name = "World"
-#function greet(person)
-    #return "Hello, " + person
-#end
-#print(greet(name))
-```
-
----
-
-## 📊 Repository Statistics
-
-With syntax highlighting configured, GitHub will show:
-
-**Language Bar:**
-```
-SUB 45.2%  C 40.1%  Shell 8.7%  Makefile 6.0%
-```
-
-**Language Badge:**
-- Color: Orange (#FF6B35)
-- Label: "SUB"
-- Percentage: Based on `.sb` file lines
-
----
-
-## 🚀 VS Code Extension
-
-For local development, we also provide a VS Code extension:
-
-**Location:** `.vscode-extension/`
-
-**Features:**
-- Syntax highlighting in VS Code
-- IntelliSense support
-- Code snippets
-- Linting integration
-
-**Installation:**
-```bash
-cd .vscode-extension
-npm install
-vsce package
-code --install-extension sub-language-*.vsix
-```
-
----
-
-## 🔧 Testing
-
-### Test Syntax Highlighting Locally
-
-1. **Install VS Code extension** (see above)
-2. **Open `.sb` file** in VS Code
-3. **Verify colors** match expected patterns
-
-### Test on GitHub
-
-1. **Push changes** to GitHub
-2. **Navigate to `.sb` file** on GitHub
-3. **Wait 1-2 minutes** for Linguist to process
-4. **Verify highlighting** appears correctly
-
----
-
-## 🐛 Troubleshooting
-
-### Highlighting Not Appearing
-
-**Problem:** `.sb` files show as plain text
-
-**Solutions:**
-1. Check `.gitattributes` includes `*.sb linguist-language=SUB`
-2. Wait 2-5 minutes for GitHub to process changes
-3. Clear browser cache and refresh
-4. Check workflow validation passed
-
-### Wrong Colors
-
-**Problem:** Colors don't match expected theme
-
-**Solutions:**
-1. Verify TextMate grammar patterns are correct
-2. Check scope names match convention
-3. Review `.tmLanguage.json` for errors
-4. Run validation workflow
-
-### Language Statistics Wrong
-
-**Problem:** SUB not showing in language bar
-
-**Solutions:**
-1. Ensure `.gitattributes` configured correctly
-2. Check `linguist-detectable=true` is set
-3. Verify `.sb` files not marked as documentation
-4. Wait for GitHub to regenerate statistics
-
----
-
-## 📚 Resources
-
-### Documentation
-- [GitHub Linguist](https://github.com/github/linguist)
-- [TextMate Grammars](https://macromates.com/manual/en/language_grammars)
-- [VS Code Language Extensions](https://code.visualstudio.com/api/language-extensions/syntax-highlight-guide)
-
-### Tools
-- [TextMate Grammar Tester](https://github.com/PanAeon/vscode-tmgrammar-test)
-- [Linguist Debug Tool](https://github.com/github/linguist#testing)
-- [VS Code Extension Generator](https://github.com/Microsoft/vscode-generator-code)
-
----
-
-## 🤝 Contributing
-
-To improve syntax highlighting:
-
-1. Edit `.github/linguist/sub.tmLanguage.json`
-2. Add/modify patterns in `repository` section
-3. Test with VS Code extension
-4. Run validation workflow
-5. Submit pull request
-
-**Example: Adding new keyword**
-
-```json
-{
-  "name": "keyword.control.sub",
-  "match": "\\b(#new_keyword)\\b"
-}
-```
-
----
-
-## ✨ Summary
-
-✅ **Complete syntax highlighting** for SUB language on GitHub
-✅ **Automatic validation** via GitHub Actions
-✅ **VS Code extension** for local development
-✅ **Language statistics** in repository insights
-✅ **Professional appearance** for code reviews
-
----
-
-Built with ❤️ by the SUB community
-
-**Making SUB code beautiful everywhere!** 🌈✨
+[linguist]: https://github.com/github-linguist/linguist
+[linguist-new]: https://github.com/github-linguist/linguist/blob/main/CONTRIBUTING.md#adding-a-language

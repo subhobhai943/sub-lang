@@ -76,7 +76,7 @@ subi --version
 
 Create `hello.sb`:
 
-```sub
+```coffee
 let name = "World"
 println("Hello, " + name)
 ```
@@ -127,7 +127,7 @@ subi --version
 
 ### Step 4 — Run your first program
 
-```sub
+```coffee
 let name = "World"
 println("Hello, " + name)
 ```
@@ -191,7 +191,7 @@ subi --version
 
 Create `hello.sb`:
 
-```sub
+```coffee
 let name = "World"
 println("Hello, " + name)
 ```
@@ -272,7 +272,7 @@ Copy this in and run it to confirm your installation works.
 
 **fibonacci.sb**
 
-```sub
+```coffee
 let a = 0
 let b = 1
 

@@ -66,7 +66,7 @@ This guide will help you set up syntax highlighting for SUB Language in various 
 
 Create a test file `test.sb`:
 
-```sub
+```coffee
 # This is a comment
 var message = "Hello, SUB Language!"
 var count = 42
@@ -99,36 +99,22 @@ Open this file in VS Code and you should see:
 
 ## GitHub
 
-GitHub will automatically detect `.sb` files using the `.gitattributes` file in the repository.
-
-### Configuration
-
-The `.gitattributes` file is already configured:
+GitHub does not load a grammar from a repository, so the extension's grammar
+has no effect there. GitHub highlights `.sb` files by way of a `.gitattributes`
+alias onto a language its own Linguist already ships:
 
 ```gitattributes
-*.sb linguist-language=SUB
-*.sub linguist-language=SUB
+*.sb linguist-language=CoffeeScript linguist-detectable=false
 ```
 
-And `.github/linguist.yml` defines SUB as a language:
+CoffeeScript is the closest fit to SUB of the grammars Linguist has - it is the
+only one that gets `#` comments, strings, numbers and most of SUB's keywords.
+`linguist-detectable=false` keeps `.sb` out of the repository's language bar, so
+the front page does not report this C compiler as a CoffeeScript project.
 
-```yaml
-SUB:
-  type: programming
-  color: "#FF6B6B"
-  extensions:
-    - ".sb"
-    - ".sub"
-  tm_scope: source.sub
-  ace_mode: text
-```
-
-### Viewing on GitHub
-
-When you push `.sb` files to GitHub:
-1. They will be recognized as SUB language
-2. Language statistics will show SUB
-3. Files will have basic syntax highlighting
+See [docs/SYNTAX_HIGHLIGHTING.md](../docs/SYNTAX_HIGHLIGHTING.md) for the
+measurements behind that choice, and for what getting SUB into Linguist itself
+would take.
 
 ---
 

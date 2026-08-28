@@ -1,1 +1,0 @@
-[Full SYNTAX_HIGHLIGHTING.md content preserved]

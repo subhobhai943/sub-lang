@@ -212,7 +212,7 @@ System utilities and environment.
 
 ### Importing Modules
 
-```sub
+```coffee
 #import "stdlib/io.sb"
 #import "stdlib/math.sb"
 #import "stdlib/string.sb"
@@ -225,7 +225,7 @@ println("Hello, World!")
 
 ### Example: File Processing
 
-```sub
+```coffee
 #import "stdlib/file.sb"
 #import "stdlib/string.sb"
 #import "stdlib/io.sb"
@@ -246,7 +246,7 @@ println("Hello, World!")
 
 ### Example: Math Operations
 
-```sub
+```coffee
 #import "stdlib/math.sb"
 #import "stdlib/io.sb"
 
@@ -262,7 +262,7 @@ println("Hello, World!")
 
 ### Example: String Processing
 
-```sub
+```coffee
 #import "stdlib/string.sb"
 #import "stdlib/io.sb"
 

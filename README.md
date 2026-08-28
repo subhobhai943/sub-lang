@@ -223,7 +223,7 @@ reassigned, so it stays.
 
 ### Variables & Types
 
-```sub
+```coffee
 let name  = "SUB"        # string
 let age   = 25           # integer
 let pi    = 3.14159      # float
@@ -236,7 +236,7 @@ const MAX = 100          # constant (cannot be reassigned)
 
 Declare functions with `fn`:
 
-```sub
+```coffee
 fn greet(name) {
     return "Hello, " + name + "!"
 }
@@ -256,7 +256,7 @@ want to; an explicit type always wins over inference.
 
 A function can read and assign a variable declared at the top level:
 
-```sub
+```coffee
 let calls = 0
 
 fn bump() {
@@ -279,7 +279,7 @@ backend - so the program means the same thing through all ten.
 
 ### Classes & Objects
 
-```sub
+```coffee
 class Point {
     let x = 0
     let y = 0
@@ -297,7 +297,7 @@ println(p.y)  # 20
 
 Blocks use braces:
 
-```sub
+```coffee
 let score = 85
 
 if score >= 90 {
@@ -314,7 +314,7 @@ form and the one every example uses.
 
 ### Loops & Iteration
 
-```sub
+```coffee
 # Numeric range iteration
 for i in range(1, 6) {
     println(i)          # 1, 2, 3, 4, 5
@@ -353,7 +353,7 @@ else, so `break` at the end of a case is optional. A `break` in the middle of
 a case skips the rest of it, and `continue` belongs to the loop around the
 switch, not to the switch.
 
-```sub
+```coffee
 let choice = 2
 
 switch choice {
@@ -373,7 +373,7 @@ agree on which clause runs.
 
 ### Exception Handling
 
-```sub
+```coffee
 try {
     throw "Fatal operation error"
 } catch (err) {
@@ -386,7 +386,7 @@ try {
 ### String & Array Methods
 
 #### Strings
-```sub
+```coffee
 let s = "Hello World"
 println(s.length)              # 11
 println(s.upper())             # HELLO WORLD
@@ -402,7 +402,7 @@ println(parts[0])              # a
 ```
 
 #### Arrays
-```sub
+```coffee
 let list = [1, 2, 3]
 list.push(4)
 println(list.length)           # 4
@@ -414,7 +414,7 @@ println(list.join(" - "))      # 1 - 2 - 3
 
 Embed foreign target languages directly in SUB source:
 
-```sub
+```coffee
 #embed c
 int custom_c_add(int a, int b) {
     return a + b;
@@ -426,7 +426,7 @@ println("Embedded C code compiled seamlessly!")
 
 ### Cross-Platform UI Declarations
 
-```sub
+```coffee
 fn handleClick() {
     println("Button clicked!")
 }

@@ -1,12 +1,33 @@
-# SUB Language Files
-*.sb linguist-language=SUB linguist-detectable=true
+# SUB source files
+#
+# GitHub highlights code with Linguist, which only knows the languages in its
+# own languages.yml. SUB is not one of them, and there is no way to hand
+# GitHub a grammar from inside a repository -- .github/linguist/ is read by
+# nothing. So `linguist-language=SUB` silently did nothing and .sb files
+# rendered as plain text.
+#
+# Pointing at a language Linguist does know is what actually colours them.
+# CoffeeScript is the closest fit by some margin: it is the only grammar that
+# gets SUB's `#` comments, its strings, its numbers and most of its keywords
+# (let, if, else, for, in, while, return, break, continue, switch, case, do,
+# true, false, null), and it never mistakes SUB code for a string or a regex
+# the way the Go grammar does. docs/SYNTAX_HIGHLIGHTING.md has the scores for
+# every candidate; the workflow of the same name checks that whatever is named
+# here still resolves to a real Linguist language with a real grammar.
+#
+# linguist-detectable=false keeps the alias out of the repository's language
+# bar. The highlighting is worth borrowing; the label is not -- without this
+# the front page would report a compiler written in C as a CoffeeScript
+# project. Getting SUB itself into that bar means getting SUB into Linguist,
+# which is gated on the language being in use across many repositories.
+*.sb  linguist-language=CoffeeScript linguist-detectable=false
+*.sub linguist-language=CoffeeScript linguist-detectable=false
 
 # Documentation
 *.md linguist-documentation=true
 
 # Examples
 examples/** linguist-documentation=true
-tests/*.sb linguist-documentation=false
 
 # Generated files
 *.o linguist-generated=true

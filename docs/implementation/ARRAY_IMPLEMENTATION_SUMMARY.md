@@ -65,7 +65,7 @@
 ## Test File Created
 
 Created `test_array.sb`:
-```sub
+```coffee
 var arr = [1, 2, 3]
 var x = arr[0]
 arr[1] = 10

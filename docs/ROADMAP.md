@@ -8,7 +8,7 @@ compile.
 
 ## Type annotations & generics
 
-```sub
+```coffee
 var price:float = 19.99
 function identity<T>(value:T):T
     return value
@@ -24,7 +24,7 @@ parser support (`class Foo ... end` currently produces parse errors — see
 
 ## Error handling
 
-```sub
+```coffee
 try
     var result = divide(10, 0)
 catch DivisionError as e
@@ -42,7 +42,7 @@ throw CustomError("Something went wrong")
 
 ## Ternary operator, C-style `for`, `do...while`
 
-```sub
+```coffee
 var result = condition ? value1 : value2
 for (i = 0; i < 10; i++) { print(i) }
 do { print(i) } while condition
@@ -50,7 +50,7 @@ do { print(i) } while condition
 
 ## UI DSL
 
-```sub
+```coffee
 ui.window(title="App", width=800, height=600)
     ui.button(text="Click", onclick=handler)
 end
@@ -58,7 +58,7 @@ end
 
 ## Foreign Function Interface (FFI)
 
-```sub
+```coffee
 ffi
     library: "mylib.so"
     function calculateSum(a:int, b:int):int
@@ -67,7 +67,7 @@ end
 
 ## Inline assembly / SIMD / parallel loops
 
-```sub
+```coffee
 asm x86_64
     mov rax, 1
 endasm
@@ -88,7 +88,7 @@ distinguished from opaque text.
 
 ## Build config / dependency manifests
 
-```sub
+```coffee
 config
     name: "MyApp"
     targets: ["android", "ios", "web"]

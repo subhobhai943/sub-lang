@@ -17,7 +17,7 @@ This creates two compilers:
 ### Step 2: Write Your First Program
 
 Create `hello.sb`:
-```sub
+```coffee
 #var name = "World"
 #print("Hello, " + name + "!")
 #print("SUB is awesome!")
@@ -63,7 +63,7 @@ javac SubProgram.java && java SubProgram
 
 ### Arithmetic
 
-```sub
+```coffee
 #var x = 10
 #var y = 20
 #var sum = x + y
@@ -75,7 +75,7 @@ javac SubProgram.java && java SubProgram
 
 ### Conditionals
 
-```sub
+```coffee
 #var age = 21
 
 #if age >= 18
@@ -87,7 +87,7 @@ javac SubProgram.java && java SubProgram
 
 ### Functions
 
-```sub
+```coffee
 #function greet(name)
     #print("Hello, " + name)
 #end
@@ -98,7 +98,7 @@ javac SubProgram.java && java SubProgram
 
 ### Loops
 
-```sub
+```coffee
 #for i in range(5)
     #print(i)
 #end
