@@ -43,6 +43,13 @@ DataType infer_expr_type(ASTNode *expr);
    toolchain assumes for an unresolved numeric type. */
 DataType infer_elem_type(ASTNode *expr);
 
+/* Tell the inference helpers which function's body is being generated, so
+   that a bare identifier can be resolved against that function's parameters.
+   Without this every parameter looks untyped at codegen time: `len(a)` on an
+   array parameter came out as strlen() because the array was invisible.
+   Returns the previous function, to restore. */
+ASTNode *infer_enter_function(ASTNode *fn);
+
 /* Element type recorded for an array-valued variable, or TYPE_UNKNOWN when
    none is known. `let a = []` says nothing about what a holds; a later
    push(a, "x") says everything, and this is how a backend asks. */

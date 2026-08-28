@@ -1,0 +1,99 @@
+# The standard library has to mean the same thing through every backend, not
+# just under the interpreter -- which is the trap the previous stdlib fell
+# into. Importing it here puts every module through the same differential
+# check as the language itself: `import` is resolved and spliced at parse
+# time, so each backend compiles the library's source along with this file.
+
+import "math"
+import "arrays"
+import "strings"
+
+# ---------- math ----------
+
+println(sign(0 - 4))
+println(sign(0))
+println(sign(9))
+println(clamp(15, 0, 10))
+println(clamp(0 - 5, 0, 10))
+println(clamp(5, 0, 10))
+println(is_even(4))
+println(is_odd(4))
+println(gcd(48, 18))
+println(gcd(0 - 48, 18))
+println(lcm(4, 6))
+println(lcm(0, 5))
+println(factorial(0))
+println(factorial(10))
+println(fib(0))
+println(fib(1))
+println(fib(20))
+println(is_prime(1))
+println(is_prime(2))
+println(is_prime(97))
+println(is_prime(99))
+println(ipow(3, 5))
+println(ipow(2, 0))
+println(hypot(3.0, 4.0))
+println(round_to(3.14159, 2))
+println(close_to(0.1 + 0.2, 0.3, 0.000001))
+println(close_to(1.0, 2.0, 0.5))
+
+# ---------- arrays ----------
+
+let xs = [5, 3, 9, 1, 3]
+
+println(sum_int(xs))
+println(sum_int([]))
+println(product_int([1, 2, 3, 4]))
+println(min_int(xs))
+println(max_int(xs))
+println(index_of_int(xs, 9))
+println(index_of_int(xs, 7))
+println(has_int(xs, 9))
+println(has_int(xs, 7))
+println(count_int(xs, 3))
+println(reverse_int(xs))
+println(slice_int(xs, 1, 3))
+println(slice_int(xs, 0 - 2, 99))
+println(concat_int([1, 2], [3]))
+println(repeat_int(7, 3))
+println(repeat_int(7, 0))
+println(sorted_int(xs))
+println(unique_int(xs))
+println(is_sorted_int(sorted_int(xs)))
+println(is_sorted_int(xs))
+
+# A sorted copy leaves its input alone.
+let before = [3, 1, 2]
+let after = sorted_int(before)
+println(before)
+println(after)
+
+println(mean_float([1.0, 2.0, 4.0]))
+println(sum_float([0.5, 0.25]))
+println(min_float([2.5, 1.5]))
+println(max_float([2.5, 1.5]))
+
+# ---------- strings ----------
+
+println(is_empty(""))
+println(is_empty("x"))
+println(is_blank("   "))
+println(is_blank(" x "))
+println(repeat("ab", 3))
+println(repeat("ab", 0))
+println(eq_ignore_case("Hello", "hELLO"))
+println(eq_ignore_case("a", "b"))
+println(pad_left("7", 3, "0"))
+println(pad_right("x", 4, "."))
+println(pad_left("already wide", 3, "0"))
+println(center("hi", 6, "-"))
+println(line("=", 10))
+
+# ---------- the modules compose ----------
+
+# A module imported twice is spliced once, so this does not redeclare
+# anything: strings is pulled in directly above and again through io.
+let widths = [3, 1, 2]
+println(pad_left(str(max_int(widths)), 4, " "))
+println(sorted_int(reverse_int(sorted_int(xs))))

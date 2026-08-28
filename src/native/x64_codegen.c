@@ -1205,7 +1205,14 @@ static void gen_for(ASTNode *n) {
 
     /* `for x in <array>`: the array and the index live in hidden slots so
        they survive the body, which is free to reassign anything visible. */
-    if (!range && n->condition && concrete(ty(n->condition)) == TYPE_ARRAY) {
+    /* An unknown collection type is taken to be an array. A function that is
+       imported but never called has no call site to infer its parameter from,
+       and refusing to compile it would make importing a module cost more than
+       using it. Strings are the only other thing `for x in y` accepts and
+       this backend does not support iterating one either way. */
+    DataType coll = n->condition ? ty(n->condition) : TYPE_UNKNOWN;
+    if (!range && n->condition &&
+        (coll == TYPE_ARRAY || coll == TYPE_UNKNOWN)) {
         DataType elem = elem_type_of(n->condition);
         int arr, idx, var;
         {
@@ -1437,8 +1444,17 @@ static void emit_function(ASTNode *fn, const char *name) {
         int argc = fn->child_count > 6 ? 6 : fn->child_count;
         for (int i = 0; i < argc; i++) {
             ASTNode *p = fn->children[i];
+            /* Left unknown rather than defaulted to int when the parameter
+               has no inferred type, so that a use site can still tell "no
+               information" from "an integer". */
             Local *l = loc_declare(p->value, concrete(p->data_type));
-            l->type = concrete(p->data_type);
+            l->type = p->data_type != TYPE_UNKNOWN ? concrete(p->data_type)
+                                                   : TYPE_UNKNOWN;
+            /* An array parameter also carries what is in the array, or every
+               element is read back as an integer -- which turns a float into
+               its bit pattern. */
+            if (l->type == TYPE_ARRAY && p->elem_type != TYPE_UNKNOWN)
+                l->elem = p->elem_type;
             e_mov_mem_r(T, RBP, slot_disp(l), ARG_REGS[i]);
         }
         if (fn->child_count > 6)

@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "sub_compiler.h"
 #include "windows_compat.h"
+#include "module.h"
 
 #include <stdarg.h>
 
@@ -999,6 +1000,7 @@ static ASTNode* parse_function(ParserState *state) {
                 DataType dt = data_type_from_token(type_tok);
                 if (dt != TYPE_UNKNOWN) {
                     param->data_type = dt;
+                    param->explicit_type = 1;
                     advance(state);
                 } else if (match(state, TOKEN_IDENTIFIER)) {
                     param->metadata = strdup(type_tok->value);
@@ -1035,6 +1037,7 @@ static ASTNode* parse_function(ParserState *state) {
         DataType dt = data_type_from_token(type_tok);
         if (dt != TYPE_UNKNOWN) {
             func->data_type = dt;
+            func->explicit_type = 1;
             advance(state);
         } else if (match(state, TOKEN_IDENTIFIER)) {
             func->metadata = strdup(type_tok->value);
@@ -1591,26 +1594,75 @@ static ASTNode* parse_import(ParserState *state) {
         return NULL;
     }
 
-    /* Build "import <module>" as the node value */
-    size_t len = 7 + strlen(module_name) + 1; /* "import " + name + "\0" */
-    char *import_str = malloc(len);
-    if (!import_str) return NULL;
-    snprintf(import_str, len, "import %s", module_name);
+    /* Resolve and splice. The module's statements are returned inside an
+       AST_PROGRAM, which parser_parse() unwraps into the importing program so
+       the result is flat: a module's functions are ordinary functions and a
+       module's `let` is an ordinary global. */
+    char *tried = NULL;
+    char *path = module_resolve(module_name, module_current_source(), &tried);
+    if (!path) {
+        parser_error(state, "cannot find module '%s'; looked in:\n%s",
+                     module_name, tried ? tried : "  (nowhere)");
+        free(tried);
+        return NULL;
+    }
+    free(tried);
 
-    ASTNode *node = create_node(AST_VAR_DECL, start, import_str);
-    free(import_str);
-    if (!node) return NULL;
+    if (module_in_progress(path)) {
+        parser_error(state, "import cycle: '%s' is already being imported",
+                     module_name);
+        free(path);
+        return NULL;
+    }
+    /* Importing the same module twice is normal -- two modules both wanting
+       `math` -- and splicing it twice would redeclare everything in it. */
+    if (module_already_included(path)) {
+        free(path);
+        ASTNode *empty = create_node(AST_PROGRAM, start, "module");
+        if (empty) { empty->line = start->line; empty->column = start->column; }
+        return empty;
+    }
 
-    /* Use metadata to mark this as an import statement */
-    node->metadata = strdup("import");
-    if (!node->metadata) {
-        parser_free_ast(node);
+    char *src = module_read(path);
+    if (!src) {
+        parser_error(state, "cannot read module '%s' (%s)", module_name, path);
+        free(path);
         return NULL;
     }
 
-    node->line = start->line;
-    node->column = start->column;
-    return node;
+    int ntok = 0;
+    Token *toks = lexer_tokenize(src, &ntok);
+    free(src);
+    if (!toks) {
+        parser_error(state, "module '%s' could not be tokenized", module_name);
+        free(path);
+        return NULL;
+    }
+
+    /* Imports inside the module resolve relative to the module, not to
+       whatever imported it. */
+    const char *outer = module_current_source();
+    char *saved = outer ? strdup(outer) : NULL;
+    module_set_source(path);
+    module_push(path);
+
+    ASTNode *mod = parser_parse(toks, ntok);
+
+    module_pop();
+    module_set_source(saved);
+    free(saved);
+    lexer_free_tokens(toks, ntok);
+    free(path);
+
+    if (!mod) {
+        parser_error(state, "module '%s' failed to parse", module_name);
+        return NULL;
+    }
+    if (mod->value) { free(mod->value); }
+    mod->value = strdup("module");
+    mod->line = start->line;
+    mod->column = start->column;
+    return mod;
 }
 
 static ASTNode* parse_class(ParserState *state) {
@@ -1745,6 +1797,30 @@ ASTNode* parser_parse(Token *tokens, int token_count) {
         if (match(&state, TOKEN_EOF)) break;
 
         ASTNode *stmt = parse_statement(&state);
+
+        /* An import parses to the module's own program. Splice its statements
+           in one by one rather than nesting them: every backend separates
+           top-level functions from top-level code by walking this list, and a
+           module's functions have to land in that walk. */
+        if (stmt && stmt->type == AST_PROGRAM) {
+            ASTNode *next = NULL;
+            for (ASTNode *m = stmt->body; m; m = next) {
+                next = m->next;
+                m->next = NULL;
+                if (!first_stmt) { first_stmt = m; last_stmt = m; }
+                else { last_stmt->next = m; last_stmt = m; }
+                add_child(root, m);
+            }
+            /* The children[] array shares those nodes with the list just
+               spliced; drop it so freeing the wrapper does not free them. */
+            free(stmt->children);
+            stmt->children = NULL;
+            stmt->child_count = 0;
+            stmt->body = NULL;
+            parser_free_ast(stmt);
+            continue;
+        }
+
         if (stmt) {
             if (!first_stmt) {
                 first_stmt = stmt;

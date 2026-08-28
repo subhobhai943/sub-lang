@@ -194,6 +194,16 @@ typedef struct ASTNode {
     ASTNodeType type;
     char *value;
     DataType data_type;
+    /* For an array-typed node, what its elements are. Set on a parameter from
+       the arguments it is called with, so a function taking an array of floats
+       does not read them back as integers. TYPE_UNKNOWN when not known, which
+       is what calloc leaves. */
+    DataType elem_type;
+    /* Set when the source wrote the type down. Inference must not overwrite
+       it: a parameter annotated `s: string` was being re-typed from its call
+       sites, so one caller passing a number turned the annotation into a
+       number and the body's len(s) with it. */
+    int explicit_type;
     struct ASTNode *left;
     struct ASTNode *right;
     struct ASTNode *next;

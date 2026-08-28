@@ -58,7 +58,12 @@ jobs:
         run: |
           Copy-Item sub.exe, subc.exe, subi.exe, LICENSE, README.md `
                     -Destination installer\windows -Force
+          # The standard library ships too; sub-lang.wxs names its files
+          # relative to the bindpath, which is installer\windows.
+          Copy-Item stdlib -Destination installer\windows\stdlib `
+                    -Recurse -Force
           Get-ChildItem installer\windows
+          Get-ChildItem installer\windows\stdlib
 
       - name: Install WiX Toolset v4
         shell: pwsh
@@ -120,7 +125,8 @@ jobs:
 
           $files = Get-MsiRows "SELECT FileName FROM File"
           Write-Host "Files:       $($files -join ', ')"
-          foreach ($want in @("sub.exe", "subc.exe", "subi.exe")) {
+          foreach ($want in @("sub.exe", "subc.exe", "subi.exe",
+                              "math.sb", "arrays.sb", "strings.sb", "io.sb")) {
             if (-not ($files -match [regex]::Escape($want))) {
               throw "$want is missing from the MSI"
             }

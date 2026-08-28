@@ -43,6 +43,7 @@
   - [Embedded Code Blocks](#embedded-code-blocks)
   - [Cross-Platform UI Declarations](#cross-platform-ui-declarations)
 - [Built-in Functions](#built-in-functions)
+- [Standard Library](#standard-library)
 - [Supported Transpilation Targets](#supported-transpilation-targets)
 - [Numbers, division and errors](#numbers-division-and-errors)
 - [Testing](#testing)
@@ -66,7 +67,7 @@
 
 - **A compiler, not a wrapper**: on x86-64 Linux `subc` goes from `.sb` straight to machine code in one process. Nothing is shelled out to, so the machine that compiles a SUB program needs no toolchain beyond `subc` itself.
 - **Dynamic & Static Flexibility**: SUB is dynamically typed, but a shared inference pass gives every function a concrete signature when targeting a statically typed language - so `fn add(a, b)` becomes `long add(long, long)` in C and `fn add(a: i64, b: i64) -> i64` in Rust without annotations.
-- **Rich Standard Library**: 25+ built-in utility functions, string methods, math wrappers, and dynamic array operations.
+- **Standard Library**: four modules — `math`, `arrays`, `strings`, `io` — written in SUB and verified through every backend, loaded with `import`.
 - **Embedded Foreign Code**: Seamlessly mix foreign C, Go, or Python directly inside `.sb` files using `#embed` blocks.
 - **Cross-Platform UI Tree**: First-class declarative syntax for UI windows, labels, buttons, and inputs.
 
@@ -459,6 +460,78 @@ ui.window(title="SUB App", width=800, height=600) {
 | `push(arr, val)` / `pop(arr)` | Array operations | `push(arr, 10)` |
 | `join(arr, sep)` | Join array to string | `join(arr, ", ")` |
 | `trim(s)` / `char_at(s, i)` | String operations | `trim(" hi ")` |
+
+Note that the character-level string builtins — `substring`, `char_at`,
+`contains`, `replace`, `split`, `join` — currently work under `subi` only.
+They are unmapped or unimplemented in the compiled backends, so a program
+using them interprets but does not compile.
+
+---
+
+## Standard Library
+
+Four modules, written in SUB, in `stdlib/`. Every function in them produces
+identical output through all ten backends — the conformance suite checks the
+library the same way it checks the language.
+
+```sub
+import "math"
+import "arrays"
+import "strings"
+import "io"
+
+heading("primes")
+let primes = []
+for n in range(2, 30) {
+    if is_prime(n) {
+        push(primes, n)
+    }
+}
+println(primes)
+
+let scores = [72, 91, 68, 91, 55, 83]
+println(sorted_int(scores))
+println(pad_left(str(max_int(scores)), 5, " "))
+ok("done")
+```
+
+| Module | What it has |
+|---|---|
+| `math` | `PI`, `E`, `TAU`, `gcd`, `lcm`, `factorial`, `fib`, `is_prime`, `ipow`, `clamp`, `sign`, `hypot`, `close_to`, `round_to` |
+| `arrays` | `sum_int`/`sum_float`, `min_*`/`max_*`, `mean_float`, `index_of_int`, `sorted_int`, `unique_int`, `reverse_int`, `slice_int`, `concat_int` |
+| `strings` | `repeat`, `pad_left`, `pad_right`, `center`, `eq_ignore_case`, `is_empty`, `is_blank` |
+| `io` | ANSI colour, `info`/`ok`/`warn`/`fail`, `heading`, `row`, `rule` |
+
+`examples/stdlib_tour.sb` exercises all four; `stdlib/README.md` documents
+every function, and is candid about what is missing and why.
+
+### import
+
+An import is resolved and spliced at parse time, so what each backend compiles
+is one flat program: a module's functions are ordinary functions and its `let`
+is an ordinary global. A module is looked for beside the importing file first,
+then in `$SUB_PATH`, then in the `stdlib/` that ships beside the executable
+(or `../lib/sub/stdlib` after `make install`). The `.sb` extension is
+optional, importing the same module twice splices it once, and a cycle is
+reported rather than followed.
+
+Writing your own module is just writing a `.sb` file:
+
+```sub
+# geometry.sb
+fn area_of_circle(r: float): float {
+    return 3.141592653589793 * r * r
+}
+```
+
+```sub
+import "geometry"
+println(area_of_circle(2.0))
+```
+
+Annotate parameter and return types in a module you intend to compile: the
+statically typed backends need a concrete type for each, and an explicit
+annotation is never overridden by inference.
 
 ---
 

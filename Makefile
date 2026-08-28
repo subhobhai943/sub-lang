@@ -16,19 +16,19 @@ LDFLAGS = -lm
 CFLAGS += $(EXTRA_CFLAGS)
 
 # Source files for the main compiler/transpiler (sub)
-COMPILER_SRC = src/compilers/sub.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_switch.c src/codegen/codegen_globals.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
+COMPILER_SRC = src/compilers/sub.c src/core/interpreter.c src/core/lexer.c src/core/module.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_switch.c src/codegen/codegen_globals.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
 COMPILER_OBJ = $(COMPILER_SRC:.c=.o)
 COMPILER_TARGET = sub
 
 # Source files for the native compiler (subc). src/native/ is the built-in
 # x86-64 backend: it emits machine code and writes the ELF itself, so a
 # compiled SUB program needs no C toolchain on the machine that runs subc.
-NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/native/x64_emit.c src/native/x64_runtime.c src/native/x64_codegen.c src/native/elf64.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_switch.c src/codegen/codegen_globals.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
+NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/native/x64_emit.c src/native/x64_runtime.c src/native/x64_codegen.c src/native/elf64.c src/core/interpreter.c src/core/lexer.c src/core/module.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_switch.c src/codegen/codegen_globals.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
 NATIVE_COMPILER_OBJ = $(NATIVE_COMPILER_SRC:.c=.o)
 NATIVE_COMPILER_TARGET = subc
 
 # Source files for the interpreter (subi)
-INTERP_SRC = src/compilers/subi.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/core/utils.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_switch.c src/codegen/codegen_globals.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c
+INTERP_SRC = src/compilers/subi.c src/core/interpreter.c src/core/lexer.c src/core/module.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/core/utils.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_switch.c src/codegen/codegen_globals.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c
 INTERP_OBJ = $(INTERP_SRC:.c=.o)
 INTERP_TARGET = subi
 
@@ -49,7 +49,7 @@ else
     INTERP_TARGET = subi.exe
 endif
 
-.PHONY: all clean compiler native_compiler interpreter help
+.PHONY: all clean compiler native_compiler interpreter install uninstall help
 
 # Default target - build all three
 all: compiler native_compiler interpreter
@@ -96,6 +96,26 @@ clean:
 	@rm -f *.o
 	@echo "Clean complete."
 
+# Install. The binaries go in bin/ and the standard library in
+# lib/sub/stdlib, which is the second of the two places the module resolver
+# looks for it relative to the executable -- so `import "math"` works from
+# anywhere after this.
+PREFIX ?= /usr/local
+
+install: all
+	@install -d "$(DESTDIR)$(PREFIX)/bin"
+	@install -m 755 sub subc subi "$(DESTDIR)$(PREFIX)/bin/"
+	@install -d "$(DESTDIR)$(PREFIX)/lib/sub/stdlib"
+	@install -m 644 stdlib/*.sb "$(DESTDIR)$(PREFIX)/lib/sub/stdlib/"
+	@echo "Installed to $(DESTDIR)$(PREFIX)"
+
+uninstall:
+	@rm -f "$(DESTDIR)$(PREFIX)/bin/sub" \
+	       "$(DESTDIR)$(PREFIX)/bin/subc" \
+	       "$(DESTDIR)$(PREFIX)/bin/subi"
+	@rm -rf "$(DESTDIR)$(PREFIX)/lib/sub"
+	@echo "Removed from $(DESTDIR)$(PREFIX)"
+
 # Help
 help:
 	@echo "SUB Language Build System"
@@ -105,6 +125,8 @@ help:
 	@echo "  compiler         - Build the main compiler/transpiler (sub)"
 	@echo "  native_compiler  - Build the native compiler (subc)"
 	@echo "  interpreter      - Build the interpreter (subi)"
+	@echo "  install          - Install to PREFIX (default /usr/local)"
+	@echo "  uninstall        - Remove an installation"
 	@echo "  clean            - Remove build artifacts"
 	@echo "  help             - Show this help message"
 	@echo ""

@@ -43,6 +43,26 @@ static Globals g_globals;
 /* A local is declared `auto x = init`, which needs the initializer to be
    there. A global is declared once at namespace scope and assigned later in
    main(), so it has to name a concrete type instead. */
+/* The concrete type of a parameter whose type is known, or NULL when it is
+   not and the template fallback below has to stand in. */
+static const char *cpp_known_type(ASTNode *n) {
+    static char buf[4][64];
+    static int slot = 0;
+    if (!n) return NULL;
+    switch (n->data_type) {
+    case TYPE_INT:    return "long long";
+    case TYPE_FLOAT:  return "double";
+    case TYPE_BOOL:   return "bool";
+    case TYPE_STRING: return "std::string";
+    case TYPE_VOID:   return "void";
+    case TYPE_ARRAY:
+        slot = (slot + 1) % 4;
+        snprintf(buf[slot], sizeof buf[0], "%s", cpp_array_type(n->elem_type));
+        return buf[slot];
+    default:          return NULL;
+    }
+}
+
 static const char* cpp_decl_type(ASTNode *node) {
     DataType t = node->data_type;
     if (t == TYPE_UNKNOWN && node->right) t = infer_expr_type(node->right);
@@ -57,7 +77,7 @@ static const char* cpp_decl_type(ASTNode *node) {
 
 static const CppBuiltin* cpp_builtin(const char *name) {
     static const CppBuiltin table[] = {
-        {"str","std::to_string(",")"},   {"to_string","std::to_string(",")"},
+        {"str","sub_str(",")"},         {"to_string","sub_str(",")"},
         {"int","(long long)(",")"},      {"float","(double)(",")"},
         {"bool","(bool)(",")"},          {"len","(long long)(",").size()"},
         {"length","(long long)(",").size()"},
@@ -486,28 +506,46 @@ static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent) {
             break;
         }
 
-        case AST_FUNCTION_DECL:
+        case AST_FUNCTION_DECL: {
             /* `auto` parameter types require C++20 abbreviated function
                templates, which callers don't reliably compile with
-               (no -std=c++20 in the documented/CI build commands). Use an
-               explicit template instead, which works under any C++11+
-               default. */
+               (no -std=c++20 in the documented/CI build commands). A
+               parameter whose type is known gets that type; only the ones
+               still unknown fall back to a template parameter, which works
+               under any C++11+ default.
+
+               The return type is named too when it is known. Deduced `auto`
+               needs every `return` in the body to agree exactly, and
+               `return 0` beside `return 0 - m` deduces int and then long long
+               -- which is an error, not a widening. */
+            int ntemplate = 0;
             if (node->children && node->child_count > 0) {
+                for (int i = 0; i < node->child_count; i++)
+                    if (!cpp_known_type(node->children[i])) ntemplate++;
+            }
+            if (ntemplate > 0) {
                 sb_append(sb, "\ntemplate<");
+                int emitted = 0;
                 for (int i = 0; i < node->child_count; i++) {
-                    if (i > 0) sb_append(sb, ", ");
+                    if (cpp_known_type(node->children[i])) continue;
+                    if (emitted++) sb_append(sb, ", ");
                     sb_append(sb, "typename T%d", i);
                 }
                 sb_append(sb, ">\n");
             } else {
                 sb_append(sb, "\n");
             }
-            sb_append(sb, "auto %s(", node->value ? node->value : "func");
+            const char *ret = cpp_known_type(node);
+            sb_append(sb, "%s %s(", ret ? ret : "auto",
+                      node->value ? node->value : "func");
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
-                    sb_append(sb, "T%d %s", i,
-                              node->children[i]->value ? node->children[i]->value : "arg");
+                    const char *pt = cpp_known_type(node->children[i]);
+                    if (pt) sb_append(sb, "%s %s", pt,
+                                      node->children[i]->value ? node->children[i]->value : "arg");
+                    else sb_append(sb, "T%d %s", i,
+                                   node->children[i]->value ? node->children[i]->value : "arg");
                 }
             }
             sb_append(sb, ") {\n");
@@ -516,6 +554,7 @@ static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent) {
             }
             sb_append(sb, "}\n");
             break;
+        }
 
         case AST_IF_STMT:
             indent_code(sb, indent);
@@ -831,6 +870,7 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
     sb_append(sb, "#include <algorithm>\n");
     sb_append(sb, "#include <cctype>\n");
     sb_append(sb, "#include <cstdlib>\n");
+    sb_append(sb, "#include <cstdio>\n");
     /* <string> and <vector> unconditionally: the array helpers below are
        templates over std::vector<T> and are emitted whether or not the
        program uses an array, and a template still has to name its types. */
@@ -900,6 +940,38 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
         return NULL;
     }
 
+    /* SUB exposes upper/lower/trim as plain functions; C++ has no such free
+       functions for std::string, so generate them. */
+    /* std::to_string(double) is %f: str(5.0) came out "5.000000" where the
+       interpreter and the other nine backends say "5". printf's %g is what
+       they all agree on. */
+    sb_append(sb, "\ntemplate<typename T> static std::string sub_str(T v);\n");
+    sb_append(sb, "static std::string sub_str(double v) {\n");
+    sb_append(sb, "    char buf[64];\n");
+    sb_append(sb, "    snprintf(buf, sizeof buf, \"%%g\", v);\n");
+    sb_append(sb, "    return std::string(buf);\n}\n");
+    /* A template for the integer types: overloads for long long and double
+       alone are ambiguous for a plain int, which converts to both. A
+       non-template overload still wins for an exact match, so double, bool
+       and string keep their own. */
+    sb_append(sb, "template<typename T> static std::string sub_str(T v) "
+                  "{ return std::to_string(v); }\n");
+    sb_append(sb, "static std::string sub_str(bool v) "
+                  "{ return v ? \"true\" : \"false\"; }\n");
+    sb_append(sb, "static std::string sub_str(const std::string &v) "
+                  "{ return v; }\n");
+
+    sb_append(sb, "\nstatic std::string sub_upper(std::string s) {\n");
+    sb_append(sb, "    std::transform(s.begin(), s.end(), s.begin(), ::toupper);\n");
+    sb_append(sb, "    return s;\n}\n");
+    sb_append(sb, "\nstatic std::string sub_lower(std::string s) {\n");
+    sb_append(sb, "    std::transform(s.begin(), s.end(), s.begin(), ::tolower);\n");
+    sb_append(sb, "    return s;\n}\n");
+    sb_append(sb, "\nstatic std::string sub_trim(std::string s) {\n");
+    sb_append(sb, "    size_t b = s.find_first_not_of(\" \\t\\n\\r\");\n");
+    sb_append(sb, "    size_t e = s.find_last_not_of(\" \\t\\n\\r\");\n");
+    sb_append(sb, "    return b == std::string::npos ? \"\" : s.substr(b, e - b + 1);\n}\n");
+
     if (ast->type == AST_PROGRAM) {
         /* Pass 0: the top-level variables, declared at namespace scope so
            that the functions below can name them. The initializer stays in
@@ -916,7 +988,11 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
         for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
             if (stmt->type == AST_FUNCTION_DECL ||
                 stmt->type == AST_CLASS_DECL) {
+                /* Resolve identifiers in the body against this function's
+                   parameters; see infer_enter_function(). */
+                ASTNode *prev_fn = infer_enter_function(stmt);
                 generate_node_cpp(sb, stmt, 0);
+                infer_enter_function(prev_fn);
             }
         }
         /* Pass 2: collect all non-function top-level statements for main() */
@@ -928,18 +1004,6 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
         }
     }
 
-    /* SUB exposes upper/lower/trim as plain functions; C++ has no such free
-       functions for std::string, so generate them. */
-    sb_append(sb, "\nstatic std::string sub_upper(std::string s) {\n");
-    sb_append(sb, "    std::transform(s.begin(), s.end(), s.begin(), ::toupper);\n");
-    sb_append(sb, "    return s;\n}\n");
-    sb_append(sb, "\nstatic std::string sub_lower(std::string s) {\n");
-    sb_append(sb, "    std::transform(s.begin(), s.end(), s.begin(), ::tolower);\n");
-    sb_append(sb, "    return s;\n}\n");
-    sb_append(sb, "\nstatic std::string sub_trim(std::string s) {\n");
-    sb_append(sb, "    size_t b = s.find_first_not_of(\" \\t\\n\\r\");\n");
-    sb_append(sb, "    size_t e = s.find_last_not_of(\" \\t\\n\\r\");\n");
-    sb_append(sb, "    return b == std::string::npos ? \"\" : s.substr(b, e - b + 1);\n}\n");
     sb_append(sb, "int main() {\n");
     /* SUB spells booleans true/false; C++ streams default to 1/0, which made
        the same program print differently than the interpreter. */

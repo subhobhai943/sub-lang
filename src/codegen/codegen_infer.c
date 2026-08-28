@@ -126,9 +126,19 @@ static int builtin_return_type(const char *name, DataType *out) {
 
 #define MAX_TRACKED_VARS 1024
 
+/* The function whose body is being walked or generated, NULL at top level.
+   Declared here because the type tables below are keyed by it. */
+static ASTNode *g_current_fn;
+
 typedef struct {
     const char *name;
     DataType    type;
+    /* Which function declared it, NULL for a top-level variable. Two
+       functions may each have a local called `out` of different types --
+       arrays.sb and strings.sb both do -- and a table keyed by name alone
+       answers for whichever was recorded last. That is how len(out) on an
+       array came out as strlen(). */
+    ASTNode    *owner;
 } VarEntry;
 
 static struct {
@@ -146,20 +156,28 @@ static struct {
 static void elem_record(const char *name, DataType t) {
     if (!name || t == TYPE_UNKNOWN) return;
     for (int i = 0; i < g_elems.count; i++)
-        if (strcmp(g_elems.items[i].name, name) == 0) {
+        if (g_elems.items[i].owner == g_current_fn &&
+            strcmp(g_elems.items[i].name, name) == 0) {
             g_elems.items[i].type = type_merge(g_elems.items[i].type, t);
             return;
         }
     if (g_elems.count >= MAX_TRACKED_VARS) return;
-    g_elems.items[g_elems.count].name = name;
-    g_elems.items[g_elems.count].type = t;
+    g_elems.items[g_elems.count].name  = name;
+    g_elems.items[g_elems.count].type  = t;
+    g_elems.items[g_elems.count].owner = g_current_fn;
     g_elems.count++;
 }
 
 static DataType elem_lookup(const char *name) {
     if (!name) return TYPE_UNKNOWN;
+    /* This function's own first, then a top-level one. */
     for (int i = 0; i < g_elems.count; i++)
-        if (strcmp(g_elems.items[i].name, name) == 0)
+        if (g_elems.items[i].owner == g_current_fn &&
+            strcmp(g_elems.items[i].name, name) == 0)
+            return g_elems.items[i].type;
+    for (int i = 0; i < g_elems.count; i++)
+        if (g_elems.items[i].owner == NULL &&
+            strcmp(g_elems.items[i].name, name) == 0)
             return g_elems.items[i].type;
     return TYPE_UNKNOWN;
 }
@@ -167,21 +185,28 @@ static DataType elem_lookup(const char *name) {
 static void var_record(const char *name, DataType t) {
     if (!name || t == TYPE_UNKNOWN) return;
     for (int i = 0; i < g_vars.count; i++) {
-        if (strcmp(g_vars.items[i].name, name) == 0) {
+        if (g_vars.items[i].owner == g_current_fn &&
+            strcmp(g_vars.items[i].name, name) == 0) {
             g_vars.items[i].type = type_merge(g_vars.items[i].type, t);
             return;
         }
     }
     if (g_vars.count >= MAX_TRACKED_VARS) return;
-    g_vars.items[g_vars.count].name = name;
-    g_vars.items[g_vars.count].type = t;
+    g_vars.items[g_vars.count].name  = name;
+    g_vars.items[g_vars.count].type  = t;
+    g_vars.items[g_vars.count].owner = g_current_fn;
     g_vars.count++;
 }
 
 static DataType var_lookup(const char *name) {
     if (!name) return TYPE_UNKNOWN;
+    /* This function's own first, then a top-level one. */
     for (int i = 0; i < g_vars.count; i++)
-        if (strcmp(g_vars.items[i].name, name) == 0) return g_vars.items[i].type;
+        if (g_vars.items[i].owner == g_current_fn &&
+            strcmp(g_vars.items[i].name, name) == 0) return g_vars.items[i].type;
+    for (int i = 0; i < g_vars.count; i++)
+        if (g_vars.items[i].owner == NULL &&
+            strcmp(g_vars.items[i].name, name) == 0) return g_vars.items[i].type;
     return TYPE_UNKNOWN;
 }
 
@@ -206,8 +231,8 @@ static int g_expr_depth = 0;
    are most often the function's own parameters, and the parameter declaration
    is where the inferred type lives - the identifier nodes referencing it are
    left untyped by the parser. Without this, `return n` looks untyped and the
-   whole function degrades to the generic fallback type. */
-static ASTNode *g_current_fn = NULL;
+   whole function degrades to the generic fallback type. (Declared above, with
+   the type tables that are keyed by it.) */
 
 /* The parser marks un-annotated declarations TYPE_AUTO and leaves other nodes
    TYPE_UNKNOWN. Both mean "nothing known yet", so every check below has to
@@ -218,6 +243,22 @@ static int type_is_unresolved(DataType t) {
 }
 
 DataType infer_elem_type(ASTNode *expr);
+
+ASTNode *infer_enter_function(ASTNode *fn) {
+    ASTNode *prev = g_current_fn;
+    g_current_fn = fn;
+    return prev;
+}
+
+/* The element type of an array parameter of the function being generated. */
+static DataType param_elem_in_current_fn(const char *name) {
+    if (!g_current_fn || !name) return TYPE_UNKNOWN;
+    for (int i = 0; i < g_current_fn->child_count; i++) {
+        ASTNode *p = g_current_fn->children[i];
+        if (p && p->value && strcmp(p->value, name) == 0) return p->elem_type;
+    }
+    return TYPE_UNKNOWN;
+}
 
 static DataType param_type_in_current_fn(const char *name) {
     if (!g_current_fn || !name) return TYPE_UNKNOWN;
@@ -330,11 +371,15 @@ DataType infer_expr_type(ASTNode *expr) {
             break;
 
         case AST_IDENTIFIER:
-            /* The semantic pass annotates identifiers it could resolve;
-               otherwise fall back to the enclosing function's parameters. */
-            result = expr->data_type;
+            /* A parameter of the function being generated wins outright. The
+               annotation on the use site and the var registry below are both
+               keyed by name alone and shared across every function, so with a
+               library in scope they answer for the wrong `a`: strings.sb
+               declares `a: string`, which made len(a) in arrays.sb compile to
+               strlen() over a SubArray. */
+            result = param_type_in_current_fn(expr->value);
             if (type_is_unresolved(result))
-                result = param_type_in_current_fn(expr->value);
+                result = expr->data_type;
             if (type_is_unresolved(result))
                 result = var_lookup(expr->value);
             break;
@@ -409,10 +454,17 @@ static void propagate_call_sites(ASTNode *node) {
                 ASTNode *arg   = node->children[i];
                 if (!param || !arg) continue;
                 /* Never override a type the programmer wrote down. */
-                if (param->metadata) continue;
+                if (param->metadata || param->explicit_type) continue;
                 DataType at = infer_expr_type(arg);
                 if (!type_is_unresolved(at))
                     param->data_type = type_merge(param->data_type, at);
+                /* An array parameter also needs to know what is in the array,
+                   or the body reads every element back as the default type. */
+                if (at == TYPE_ARRAY) {
+                    DataType et = infer_elem_type(arg);
+                    if (!type_is_unresolved(et))
+                        param->elem_type = type_merge(param->elem_type, et);
+                }
             }
         }
     }
@@ -433,6 +485,76 @@ static void propagate_call_sites(ASTNode *node) {
 /* Look for uses of `pname` inside `node` that reveal its type, e.g.
    `"Hello, " + name` implies name is a string. Used only when no call
    site pinned the parameter down. */
+/* Names bound to an element of `arr`: the variable of a `for x in arr` loop,
+   and any `let x = arr[...]`. What those are used for is what the array
+   holds. */
+static void bind_element_names(ASTNode *n, const char *arr,
+                               const char *out[], int max, int *count) {
+    if (!n || *count >= max) return;
+
+    if (n->type == AST_FOR_STMT && n->value && n->condition &&
+        n->condition->type == AST_IDENTIFIER && n->condition->value &&
+        strcmp(n->condition->value, arr) == 0)
+        out[(*count)++] = n->value;
+
+    if ((n->type == AST_VAR_DECL || n->type == AST_CONST_DECL) && n->value &&
+        n->right && n->right->type == AST_ARRAY_ACCESS &&
+        n->right->left && n->right->left->type == AST_IDENTIFIER &&
+        n->right->left->value &&
+        strcmp(n->right->left->value, arr) == 0 && *count < max)
+        out[(*count)++] = n->value;
+
+    for (int i = 0; i < n->child_count; i++)
+        bind_element_names(n->children[i], arr, out, max, count);
+    bind_element_names(n->left, arr, out, max, count);
+    bind_element_names(n->right, arr, out, max, count);
+    bind_element_names(n->condition, arr, out, max, count);
+    bind_element_names(n->body, arr, out, max, count);
+    bind_element_names(n->next, arr, out, max, count);
+}
+
+/* An array handed straight to another function holds whatever that
+   function's parameter was found to hold. mean_float() gives no other clue:
+   it only passes its array to sum_float() and divides by its length. */
+static void elem_from_pass_through(ASTNode *n, const char *pname, DataType *acc) {
+    if (!n) return;
+    if (n->type == AST_CALL_EXPR && n->value) {
+        ASTNode *decl = fn_lookup(n->value);
+        if (decl) {
+            int c = n->child_count < decl->child_count
+                        ? n->child_count : decl->child_count;
+            for (int i = 0; i < c; i++) {
+                ASTNode *arg = n->children[i];
+                if (arg && arg->type == AST_IDENTIFIER && arg->value &&
+                    strcmp(arg->value, pname) == 0 && decl->children[i])
+                    *acc = type_merge(*acc, decl->children[i]->elem_type);
+            }
+        }
+    }
+    for (int i = 0; i < n->child_count; i++)
+        elem_from_pass_through(n->children[i], pname, acc);
+    elem_from_pass_through(n->left, pname, acc);
+    elem_from_pass_through(n->right, pname, acc);
+    elem_from_pass_through(n->condition, pname, acc);
+    elem_from_pass_through(n->body, pname, acc);
+    elem_from_pass_through(n->next, pname, acc);
+}
+
+/* Whether the body has a bare `return <name>`. With an explicit return type
+   that pins the name down, which is the only clue min_float() gives about
+   what its array holds. */
+static int returns_name(ASTNode *n, const char *name) {
+    if (!n || !name) return 0;
+    if (n->type == AST_RETURN_STMT && n->right &&
+        n->right->type == AST_IDENTIFIER && n->right->value &&
+        strcmp(n->right->value, name) == 0) return 1;
+    for (int i = 0; i < n->child_count; i++)
+        if (returns_name(n->children[i], name)) return 1;
+    return returns_name(n->left, name) || returns_name(n->right, name) ||
+           returns_name(n->condition, name) || returns_name(n->body, name) ||
+           returns_name(n->next, name);
+}
+
 static void scan_param_usage(ASTNode *node, const char *pname, DataType *acc) {
     if (!node || !pname) return;
 
@@ -456,6 +578,31 @@ static void scan_param_usage(ASTNode *node, const char *pname, DataType *acc) {
                 *acc = type_merge(*acc, ot);
         }
     }
+
+    /* Iterating it, indexing it, or asking for its length: all three say the
+       parameter is an array. Without this a function whose only clue is
+       `for v in a` had its parameter defaulted to a number, and the native
+       backend then refused to compile the loop -- which meant importing a
+       module cost more than calling into it, since an uncalled function has
+       no call site to be inferred from. */
+    if (node->type == AST_FOR_STMT && node->condition &&
+        node->condition->type == AST_IDENTIFIER && node->condition->value &&
+        strcmp(node->condition->value, pname) == 0)
+        *acc = type_merge(*acc, TYPE_ARRAY);
+
+    if (node->type == AST_ARRAY_ACCESS && node->left &&
+        node->left->type == AST_IDENTIFIER && node->left->value &&
+        strcmp(node->left->value, pname) == 0)
+        *acc = type_merge(*acc, TYPE_ARRAY);
+
+    if (node->type == AST_CALL_EXPR && node->value &&
+        (strcmp(node->value, "push") == 0 || strcmp(node->value, "pop") == 0 ||
+         strcmp(node->value, "append") == 0) &&
+        node->child_count > 0 && node->children[0] &&
+        node->children[0]->type == AST_IDENTIFIER &&
+        node->children[0]->value &&
+        strcmp(node->children[0]->value, pname) == 0)
+        *acc = type_merge(*acc, TYPE_ARRAY);
 
     /* Passing the parameter straight through to another function tells us
        what that function expects. */
@@ -620,6 +767,12 @@ DataType infer_elem_type(ASTNode *expr) {
     }
 
     if (expr->type == AST_IDENTIFIER) {
+        /* A parameter first: its element type came from the call sites and is
+           specific to this function, where the name-keyed registry below is
+           shared across all of them and would merge sum_int's `a` with
+           sum_float's. */
+        DataType p = param_elem_in_current_fn(expr->value);
+        if (!type_is_unresolved(p)) return p;
         DataType t = elem_lookup(expr->value);
         if (!type_is_unresolved(t)) return t;
         return TYPE_INT;
@@ -772,7 +925,7 @@ void infer_function_signatures(ASTNode *program) {
         ASTNode *fn = g_fns.items[i].decl;
         for (int p = 0; p < fn->child_count; p++) {
             ASTNode *param = fn->children[p];
-            if (!param || param->metadata) continue;
+            if (!param || param->metadata || param->explicit_type) continue;
             if (!type_is_unresolved(param->data_type)) continue;
 
             DataType acc = TYPE_UNKNOWN;
@@ -781,6 +934,49 @@ void infer_function_signatures(ASTNode *program) {
             g_current_fn = NULL;
             if (!type_is_unresolved(acc)) param->data_type = acc;
         }
+    }
+
+    /* What an array parameter holds, when no call site said.
+
+       A module is compiled along with the program that imports it, including
+       the functions that program never calls -- and an uncalled function has
+       no call site to be inferred from. Its array parameter would then be
+       taken to hold integers, so sum_float() summed floats into an integer
+       and the typed backends rejected the body. The elements themselves say
+       what they are: what the loop variable is added to, or what the function
+       returns after reading one. */
+    for (int round = 0; round < 2; round++) {
+        for (int i = 0; i < g_fns.count; i++) {
+            ASTNode *fn = g_fns.items[i].decl;
+            for (int p = 0; p < fn->child_count; p++) {
+                ASTNode *param = fn->children[p];
+                if (!param || param->data_type != TYPE_ARRAY) continue;
+                if (!type_is_unresolved(param->elem_type)) continue;
+
+                const char *names[MAX_TRACKED_VARS];
+                int n = 0;
+                bind_element_names(fn->body, param->value, names,
+                                   MAX_TRACKED_VARS, &n);
+
+                DataType acc = TYPE_UNKNOWN;
+                g_current_fn = fn;
+                for (int k = 0; k < n; k++) {
+                    scan_param_usage(fn->body, names[k], &acc);
+                    if (fn->explicit_type && !type_is_unresolved(fn->data_type) &&
+                        returns_name(fn->body, names[k]))
+                        acc = type_merge(acc, fn->data_type);
+                }
+                elem_from_pass_through(fn->body, param->value, &acc);
+                g_current_fn = NULL;
+                if (!type_is_unresolved(acc) && acc != TYPE_GENERIC)
+                    param->elem_type = acc;
+            }
+        }
+
+        /* An array handed straight to another function holds whatever that
+           function's parameter holds. */
+        for (int i = 0; i < g_fns.count; i++)
+            propagate_call_sites(g_fns.items[i].decl->body);
     }
 
     /* Anything still unknown is genuinely unconstrained - a numeric default

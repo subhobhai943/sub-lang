@@ -1,0 +1,64 @@
+# A tour of the SUB standard library.
+#
+#   subi examples/stdlib_tour.sb          # run it
+#   sub  examples/stdlib_tour.sb python   # or compile it, to any target
+#
+# `import` resolves a module next to this file first, then $SUB_PATH, then the
+# stdlib/ directory that ships beside the binary -- so this works from a
+# checkout and from an unpacked release with no configuration.
+
+import "math"
+import "arrays"
+import "strings"
+import "io"
+
+heading("math")
+
+println("gcd(48, 18)      = " + str(gcd(48, 18)))
+println("lcm(4, 6)        = " + str(lcm(4, 6)))
+println("factorial(10)    = " + str(factorial(10)))
+println("fib(30)          = " + str(fib(30)))
+println("ipow(2, 16)      = " + str(ipow(2, 16)))
+println("hypot(3.0, 4.0)  = " + str(hypot(3.0, 4.0)))
+println("round_to(pi, 3)  = " + str(round_to(PI, 3)))
+
+let primes = []
+for n in range(2, 30) {
+    if is_prime(n) {
+        push(primes, n)
+    }
+}
+print("primes under 30  = ")
+println(primes)
+
+println("")
+heading("arrays")
+
+let scores = [72, 91, 68, 91, 55, 83]
+
+println(row(["count", str(len(scores))], 8))
+println(row(["sum", str(sum_int(scores))], 8))
+println(row(["min", str(min_int(scores))], 8))
+println(row(["max", str(max_int(scores))], 8))
+# str() of an array is interpreter-only, so arrays are printed directly.
+print(pad_right("sorted", 8, " ") + "  ")
+println(sorted_int(scores))
+print(pad_right("unique", 8, " ") + "  ")
+println(unique_int(scores))
+print(pad_right("top 3", 8, " ") + "  ")
+println(slice_int(reverse_int(sorted_int(scores)), 0, 3))
+
+println("")
+heading("strings")
+
+# pad_left is what lines a column of numbers up on its right edge.
+for s in scores {
+    println(pad_left(str(s), 5, " ") + "  " + repeat("*", s / 10))
+}
+
+println("")
+heading("io")
+
+ok("everything above ran through the same library")
+info("and the same source compiles to all ten backends")
+warn("the string module is small on purpose -- see stdlib/README.md")

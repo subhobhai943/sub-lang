@@ -135,6 +135,9 @@ jobs:
           ARCHIVE_NAME="sub-${{ matrix.platform }}-${{ matrix.arch }}"
           mkdir -p "${ARCHIVE_NAME}"
           cp sub subc subi "${ARCHIVE_NAME}/"
+          # The standard library, where `import "math"` looks for it: the
+          # module resolver checks stdlib/ beside the executable.
+          cp -r stdlib "${ARCHIVE_NAME}/"
           cp LICENSE README.md "${ARCHIVE_NAME}/"
           tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}/"
 
@@ -186,6 +189,9 @@ jobs:
           mkdir -p "${PKG}/usr/share/doc/sub-lang"
 
           cp sub subc subi "${PKG}/usr/local/bin/"
+          # /usr/local/bin/sub looks for ../lib/sub/stdlib.
+          mkdir -p "${PKG}/usr/local/lib/sub"
+          cp -r stdlib "${PKG}/usr/local/lib/sub/"
           cp LICENSE README.md "${PKG}/usr/share/doc/sub-lang/"
 
           printf '%s\n' \

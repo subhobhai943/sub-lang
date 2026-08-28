@@ -1,0 +1,81 @@
+# ============================================================
+# SUB Standard Library - strings
+#
+#   import "strings"
+#
+# This module is deliberately small, and the reason is worth stating plainly:
+# SUB's character-level string builtins do not work outside the interpreter.
+# `substring`, `char_at`, `contains`, `replace`, `split` and `join` are
+# implemented in the interpreter and are either unmapped or unimplemented in
+# every compiled backend, so anything built on them would run under `subi` and
+# fail to compile under `sub` and `subc`.
+#
+# What is portable is `len`, `upper`, `lower`, `trim`, `+` and comparison, so
+# that is what this module is built from. Everything here produces identical
+# output through all ten backends; see tests/conformance/19_stdlib.sb.
+#
+# When the character builtins are wired into the backends, this module is
+# where find/starts_with/split_on and friends belong.
+# ============================================================
+
+fn is_empty(s: string): bool {
+    return len(s) == 0
+}
+
+fn is_blank(s: string): bool {
+    return len(trim(s)) == 0
+}
+
+# `s` written `times` times. A count of zero or less gives "".
+fn repeat(s: string, times: int): string {
+    let out = ""
+    let i = 0
+    while i < times {
+        out = out + s
+        i = i + 1
+    }
+    return out
+}
+
+# Compare ignoring case, which `==` does not.
+fn eq_ignore_case(a: string, b: string): bool {
+    return lower(a) == lower(b)
+}
+
+# `s` padded on the left with `pad` until it is `width` long. A string already
+# that long is returned unchanged -- padding never truncates.
+fn pad_left(s: string, width: int, pad: string): string {
+    let out = s
+    while len(out) < width {
+        out = pad + out
+    }
+    return out
+}
+
+fn pad_right(s: string, width: int, pad: string): string {
+    let out = s
+    while len(out) < width {
+        out = out + pad
+    }
+    return out
+}
+
+# `s` centred in `width`, with any odd column going to the right.
+fn center(s: string, width: int, pad: string): string {
+    let out = s
+    let left = true
+    while len(out) < width {
+        if left {
+            out = pad + out
+        } else {
+            out = out + pad
+        }
+        left = !left
+    }
+    return out
+}
+
+# A line of `n` copies of `s`, which is what a report separator wants.
+fn line(s: string, n: int): string {
+    return repeat(s, n)
+}

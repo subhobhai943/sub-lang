@@ -319,6 +319,16 @@ static void gen_elem_out_open(StringBuilder *sb, DataType elem) {
     else                          sb_append(sb, "(");
 }
 
+/* The C type a loop variable takes when iterating an array of `elem`. */
+static const char *elem_c_type(DataType elem) {
+    switch (elem) {
+    case TYPE_FLOAT:  return "double";
+    case TYPE_STRING: return "char *";
+    case TYPE_BOOL:   return "bool";
+    default:          return "long";
+    }
+}
+
 static int elem_kind_code(DataType elem) {
     switch (elem) {
     case TYPE_FLOAT:  return 1;
@@ -903,6 +913,9 @@ static DataType find_return_type_recursive(ASTNode *node) {
    -1 means the nearest enclosing breakable is a loop, so `break;` is right.
    Anything else is the id of an enclosing switch, whose cases are an if/else
    chain that `break;` would either escape wrongly or fail to compile in. */
+/* Distinguishes the temps of one `for x in ...` from another's. */
+static int g_loop_seq = 0;
+
 static int g_break_switch = -1;
 /* Set when a `break` actually emitted a jump, so an unused label -- which
    compilers warn about -- is never written. */
@@ -1027,7 +1040,12 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             }
             sb_append(sb, ") {\n");
             if (node->body) {
+                /* Resolve bare identifiers in the body against this
+                   function's parameters: without it an array parameter is
+                   invisible and len(a) comes out as strlen(). */
+                ASTNode *prev_fn = infer_enter_function(node);
                 generate_node(sb, node->body, indent + 1);
+                infer_enter_function(prev_fn);
             }
             sb_append(sb, "}\n\n");
             break;
@@ -1081,25 +1099,33 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
                 } else if (node->condition) {
                     /* for item in collection */
                     const char *var = node->value ? node->value : "item";
+                    /* The array and index temps are declared in the enclosing
+                       block, not inside the loop, so naming them after the
+                       loop variable alone made two `for v in ...` loops in one
+                       function redeclare _arr_v. */
+                    int seq = g_loop_seq++;
                     if (node->condition->data_type == TYPE_STRING ||
                         (node->condition->type == AST_LITERAL && node->condition->value && !isdigit((unsigned char)node->condition->value[0]))) {
-                        sb_append(sb, "const char *_str_%s = (const char*)(", var);
+                        sb_append(sb, "const char *_str_%d = (const char*)(", seq);
                         generate_expression(sb, node->condition);
                         sb_append(sb, ");\n");
                         indent_code(sb, indent);
-                        sb_append(sb, "for (long _idx_%s = 0; _str_%s && _str_%s[_idx_%s]; _idx_%s++) {\n", var, var, var, var, var);
+                        sb_append(sb, "for (long _idx_%d = 0; _str_%d && _str_%d[_idx_%d]; _idx_%d++) {\n", seq, seq, seq, seq, seq);
                         indent_code(sb, indent + 1);
-                        sb_append(sb, "char _buf_%s[2] = {_str_%s[_idx_%s], '\\0'};\n", var, var, var);
+                        sb_append(sb, "char _buf_%d[2] = {_str_%d[_idx_%d], '\\0'};\n", seq, seq, seq);
                         indent_code(sb, indent + 1);
-                        sb_append(sb, "char *%s = _buf_%s;\n", var, var);
+                        sb_append(sb, "char *%s = _buf_%d;\n", var, seq);
                     } else {
-                        sb_append(sb, "SubArray *_arr_%s = (SubArray*)(", var);
+                        sb_append(sb, "SubArray *_arr_%d = (SubArray*)(", seq);
                         generate_expression(sb, node->condition);
                         sb_append(sb, ");\n");
                         indent_code(sb, indent);
-                        sb_append(sb, "for (long _idx_%s = 0; _arr_%s && _idx_%s < _arr_%s->count; _idx_%s++) {\n", var, var, var, var, var);
+                        sb_append(sb, "for (long _idx_%d = 0; _arr_%d && _idx_%d < _arr_%d->count; _idx_%d++) {\n", seq, seq, seq, seq, seq);
                         indent_code(sb, indent + 1);
-                        sb_append(sb, "long %s = _arr_%s->items[_idx_%s];\n", var, var, var);
+                        DataType el = infer_elem_type(node->condition);
+                        sb_append(sb, "%s %s = ", elem_c_type(el), var);
+                        gen_elem_out_open(sb, el);
+                        sb_append(sb, "_arr_%d->items[_idx_%d]);\n", seq, seq);
                     }
                 } else {
                     sb_append(sb, "for (long %s = 0; %s < 10; %s++) {\n", var, var, var);

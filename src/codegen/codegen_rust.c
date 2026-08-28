@@ -35,7 +35,7 @@ static const RustBuiltin* rust_builtin(const char *name) {
         /* str() of a float has to use the same %g shape as printing it. */
         {"str","_sub_str(",")"},         {"to_string","_sub_str(",")"},
         {"int","(",") as i64"},          {"float","(",") as f64"},
-        {"len","(",").len() as i64"},    {"length","(",").len() as i64"},
+        {"len","((",").len() as i64)"},  {"length","((",").len() as i64)"},
         {"abs","((",") as f64).abs()"},  {"sqrt","((",") as f64).sqrt()"},
         {"floor","_sub_floor(",")"},     {"ceil","_sub_ceil(",")"},
         {"round","_sub_round(",")"},
@@ -113,6 +113,18 @@ static const char* rust_type(DataType t, int is_param) {
         default:          return "f64";
     }
 }
+
+/* The type a parameter takes. An array parameter carries the element type
+   its call sites passed (ASTNode.elem_type), so a function over an array of
+   floats does not declare Vec<i64> and reject every caller. */
+static const char *rust_array_decl(DataType elem);
+
+static const char *rust_param_type(ASTNode *param) {
+    if (param->data_type == TYPE_ARRAY)
+        return rust_array_decl(param->elem_type);
+    return rust_type(param->data_type, 1);
+}
+
 
 /* The top-level variables of the program being generated; see
    codegen_globals.h. In Rust they become `static mut`, which is the only
@@ -274,6 +286,20 @@ static char* escape_string_for_rust(const char *raw) {
 
 static void generate_expr_rust(StringBuilder *sb, ASTNode *node);
 
+/* Whether reading this expression would move a Vec out of a binding that is
+   used again afterwards -- passing an array to a function, or iterating one.
+   Rust moves; SUB does not, so the value is cloned. Skipped for a global,
+   whose read path already clones. */
+static int rust_needs_clone(ASTNode *n) {
+    if (!n || n->type != AST_IDENTIFIER) return 0;
+    DataType t = infer_expr_type(n);
+    /* String is owned too: `println(bold(title)); println(len(title))` moves
+       `title` into bold() and then reads it again. */
+    if (t != TYPE_ARRAY && t != TYPE_STRING) return 0;
+    if (rust_is_global(n->value) && rust_global_is_owned(n->value)) return 0;
+    return 1;
+}
+
 /* A position that is written or mutated in place, rather than read. A global
    here has to be the static itself, never the clone a read gets. */
 static void rust_place(StringBuilder *sb, ASTNode *node) {
@@ -414,6 +440,11 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
             break;
             
         case AST_VAR_DECL:
+        case AST_CONST_DECL:
+            /* `const` is a declaration like any other here. Without this case
+               it fell through to `default:` and vanished: a top-level `const`
+               got its static but never its value, so every use of it read an
+               empty string. */
             indent_code(sb, indent);
             /* A top-level declaration was already written as a `static mut`,
                so here only its initializer is left, as an assignment. */
@@ -440,7 +471,7 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
                 sb_append(sb, "%s: %s",
                           rust_name(node->children[i]->value
                                     ? node->children[i]->value : "arg"),
-                          rust_type(node->children[i]->data_type, 1));
+                          rust_param_type(node->children[i]));
             }
             sb_append(sb, ")");
             /* Rust requires the return type in the signature; omitting it
@@ -511,6 +542,8 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
             } else if (node->condition) {
                 sb_append(sb, "for %s in ", node->value ? node->value : "item");
                 generate_expr_rust(sb, node->condition);
+                /* Iterating a Vec consumes it; SUB's loop leaves it alone. */
+                if (rust_needs_clone(node->condition)) sb_append(sb, ".clone()");
                 sb_append(sb, " {\n");
             } else {
                 sb_append(sb, "for %s in 0..10 {\n", node->value ? node->value : "i");
@@ -554,14 +587,17 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_ASSIGN_STMT:
             indent_code(sb, indent);
             if (node->left && node->left->type == AST_ARRAY_ACCESS) {
-                sb_append(sb, "_sub_put(&mut ");
-                rust_place(sb, node->left->left);
-                sb_append(sb, ", ");
-                generate_expr_rust(sb, node->left->right);
-                sb_append(sb, ", ");
+                /* The value is bound first: `a[i] = a[j]` would otherwise
+                   borrow `a` immutably for the right-hand side while
+                   _sub_put holds it mutably, which Rust rejects. */
+                sb_append(sb, "{ let _v = ");
                 generate_expr_rust_as(sb, node->right,
                                       infer_elem_type(node->left->left));
-                sb_append(sb, ");\n");
+                sb_append(sb, "; let _i = ");
+                generate_expr_rust(sb, node->left->right);
+                sb_append(sb, "; _sub_put(&mut ");
+                rust_place(sb, node->left->left);
+                sb_append(sb, ", _i, _v); }\n");
                 break;
             }
             rust_place(sb, node->left);
@@ -740,8 +776,11 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                         break;
                     }
                     if (!strcmp(node->value, "len") || !strcmp(node->value, "length")) {
+                        /* Parenthesised: `x.len() as i64 < n` parses the `<`
+                           as the start of a generic argument list. */
+                        sb_append(sb, "(");
                         generate_expr_rust(sb, node->children[0]);
-                        sb_append(sb, ".len() as i64");
+                        sb_append(sb, ".len() as i64)");
                         break;
                     }
                 }
@@ -789,6 +828,8 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                     if (i > 0) sb_append(sb, ", ");
                     generate_expr_rust_as(sb, node->children[i],
                                           param_type_of(node->value, i));
+                    if (rust_needs_clone(node->children[i]))
+                        sb_append(sb, ".clone()");
                 }
                 sb_append(sb, ")");
             }
@@ -966,7 +1007,11 @@ char* codegen_rust(ASTNode *ast, const char *source) {
     if (ast->type == AST_PROGRAM) {
         for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
             if (stmt->type == AST_FUNCTION_DECL) {
+                /* Resolve identifiers in the body against this function's
+                   parameters; see infer_enter_function(). */
+                ASTNode *prev_fn = infer_enter_function(stmt);
                 generate_node_rust(sb, stmt, 0);
+                infer_enter_function(prev_fn);
             } else {
                 generate_node_rust(main_sb, stmt, g_globals.count > 0 ? 2 : 1);
             }

@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include "module.h"
 #include "codegen_cpp.h"
 #include "codegen_infer.h"
 #include "native.h"
@@ -99,7 +100,10 @@ static ASTNode* front_end(const char *input_file, bool verbose,
     if (!tokens) { free(source); return NULL; }
 
     if (verbose) printf("[2/4] Parsing...\n");
+    module_reset();
+    module_set_source(input_file);
     ASTNode *ast = parser_parse(tokens, ntok);
+    module_set_source(NULL);
     if (!ast) {
         fprintf(stderr, "Parsing failed.\n");
         lexer_free_tokens(tokens, ntok); free(source);

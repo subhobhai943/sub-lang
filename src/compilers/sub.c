@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE
 #include "sub_compiler.h"
+#include "module.h"
 #include "codegen_cpp.h"
 #include "codegen_infer.h"
 #include "logo.h"
@@ -307,7 +308,10 @@ int main(int argc, char *argv[]) {
     
     // Phase 3: Parsing
     printf("[3/5] Parsing...\n");
+    module_reset();
+    module_set_source(input_file);
     ASTNode *ast = parser_parse(tokens, token_count);
+    module_set_source(NULL);
     if (!ast) {
         fprintf(stderr, "Parsing failed.\n");
         free(source);

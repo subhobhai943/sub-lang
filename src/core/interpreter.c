@@ -23,6 +23,7 @@
 
 #define _GNU_SOURCE
 #include "interpreter.h"
+#include "module.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -260,6 +261,22 @@ static SubVal val_copy(SubVal v) {
         return r;
     }
     return r;
+}
+
+/* Whether evaluating this expression yields a value some binding still owns,
+   rather than a freshly built one. Only these three reach into a binding:
+   a name, an element of one, and a field of one. Everything else -- a
+   literal, an operator, a call -- constructs its result. */
+static int expr_borrows_binding(ASTNode *n) {
+    if (!n) return 0;
+    switch (n->type) {
+    case AST_IDENTIFIER:
+    case AST_ARRAY_ACCESS:
+    case AST_MEMBER_ACCESS:
+        return 1;
+    default:
+        return 0;
+    }
 }
 
 /* ================================================================
@@ -1324,6 +1341,19 @@ SubVal eval(ASTNode *node, Env *env) {
        ============================================================ */
     case AST_RETURN_STMT: {
         SubVal rv = node->right ? eval(node->right, env) : NULL_VAL;
+        /* The caller frees this scope the moment the call returns, and
+           env_get hands out the environment's own value rather than a copy.
+           So a value still reachable from a binding here has to be copied out
+           before that happens, or the caller is handed freed memory:
+
+               fn f() { let o = []; push(o, 7); return o }
+               println(f())        # [] on a good day, a segfault otherwise
+
+           A value the expression built fresh -- an array literal, the result
+           of an operator or of another call -- is owned by nobody and is
+           returned as it is, so this does not copy on every return. */
+        if (node->right && expr_borrows_binding(node->right))
+            rv = val_copy(rv);
         env->returning = 1;
         env->ret_val   = rv;
         return rv;
@@ -1971,7 +2001,11 @@ int interpret_file(const char *path) {
     int ntok;
     Token *toks = lexer_tokenize(src, &ntok);
 
+    /* Imports in this file resolve relative to it. */
+    module_reset();
+    module_set_source(path);
     ASTNode *ast = parser_parse(toks, ntok);
+    module_set_source(NULL);
     if (!ast) {
         fprintf(stderr, "Error: parsing failed\n");
         free(src); lexer_free_tokens(toks, ntok);

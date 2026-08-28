@@ -55,7 +55,9 @@
     <Property Id="ARPCONTACT" Value="SUB Language Project" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLDIR" Name="SUB Language" />
+      <Directory Id="INSTALLDIR" Name="SUB Language">
+        <Directory Id="STDLIBDIR" Name="stdlib" />
+      </Directory>
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder">
       <Directory Id="AppMenuFolder" Name="SUB Language" />
@@ -91,6 +93,19 @@
       <Component Id="Docs" Guid="8AB4BC1E-3F45-462D-86E5-19A7AD4AF343">
         <File Id="LICENSE" Source="LICENSE" KeyPath="yes" />
         <File Id="README" Source="README.md" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- The standard library, in the directory the module resolver looks in:
+         stdlib\ beside the executables. Without it `import "math"` finds
+         nothing on a Windows install. -->
+    <ComponentGroup Id="StdLib" Directory="STDLIBDIR">
+      <Component Id="StdLibFiles" Guid="3F1C6A54-90D2-4E7B-9A28-5C0E1B7F4D63">
+        <File Id="stdlib.math" Source="stdlib\math.sb" KeyPath="yes" />
+        <File Id="stdlib.arrays" Source="stdlib\arrays.sb" />
+        <File Id="stdlib.strings" Source="stdlib\strings.sb" />
+        <File Id="stdlib.io" Source="stdlib\io.sb" />
+        <File Id="stdlib.readme" Source="stdlib\README.md" />
       </Component>
     </ComponentGroup>
 
@@ -133,6 +148,7 @@
              Level="1"
              AllowAbsent="no">
       <ComponentGroupRef Id="Tools" />
+      <ComponentGroupRef Id="StdLib" />
 
       <Feature Id="PathFeature"
                Title="Add to system PATH"

@@ -333,7 +333,43 @@ static const char* go_type(DataType t) {
         case TYPE_ARRAY:  return "*[]int64";
         default:          return "interface{}";
     }
+
 }
+
+/* The type a parameter takes in each typed target. An array parameter
+   carries the element type its call sites passed (ASTNode.elem_type); without
+   it every array parameter is declared as one of integers, and a function
+   over floats reads its elements back as ints or is rejected outright. */
+static const char *java_param_type(ASTNode *p) {
+    static char buf[64];
+    if (p->data_type != TYPE_ARRAY) return java_type(p->data_type);
+    snprintf(buf, sizeof buf, "java.util.List<%s>", java_elem_box(p->elem_type));
+    return buf;
+}
+
+static const char *swift_param_type(ASTNode *p) {
+    static char buf[64];
+    if (p->data_type != TYPE_ARRAY) return swift_type(p->data_type);
+    snprintf(buf, sizeof buf, "[%s]", swift_type(p->elem_type == TYPE_UNKNOWN
+                                                 ? TYPE_INT : p->elem_type));
+    return buf;
+}
+
+static const char *kotlin_param_type(ASTNode *p) {
+    static char buf[64];
+    if (p->data_type != TYPE_ARRAY) return kotlin_type(p->data_type);
+    snprintf(buf, sizeof buf, "MutableList<%s>", kotlin_elem_type(p->elem_type));
+    return buf;
+}
+
+static const char *go_param_type(ASTNode *p) {
+    static char buf[64];
+    if (p->data_type != TYPE_ARRAY) return go_type(p->data_type);
+    snprintf(buf, sizeof buf, "*[]%s", go_type(p->elem_type == TYPE_UNKNOWN
+                                               ? TYPE_INT : p->elem_type));
+    return buf;
+}
+
 
 static const char* go_array_type(DataType elem) {
     switch (elem) {
@@ -693,8 +729,23 @@ static int emit_special_binop(StringBuilder *sb, ASTNode *node,
                 break;
         }
         sb_append(sb, "%s(", fn);
-        gen(sb, node->left); sb_append(sb, ", ");
-        gen(sb, node->right); sb_append(sb, ")");
+        /* Go has no implicit numeric conversion, so an integer operand of a
+           float division has to be converted at the call: round() yields an
+           int64, and `round(x * scale) / scale` would not compile without
+           this. The other targets promote on their own. */
+        int coerce = (lang == LANG_GO && is_flt);
+        if (coerce && infer_expr_type(node->left) != TYPE_FLOAT) {
+            sb_append(sb, "float64("); gen(sb, node->left); sb_append(sb, ")");
+        } else {
+            gen(sb, node->left);
+        }
+        sb_append(sb, ", ");
+        if (coerce && infer_expr_type(node->right) != TYPE_FLOAT) {
+            sb_append(sb, "float64("); gen(sb, node->right); sb_append(sb, ")");
+        } else {
+            gen(sb, node->right);
+        }
+        sb_append(sb, ")");
         return 1;
     }
     return 0;
@@ -2286,7 +2337,7 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
-                    sb_append(sb, "%s %s", java_type(node->children[i]->data_type),
+                    sb_append(sb, "%s %s", java_param_type(node->children[i]),
                               node->children[i]->value ? node->children[i]->value : "arg");
                     scope_push(node->children[i]->value);
                 }
@@ -2589,7 +2640,11 @@ char* codegen_java(ASTNode *ast, const char *source) {
         /* Pass 1: emit function declarations as static methods */
         for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
             if (stmt->type == AST_FUNCTION_DECL) {
+                /* Resolve identifiers in the body against this function's
+                   parameters; see infer_enter_function(). */
+                ASTNode *prev_fn = infer_enter_function(stmt);
                 generate_node_java(sb, stmt, 1);
+                infer_enter_function(prev_fn);
             }
         }
         /* Pass 2: collect all non-function statements for main */
@@ -2881,7 +2936,7 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
                     sb_append(sb, "_ %s: %s", swift_ident(node->children[i]->value ? node->children[i]->value : "arg"),
-                              swift_type(node->children[i]->data_type));
+                              swift_param_type(node->children[i]));
                 }
             }
             sb_append(sb, ")");
@@ -3319,7 +3374,7 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
                     sb_append(sb, "%s: %s", node->children[i]->value ? node->children[i]->value : "arg",
-                              kotlin_type(node->children[i]->data_type));
+                              kotlin_param_type(node->children[i]));
                 }
             }
             sb_append(sb, ")");
@@ -3543,7 +3598,11 @@ char* codegen_kotlin(ASTNode *ast, const char *source) {
     if (ast->type == AST_PROGRAM) {
         for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
             if (stmt->type == AST_FUNCTION_DECL) {
+                /* Resolve identifiers in the body against this function's
+                   parameters; see infer_enter_function(). */
+                ASTNode *prev_fn = infer_enter_function(stmt);
                 generate_node_kotlin(sb, stmt, 0);
+                infer_enter_function(prev_fn);
             } else {
                 generate_node_kotlin(main_sb, stmt, 1);
             }
@@ -3773,6 +3832,29 @@ static void indent_ruby(StringBuilder *sb, int level) {
 static const char *g_rb_shadow[GLOBALS_MAX];
 static int g_rb_nshadow = 0;
 
+/* Ruby reserves words SUB does not, and `next`, `end`, `def`, `then` and
+   `unless` are all plausible variable names. Ruby has no escape for a local
+   of a reserved name -- Swift's backticks have no equivalent -- so the name
+   is suffixed instead. Consistently, at declaration and at every use.
+
+       let next = a + b     ->     next_ = (a + b)
+
+   Without this a `let next` anywhere in a program made the whole Ruby
+   translation a syntax error. */
+static int ruby_reserved(const char *name) {
+    static const char *kw[] = {
+        "alias", "and", "begin", "break", "case", "class", "def", "defined?",
+        "do", "else", "elsif", "end", "ensure", "false", "for", "if", "in",
+        "module", "next", "nil", "not", "or", "redo", "rescue", "retry",
+        "return", "self", "super", "then", "true", "undef", "unless",
+        "until", "when", "while", "yield", "__FILE__", "__LINE__", NULL
+    };
+    if (!name) return 0;
+    for (int i = 0; kw[i]; i++)
+        if (strcmp(name, kw[i]) == 0) return 1;
+    return 0;
+}
+
 static int ruby_is_global(const char *name) {
     if (!name || !globals_has(&g_globals, name)) return 0;
     for (int i = 0; i < g_rb_nshadow; i++)
@@ -3786,9 +3868,12 @@ static const char *ruby_name(const char *name) {
     static char buf[4][128];
     static int slot = 0;
     if (!name) return "var";
-    if (!ruby_is_global(name)) return name;
+    int global = ruby_is_global(name);
+    int reserved = ruby_reserved(name);
+    if (!global && !reserved) return name;
     slot = (slot + 1) % 4;
-    snprintf(buf[slot], sizeof buf[0], "$%s", name);
+    snprintf(buf[slot], sizeof buf[0], "%s%s%s",
+             global ? "$" : "", name, reserved ? "_" : "");
     return buf[slot];
 }
 
@@ -4034,7 +4119,11 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
                     if (node->children[i] && node->children[i]->value) {
-                        sb_append(sb, "%s", node->children[i]->value);
+                        /* A parameter named for a Ruby keyword needs the same
+                           suffix its uses get. */
+                        sb_append(sb, "%s", ruby_reserved(node->children[i]->value)
+                                  ? ruby_name(node->children[i]->value)
+                                  : node->children[i]->value);
                     }
                 }
                 sb_append(sb, ")");
@@ -4625,7 +4714,7 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
                         /* Go needs a type per parameter, not one trailing type
                            shared by every name. */
                         sb_append(sb, "%s %s", node->children[i]->value,
-                                  go_type(node->children[i]->data_type));
+                                  go_param_type(node->children[i]));
                     }
                 }
             }
@@ -5027,7 +5116,12 @@ char* codegen_go(ASTNode *ast, const char *source) {
         }
 
         if (is_go_package_level_node(stmt)) {
+            /* Resolve identifiers in a function body against its parameters;
+               see infer_enter_function(). */
+            ASTNode *prev_fn = stmt->type == AST_FUNCTION_DECL
+                             ? infer_enter_function(stmt) : NULL;
             generate_node_go(sb, stmt, 0);
+            if (stmt->type == AST_FUNCTION_DECL) infer_enter_function(prev_fn);
             emitted_package_level = true;
         } else {
             has_exec_stmts = true;

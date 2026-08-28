@@ -1,303 +1,191 @@
-# ==========================================
-# SUB Standard Library - Math Module
-# File: stdlib/math.sb
-# Mathematical functions and constants
-# ==========================================
+# ============================================================
+# SUB Standard Library - math
+#
+#   import "math"
+#
+# Built only on operations every backend implements: + - * / % **,
+# comparisons, and the abs/min/max/sqrt/floor/ceil/round builtins. Nothing
+# here needs a builtin that only the interpreter has, which is why the same
+# results come out of all ten backends.
+#
+# Integer and floating-point helpers are kept apart -- sum_int and sum_float
+# rather than one sum -- because the statically typed backends infer a single
+# concrete signature per function, and one that returned an int here and a
+# float there would not compile.
+# ============================================================
 
-# Constants
-const PI = 3.141592653589793
-const E = 2.718281828459045
+const PI  = 3.141592653589793
+const E   = 2.718281828459045
 const TAU = 6.283185307179586
-const PHI = 1.618033988749895
 
-# Basic operations
-func abs(x) -> num {
+# ---------- sign and range ----------
+
+# -1, 0 or 1 according to the sign of x.
+fn sign(x: int): int {
+    if x > 0 {
+        return 1
+    }
     if x < 0 {
-        return -x
+        return 0 - 1
+    }
+    return 0
+}
+
+# x confined to [lo, hi].
+fn clamp(x: int, lo: int, hi: int): int {
+    if x < lo {
+        return lo
+    }
+    if x > hi {
+        return hi
     }
     return x
 }
 
-func min(a, b) -> num {
-    if a < b {
-        return a
-    }
-    return b
+fn is_even(n: int): bool {
+    return n % 2 == 0
 }
 
-func max(a, b) -> num {
-    if a > b {
-        return a
-    }
-    return b
+fn is_odd(n: int): bool {
+    return n % 2 != 0
 }
 
-func clamp(value, min_val, max_val) -> num {
-    if value < min_val {
-        return min_val
-    }
-    if value > max_val {
-        return max_val
-    }
-    return value
-}
+# ---------- integer arithmetic ----------
 
-# Power and roots
-func pow(base, exp) -> num {
-    if exp == 0 {
-        return 1
-    }
-    if exp < 0 {
-        return 1.0 / pow(base, -exp)
-    }
-
-    var result = 1
-    for i in range(exp) {
-        result = result * base
-    }
-    return result
-}
-
-func sqrt(x) -> float {
+# Greatest common divisor, by Euclid. Negative inputs give a positive result.
+fn gcd(a: int, b: int): int {
+    let x = a
+    let y = b
     if x < 0 {
-        return NaN
+        x = 0 - x
     }
-    if x == 0 {
+    if y < 0 {
+        y = 0 - y
+    }
+    while y != 0 {
+        let t = y
+        y = x % y
+        x = t
+    }
+    return x
+}
+
+# Least common multiple. lcm(0, n) is 0.
+fn lcm(a: int, b: int): int {
+    if a == 0 {
         return 0
     }
-
-    # Newton's method
-    var guess = x / 2.0
-    var epsilon = 0.000001
-
-    while abs(guess * guess - x) > epsilon {
-        guess = (guess + x / guess) / 2.0
-    }
-
-    return guess
-}
-
-func cbrt(x) -> float {
-    # Cube root using Newton's method
-    if x == 0 {
+    if b == 0 {
         return 0
     }
-
-    var guess = x / 3.0
-    var epsilon = 0.000001
-
-    while abs(guess * guess * guess - x) > epsilon {
-        guess = (2 * guess + x / (guess * guess)) / 3.0
+    let g = gcd(a, b)
+    let m = a / g * b
+    if m < 0 {
+        return 0 - m
     }
-
-    return guess
+    return m
 }
 
-# Rounding
-func floor(x) -> int {
-    var int_x = int(x)
-    if x < int_x {
-        return int_x - 1
-    }
-    return int_x
-}
-
-func ceil(x) -> int {
-    var int_x = int(x)
-    if x > int_x {
-        return int_x + 1
-    }
-    return int_x
-}
-
-func round(x) -> int {
-    if x >= 0 {
-        return floor(x + 0.5)
-    } else {
-        return ceil(x - 0.5)
-    }
-}
-
-# Trigonometry (radians)
-func sin(x) -> float {
-    # Taylor series approximation
-    var result = 0.0
-    var term = x
-    var i = 1
-
-    while abs(term) > 0.000001 && i < 20 {
-        result = result + term
-        term = -term * x * x / ((2 * i) * (2 * i + 1))
+# n! for n >= 0; factorial(0) is 1. Overflows past 20 on a 64-bit integer.
+fn factorial(n: int): int {
+    let acc = 1
+    let i = 2
+    while i <= n {
+        acc = acc * i
         i = i + 1
     }
-
-    return result
+    return acc
 }
 
-func cos(x) -> float {
-    return sin(x + PI / 2)
-}
-
-func tan(x) -> float {
-    return sin(x) / cos(x)
-}
-
-# Degree conversion
-func deg_to_rad(degrees) -> float {
-    return degrees * PI / 180.0
-}
-
-func rad_to_deg(radians) -> float {
-    return radians * 180.0 / PI
-}
-
-# Logarithms
-func ln(x) -> float {
-    if x <= 0 {
-        return NaN
-    }
-
-    # Natural log using series
-    var result = 0.0
-    var y = (x - 1) / (x + 1)
-    var y_sq = y * y
-    var term = y
-    var i = 1
-
-    while abs(term) > 0.000001 && i < 100 {
-        result = result + term / i
-        term = term * y_sq
-        i = i + 2
-    }
-
-    return 2 * result
-}
-
-func log10(x) -> float {
-    return ln(x) / ln(10)
-}
-
-func log2(x) -> float {
-    return ln(x) / ln(2)
-}
-
-# Exponential
-func exp(x) -> float {
-    # e^x using Taylor series
-    var result = 1.0
-    var term = 1.0
-    var i = 1
-
-    while abs(term) > 0.000001 && i < 100 {
-        term = term * x / i
-        result = result + term
-        i = i + 1
-    }
-
-    return result
-}
-
-# Statistics
-func sum(arr) -> num {
-    var total = 0
-    for val in arr {
-        total = total + val
-    }
-    return total
-}
-
-func mean(arr) -> float {
-    if len(arr) == 0 {
-        return 0
-    }
-    return sum(arr) / len(arr)
-}
-
-func median(arr) -> num {
-    var sorted = sort(arr)
-    var n = len(sorted)
-
-    if n % 2 == 0 {
-        return (sorted[n/2 - 1] + sorted[n/2]) / 2
-    } else {
-        return sorted[n/2]
-    }
-}
-
-func variance(arr) -> float {
-    var avg = mean(arr)
-    var sum_sq_diff = 0
-
-    for val in arr {
-        var diff = val - avg
-        sum_sq_diff = sum_sq_diff + diff * diff
-    }
-
-    return sum_sq_diff / len(arr)
-}
-
-func std_dev(arr) -> float {
-    return sqrt(variance(arr))
-}
-
-# Random (requires system RNG)
-func random() -> float {
-    # Returns random float between 0 and 1
-    return sys_random()
-}
-
-func randint(min_val, max_val) -> int {
-    return floor(random() * (max_val - min_val + 1)) + min_val
-}
-
-func choice(arr) {
-    return arr[randint(0, len(arr) - 1)]
-}
-
-# GCD and LCM
-func gcd(a, b) -> int {
-    while b != 0 {
-        var temp = b
-        b = a % b
-        a = temp
-    }
-    return abs(a)
-}
-
-func lcm(a, b) -> int {
-    return abs(a * b) / gcd(a, b)
-}
-
-# Factorial
-func factorial(n) -> int {
-    if n < 0 {
-        return -1
-    }
-    if n == 0 || n == 1 {
-        return 1
-    }
-
-    var result = 1
-    for i in range(2, n + 1) {
-        result = result * i
-    }
-    return result
-}
-
-# Fibonacci
-func fibonacci(n) -> int {
-    if n <= 1 {
+# The nth Fibonacci number, counting fib(0) = 0 and fib(1) = 1.
+fn fib(n: int): int {
+    if n < 2 {
         return n
     }
-
-    var a = 0
-    var b = 1
-
-    for i in range(2, n + 1) {
-        var temp = a + b
+    let a = 0
+    let b = 1
+    let i = 2
+    while i <= n {
+        let next = a + b
         a = b
-        b = temp
+        b = next
+        i = i + 1
     }
-
     return b
+}
+
+# Trial division up to the square root. 0 and 1 are not prime.
+fn is_prime(n: int): bool {
+    if n < 2 {
+        return false
+    }
+    if n < 4 {
+        return true
+    }
+    if n % 2 == 0 {
+        return false
+    }
+    let d = 3
+    while d * d <= n {
+        if n % d == 0 {
+            return false
+        }
+        d = d + 2
+    }
+    return true
+}
+
+# base raised to a non-negative integer power, by repeated squaring.
+# `**` is the operator form; this is the one to call when the exponent is a
+# value rather than something written in the source.
+fn ipow(base: int, exp: int): int {
+    if exp < 0 {
+        return 0
+    }
+    let result = 1
+    let b = base
+    let e = exp
+    while e > 0 {
+        if e % 2 == 1 {
+            result = result * b
+        }
+        b = b * b
+        e = e / 2
+    }
+    return result
+}
+
+# ---------- floating point ----------
+
+fn hypot(a: float, b: float): float {
+    return sqrt(a * a + b * b)
+}
+
+fn deg_to_rad(deg: float): float {
+    return deg * PI / 180.0
+}
+
+fn rad_to_deg(rad: float): float {
+    return rad * 180.0 / PI
+}
+
+# Whether two floats are within `tol` of one another. Comparing floats with
+# == is a trap in any language; this is the comparison to reach for.
+fn close_to(a: float, b: float, tol: float): bool {
+    let d = a - b
+    if d < 0.0 {
+        d = 0.0 - d
+    }
+    return d <= tol
+}
+
+# x truncated to `places` decimal places, rounding halves away from zero.
+fn round_to(x: float, places: int): float {
+    let scale = 1.0
+    let i = 0
+    while i < places {
+        scale = scale * 10.0
+        i = i + 1
+    }
+    return round(x * scale) / scale
 }

@@ -1,316 +1,188 @@
 # SUB Standard Library
 
-Comprehensive standard library for the SUB programming language providing common functionality across all target languages.
-
-## 📚 Modules
-
-### 1. I/O Module (`io.sb`)
-Input/output operations and formatting.
-
-**Functions:**
-- `println(message)` - Print with newline
-- `printf(format, ...args)` - Formatted print
-- `readln() -> str` - Read line from stdin
-- `read_int() -> int` - Read integer
-- `read_float() -> float` - Read float
-- `eprint(message)` - Print to stderr
-- `eprintln(message)` - Print to stderr with newline
-- `format(template, ...args) -> str` - Format string with placeholders
-- `print_color(message, color)` - ANSI colored output
-- `print_success(message)` - Green success message
-- `print_error(message)` - Red error message
-- `print_warning(message)` - Yellow warning
-- `print_info(message)` - Cyan info message
-- `clear_screen()` - Clear console
-- `prompt(message) -> str` - Prompt for input
-- `confirm(message) -> bool` - Yes/no confirmation
-
-### 2. Math Module (`math.sb`)
-Mathematical operations and constants.
-
-**Constants:**
-- `PI = 3.141592653589793`
-- `E = 2.718281828459045`
-- `TAU = 6.283185307179586`
-- `PHI = 1.618033988749895`
-
-**Functions:**
-- `abs(x)` - Absolute value
-- `min(a, b)` / `max(a, b)` - Min/max
-- `clamp(value, min, max)` - Clamp value
-- `pow(base, exp)` - Power
-- `sqrt(x)` / `cbrt(x)` - Square/cube root
-- `floor(x)` / `ceil(x)` / `round(x)` - Rounding
-- `sin(x)` / `cos(x)` / `tan(x)` - Trigonometry
-- `deg_to_rad(degrees)` / `rad_to_deg(radians)` - Conversion
-- `ln(x)` / `log10(x)` / `log2(x)` - Logarithms
-- `exp(x)` - Exponential
-- `sum(arr)` / `mean(arr)` / `median(arr)` - Statistics
-- `variance(arr)` / `std_dev(arr)` - Statistical measures
-- `random()` / `randint(min, max)` / `choice(arr)` - Random
-- `gcd(a, b)` / `lcm(a, b)` - GCD/LCM
-- `factorial(n)` / `fibonacci(n)` - Sequences
-
-### 3. String Module (`string.sb`)
-String manipulation and processing.
-
-**Functions:**
-- `len(s)` - Length
-- `concat(s1, s2)` - Concatenation
-- `substr(s, start, length)` - Substring
-- `strcmp(s1, s2)` / `stricmp(s1, s2)` - Comparison
-- `index_of(s, ch)` / `last_index_of(s, ch)` - Search
-- `contains(s, substr)` / `find(s, substr)` - Contains
-- `to_upper(s)` / `to_lower(s)` - Case conversion
-- `capitalize(s)` / `title_case(s)` - Capitalization
-- `trim(s)` / `trim_left(s)` / `trim_right(s)` - Trimming
-- `replace(s, old, new)` - Replacement
-- `split(s, delimiter)` / `join(arr, separator)` - Split/join
-- `reverse(s)` - Reversal
-- `is_alpha(s)` / `is_digit(s)` / `is_alnum(s)` - Checks
-- `starts_with(s, prefix)` / `ends_with(s, suffix)` - Prefix/suffix
-- `pad_left(s, width, char)` / `pad_right(s, width, char)` - Padding
-- `center(s, width, char)` - Center alignment
-
-### 4. Collections Module (`collections.sb`)
-Data structures and collection utilities.
-
-**Array Operations:**
-- `array_new(size, value)` - Create array
-- `array_append(arr, value)` - Append
-- `array_insert(arr, index, value)` - Insert
-- `array_remove(arr, index)` - Remove
-- `array_pop(arr)` - Pop last
-- `array_clear(arr)` - Clear
-- `array_find(arr, value)` - Find index
-- `array_contains(arr, value)` - Contains
-- `array_count(arr, value)` - Count occurrences
-
-**Transformations:**
-- `array_map(arr, func)` - Map
-- `array_filter(arr, predicate)` - Filter
-- `array_reduce(arr, func, initial)` - Reduce
-- `array_sort(arr)` - Sort
-- `array_reverse(arr)` - Reverse
-- `array_min(arr)` / `array_max(arr)` - Min/max
-
-**Set Operations:**
-- `set_union(set1, set2)` - Union
-- `set_intersection(set1, set2)` - Intersection
-- `set_difference(set1, set2)` - Difference
-
-**Stack (LIFO):**
-- `stack_new()` - Create stack
-- `stack_push(stack, value)` - Push
-- `stack_pop(stack)` - Pop
-- `stack_peek(stack)` - Peek
-- `stack_is_empty(stack)` - Check empty
-
-**Queue (FIFO):**
-- `queue_new()` - Create queue
-- `queue_enqueue(queue, value)` - Enqueue
-- `queue_dequeue(queue)` - Dequeue
-- `queue_front(queue)` - Front
-- `queue_is_empty(queue)` - Check empty
-
-**Hash Map:**
-- `map_new()` - Create map
-- `map_set(map, key, value)` - Set
-- `map_get(map, key)` - Get
-- `map_has(map, key)` - Has key
-- `map_delete(map, key)` - Delete
-- `map_keys(map)` / `map_values(map)` - Keys/values
-- `map_size(map)` - Size
-
-### 5. File Module (`file.sb`)
-File system operations.
-
-**File Reading:**
-- `read_file(path) -> str` - Read entire file
-- `read_lines(path) -> array` - Read lines
-- `read_bytes(path) -> bytes` - Read binary
-
-**File Writing:**
-- `write_file(path, content)` - Write file
-- `append_file(path, content)` - Append
-- `write_lines(path, lines)` - Write lines
-
-**File Checks:**
-- `file_exists(path)` - Exists
-- `is_file(path)` / `is_directory(path)` - Type check
-- `file_size(path)` - Size
-
-**File Operations:**
-- `copy_file(src, dest)` - Copy
-- `move_file(src, dest)` - Move
-- `delete_file(path)` - Delete
-- `rename_file(old, new)` - Rename
-
-**Directory Operations:**
-- `create_directory(path)` - Create
-- `list_directory(path)` - List
-- `remove_directory(path)` - Remove
-- `get_current_directory()` - Get CWD
-- `change_directory(path)` - Change CWD
-
-**Path Operations:**
-- `join_path(...parts)` - Join paths
-- `basename(path)` - Base name
-- `dirname(path)` - Directory name
-- `extension(path)` - File extension
-- `without_extension(path)` - Remove extension
-- `normalize_path(path)` - Normalize
-
-### 6. System Module (`system.sb`)
-System utilities and environment.
-
-**Process:**
-- `exit(code)` - Exit program
-- `system(command)` - Execute command
-- `execute(command, args)` - Execute with args
-
-**Environment:**
-- `getenv(name)` - Get variable
-- `setenv(name, value)` - Set variable
-- `unsetenv(name)` - Unset variable
-
-**Time:**
-- `time()` - Unix timestamp
-- `clock()` - Processor time
-- `sleep(seconds)` - Sleep
-- `sleep_ms(milliseconds)` - Sleep milliseconds
-- `format_time(timestamp, format)` - Format
-- `parse_time(str, format)` - Parse
-
-**Platform:**
-- `platform()` - Platform name
-- `is_windows()` / `is_linux()` / `is_macos()` - Platform checks
-- `arch()` - Architecture
-
-**Process Info:**
-- `pid()` / `ppid()` - Process IDs
-- `username()` - Username
-- `hostname()` - Hostname
-
-**Performance:**
-- `benchmark(func)` - Time function
-- `time_it(func, iterations)` - Average time
-- `memory_usage()` - Memory usage
-
-**Command Line:**
-- `argc()` - Argument count
-- `argv(index)` - Get argument
-- `get_args()` - All arguments
-
-**Error Handling:**
-- `assert(condition, message)` - Assertion
-- `panic(message)` - Panic exit
-- `last_error()` - Last error
-- `errno()` - Error number
-
-## 🚀 Usage
-
-### Importing Modules
-
-```coffee
-#import "stdlib/io.sb"
-#import "stdlib/math.sb"
-#import "stdlib/string.sb"
-
-# Use functions
-println("Hello, World!")
-#var result = sqrt(16)
-#var upper = to_upper("hello")
+```sub
+import "math"
+import "arrays"
+import "strings"
+import "io"
 ```
 
-### Example: File Processing
+Four modules, written in SUB. Every function here produces identical output
+through all ten backends and the interpreter — `tests/conformance/19_stdlib.sb`
+and `20_stdlib_tour.sb` check exactly that on every push, the same way the
+language itself is checked.
 
-```coffee
-#import "stdlib/file.sb"
-#import "stdlib/string.sb"
-#import "stdlib/io.sb"
+Run `examples/stdlib_tour.sb` to see the whole library working:
 
-#func process_file(path) {
-    #if !file_exists(path) {
-        print_error("File not found: " + path)
-        #return
-    }
-    
-    #var lines = read_lines(path)
-    #var processed = array_map(lines, to_upper)
-    write_lines("output.txt", processed)
-    
-    print_success("Processed " + str(len(lines)) + " lines")
-}
+```console
+$ subi examples/stdlib_tour.sb
+$ sub  examples/stdlib_tour.sb rust    # or any other target
 ```
-
-### Example: Math Operations
-
-```coffee
-#import "stdlib/math.sb"
-#import "stdlib/io.sb"
-
-#func stats_demo() {
-    #var numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    
-    println("Mean: " + str(mean(numbers)))
-    println("Median: " + str(median(numbers)))
-    println("Std Dev: " + str(std_dev(numbers)))
-    println("Sum: " + str(sum(numbers)))
-}
-```
-
-### Example: String Processing
-
-```coffee
-#import "stdlib/string.sb"
-#import "stdlib/io.sb"
-
-#func text_analysis(text) {
-    #var words = split(text, " ")
-    #var word_count = len(words)
-    #var char_count = len(text)
-    
-    println("Words: " + str(word_count))
-    println("Characters: " + str(char_count))
-    println("Uppercase: " + to_upper(text))
-}
-```
-
-## 🔧 Implementation Notes
-
-### Platform Independence
-All stdlib functions are designed to work across target languages:
-- **Python**: Direct mapping to built-in functions
-- **JavaScript**: ES6+ compatibility
-- **Java**: Standard library integration
-- **C/C++**: Standard library wrappers
-- **Native**: Direct system calls
-
-### Performance
-- Pure SUB implementations for algorithms
-- System calls for I/O and OS operations
-- Optimized for readability and correctness
-
-### Error Handling
-- Functions return `null` on error where appropriate
-- Boolean return values for success/failure
-- Panic/assert for critical failures
-
-## 📝 Contributing
-
-To add new stdlib functions:
-
-1. Add function to appropriate module
-2. Update this README with documentation
-3. Add tests to `tests/stdlib/`
-4. Ensure cross-platform compatibility
-
-## 📄 License
-
-MIT License - See LICENSE file
 
 ---
 
-**Version**: 1.0.0  
-**Last Updated**: December 30, 2025
+## How `import` finds a module
+
+An import is resolved and spliced at parse time: the module is read, parsed,
+and its top-level statements are inserted into your program. What each backend
+compiles is one flat program, so a module's functions are ordinary functions
+and its `let` is an ordinary global.
+
+Search order:
+
+1. **Next to the file doing the importing** — your own helpers work with no
+   configuration.
+2. **`$SUB_PATH`** — colon-separated (semicolon on Windows).
+3. **`stdlib/` beside the executable** — how the release tarball is laid out.
+4. **`../lib/sub/stdlib`** relative to the executable — for a prefix install.
+
+The `.sb` extension is optional: `import "math"` and `import "math.sb"` are the
+same. Importing one module twice splices it once, so two modules that both want
+`strings` is fine. An import cycle is reported rather than followed.
+
+A module that cannot be found lists every path it tried.
+
+---
+
+## math
+
+```sub
+import "math"
+```
+
+| | |
+|---|---|
+| `PI`, `E`, `TAU` | constants |
+| `sign(x)` | `-1`, `0` or `1` |
+| `clamp(x, lo, hi)` | confine to a range |
+| `is_even(n)`, `is_odd(n)` | parity |
+| `gcd(a, b)`, `lcm(a, b)` | Euclid; negatives give a positive result |
+| `factorial(n)` | `factorial(0)` is 1; overflows past 20 |
+| `fib(n)` | `fib(0)` is 0 |
+| `is_prime(n)` | trial division to the square root |
+| `ipow(base, exp)` | integer power, for when the exponent is a value |
+| `hypot(a, b)` | `sqrt(a² + b²)` |
+| `deg_to_rad(d)`, `rad_to_deg(r)` | angle conversion |
+| `close_to(a, b, tol)` | compare floats without `==` |
+| `round_to(x, places)` | round to a number of decimal places |
+
+No trigonometry or logarithms: there are no `sin`/`log`/`exp` builtins to build
+them on, and a series expansion in SUB would risk producing a different last
+digit on different backends — which the conformance suite would (rightly)
+reject.
+
+## arrays
+
+```sub
+import "arrays"
+```
+
+| | |
+|---|---|
+| `sum_int(a)`, `sum_float(a)` | total |
+| `product_int(a)` | product |
+| `mean_float(a)` | mean; `0.0` for an empty array |
+| `min_int(a)`, `max_int(a)`, `min_float(a)`, `max_float(a)` | extremes |
+| `index_of_int(a, v)` | position, or `-1` |
+| `has_int(a, v)`, `count_int(a, v)` | membership and tally |
+| `reverse_int(a)` | reversed copy |
+| `slice_int(a, start, stop)` | `[start, stop)`, bounds clipped |
+| `concat_int(a, b)`, `repeat_int(v, n)` | build |
+| `sorted_int(a)` | ascending copy; the input is left alone |
+| `unique_int(a)` | distinct, in first-seen order |
+| `is_sorted_int(a)` | check |
+
+**Why `_int` and `_float` rather than one `sum`.** SUB has no generics, and
+six of the ten backends must emit one concrete signature per function. A single
+`sum()` returning an integer for one caller and a float for another does not
+compile to Rust, Go, Java, Kotlin, Swift or C++. Splitting them is what makes
+the library work everywhere rather than only under the interpreter.
+
+## strings
+
+```sub
+import "strings"
+```
+
+| | |
+|---|---|
+| `is_empty(s)`, `is_blank(s)` | emptiness |
+| `repeat(s, n)` | `s` written `n` times |
+| `eq_ignore_case(a, b)` | compare ignoring case |
+| `pad_left(s, w, pad)`, `pad_right(s, w, pad)` | pad to a width; never truncates |
+| `center(s, w, pad)` | centre, odd column to the right |
+| `line(s, n)` | a separator |
+
+**This module is small on purpose.** SUB's character-level string builtins —
+`substring`, `char_at`, `contains`, `replace`, `split`, `join` — are
+implemented in the interpreter and are unmapped or unimplemented in every
+compiled backend. Anything built on them would run under `subi` and fail to
+compile under `sub` and `subc`, which is precisely the trap the previous
+version of this library fell into.
+
+What *is* portable is `len`, `upper`, `lower`, `trim`, `+` and comparison, so
+that is what this module is built from. When those builtins are wired into the
+backends, `find`, `starts_with` and `split_on` belong here.
+
+## io
+
+```sub
+import "io"
+```
+
+| | |
+|---|---|
+| `red(s)` … `cyan(s)`, `bold(s)`, `dim(s)` | ANSI colour |
+| `info(m)`, `ok(m)`, `warn(m)`, `fail(m)` | labelled lines |
+| `heading(title)` | title with a rule under it |
+| `row(cells, width)` | one aligned table row |
+| `rule(columns, width)` | a rule the width of such a table |
+
+Printing itself is a builtin (`print`, `println`); this is the layer above.
+The colours are ANSI escapes — a terminal renders them, a pipe gets the bytes,
+so write plain output when something else will read it.
+
+---
+
+## Known limits
+
+These are properties of the language and the backends, not of the library, and
+each is why some obvious function is missing:
+
+- **No character-level string work outside the interpreter** (above). This is
+  the biggest gap.
+- **`str()` of an array** is interpreter-only; print arrays directly with
+  `println(a)`.
+- **No file or process access.** There are no builtins for either, so there is
+  no `file` or `system` module. The versions that used to sit here called
+  `open()` and `exec()`, which have never existed.
+- **No higher-order functions**, so no `map`/`filter`/`reduce`.
+
+## Writing your own module
+
+A module is a `.sb` file. Anything it declares at the top level — functions,
+`let`, `const` — becomes visible to whatever imports it.
+
+```sub
+# geometry.sb
+const TAU_OVER_4 = 1.5707963267948966
+
+fn area_of_circle(r: float): float {
+    return 3.141592653589793 * r * r
+}
+```
+
+```sub
+import "geometry"
+println(area_of_circle(2.0))
+```
+
+Two things are worth doing, and the modules here do both:
+
+**Annotate the types.** `fn pad_left(s: string, width: int, pad: string): string`
+rather than bare parameters. The statically typed backends have to name a type
+for every parameter and return; an annotation settles it, and an explicit type
+is never overridden by inference. Array parameters cannot be annotated — SUB
+has no `array` type keyword — and are inferred from use.
+
+**Keep each function's types consistent.** One function, one signature.

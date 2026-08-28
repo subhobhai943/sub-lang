@@ -1,0 +1,216 @@
+# ============================================================
+# SUB Standard Library - arrays
+#
+#   import "arrays"
+#
+# Built on indexing, indexed assignment, len, push and pop, which every
+# backend implements. Nothing here uses a builtin the compiled backends lack.
+#
+# Functions come in _int and _float pairs where the element type decides the
+# return type. That is not stylistic: the statically typed backends infer one
+# concrete signature per function, so a single sum() returning an int for one
+# caller and a float for another would not compile.
+# ============================================================
+
+# ---------- reductions ----------
+
+fn sum_int(a): int {
+    let total = 0
+    for v in a {
+        total = total + v
+    }
+    return total
+}
+
+fn sum_float(a): float {
+    let total = 0.0
+    for v in a {
+        total = total + v
+    }
+    return total
+}
+
+fn product_int(a): int {
+    let acc = 1
+    for v in a {
+        acc = acc * v
+    }
+    return acc
+}
+
+# The mean of a non-empty float array. An empty array has no mean; this
+# returns 0.0 rather than dividing by zero, which would abort the program.
+fn mean_float(a): float {
+    if len(a) == 0 {
+        return 0.0
+    }
+    return sum_float(a) / float(len(a))
+}
+
+fn min_int(a): int {
+    let best = a[0]
+    for v in a {
+        if v < best {
+            best = v
+        }
+    }
+    return best
+}
+
+fn max_int(a): int {
+    let best = a[0]
+    for v in a {
+        if v > best {
+            best = v
+        }
+    }
+    return best
+}
+
+fn min_float(a): float {
+    let best = a[0]
+    for v in a {
+        if v < best {
+            best = v
+        }
+    }
+    return best
+}
+
+fn max_float(a): float {
+    let best = a[0]
+    for v in a {
+        if v > best {
+            best = v
+        }
+    }
+    return best
+}
+
+# ---------- searching ----------
+
+# The position of the first element equal to `want`, or -1.
+fn index_of_int(a, want: int): int {
+    let i = 0
+    while i < len(a) {
+        if a[i] == want {
+            return i
+        }
+        i = i + 1
+    }
+    return 0 - 1
+}
+
+fn has_int(a, want: int): bool {
+    return index_of_int(a, want) >= 0
+}
+
+fn count_int(a, want: int): int {
+    let n = 0
+    for v in a {
+        if v == want {
+            n = n + 1
+        }
+    }
+    return n
+}
+
+# ---------- building new arrays ----------
+
+fn reverse_int(a) {
+    let out = []
+    let i = len(a) - 1
+    while i >= 0 {
+        push(out, a[i])
+        i = i - 1
+    }
+    return out
+}
+
+# Elements [start, end), the half-open range every language in the family
+# uses. Out-of-range bounds are clipped rather than being an error.
+fn slice_int(a, start: int, stop: int) {
+    let lo = start
+    let hi = stop
+    if lo < 0 {
+        lo = 0
+    }
+    if hi > len(a) {
+        hi = len(a)
+    }
+    let out = []
+    let i = lo
+    while i < hi {
+        push(out, a[i])
+        i = i + 1
+    }
+    return out
+}
+
+fn concat_int(a, b) {
+    let out = []
+    for v in a {
+        push(out, v)
+    }
+    for v in b {
+        push(out, v)
+    }
+    return out
+}
+
+fn repeat_int(value: int, times: int) {
+    let out = []
+    let i = 0
+    while i < times {
+        push(out, value)
+        i = i + 1
+    }
+    return out
+}
+
+# A sorted copy, ascending, by insertion sort. The input is left alone.
+# Insertion sort rather than something faster because these arrays are small
+# and this is the version that is obviously correct.
+fn sorted_int(a) {
+    let out = []
+    for v in a {
+        push(out, v)
+    }
+    let i = 1
+    while i < len(out) {
+        let key = out[i]
+        let j = i - 1
+        while j >= 0 {
+            if out[j] <= key {
+                break
+            }
+            out[j + 1] = out[j]
+            j = j - 1
+        }
+        out[j + 1] = key
+        i = i + 1
+    }
+    return out
+}
+
+# The distinct elements, in the order they first appear.
+fn unique_int(a) {
+    let out = []
+    for v in a {
+        if index_of_int(out, v) < 0 {
+            push(out, v)
+        }
+    }
+    return out
+}
+
+fn is_sorted_int(a): bool {
+    let i = 1
+    while i < len(a) {
+        if a[i] < a[i - 1] {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
