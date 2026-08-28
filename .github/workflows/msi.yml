@@ -97,7 +97,13 @@ jobs:
                   "OpenDatabase", "InvokeMethod", $null, $installer, @($msi.FullName, 0))
 
           function Get-MsiRows([string]$sql) {
-            $view = $db.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $db, @($sql))
+            try {
+              $view = $db.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $db, @($sql))
+            } catch {
+              # A missing table fails here rather than returning nothing, and
+              # the COM error alone does not say which query was at fault.
+              throw "query failed: $sql"
+            }
             # [void] matters: anything these calls emit would otherwise be
             # returned alongside the rows and turn the result into nonsense.
             [void]$view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null)
@@ -128,9 +134,17 @@ jobs:
 
           # The .sb association and the PATH entry are the two things a user
           # notices if they silently stop being registered.
-          $ext = Get-MsiRows "SELECT Extension FROM Extension"
-          Write-Host "Extensions:  $($ext -join ', ')"
-          if (-not ($ext -contains "sb")) { throw ".sb file association is missing" }
+          #
+          # The association lives in the Registry table, not in Extension:
+          # Extension and ProgId are the *advertised* tables, and WiX only
+          # authors those for an advertised component. A plain ProgId like
+          # ours becomes ordinary HKCR keys.
+          $keys = Get-MsiRows "SELECT Key FROM Registry"
+          Write-Host "Registry:    $($keys -join ', ')"
+          if (-not ($keys -contains ".sb")) { throw ".sb file association is missing" }
+          if (-not ($keys -match "SUBLanguage\.Source\\shell\\open\\command")) {
+            throw ".sb has no open command"
+          }
 
           $envRows = Get-MsiRows "SELECT Name FROM Environment"
           Write-Host "Environment: $($envRows -join ', ')"
