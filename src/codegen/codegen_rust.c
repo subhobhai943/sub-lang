@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include "codegen_switch.h"
 
 typedef struct {
     char *buffer;
@@ -208,12 +209,91 @@ static bool ast_contains_object(ASTNode *node) {
     return false;
 }
 
+static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent);
+
+/* See gen_clause_python. A labelled block would also work here, but a loop
+   run once is the same shape every other backend uses. */
+static void gen_clause_rust(StringBuilder *sb, ASTNode *clause, int indent) {
+    int loop = switch_clause_breaks(clause);
+    if (loop) {
+        indent_code(sb, indent);
+        sb_append(sb, "loop {\n");
+        indent++;
+    }
+    generate_node_rust(sb, clause->body, indent);
+    if (loop) {
+        indent_code(sb, indent);
+        sb_append(sb, "break;\n");
+        indent_code(sb, indent - 1);
+        sb_append(sb, "}\n");
+    }
+}
+
 static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     
     switch (node->type) {
         /*  A dropped `break` turns a loop that terminates into one
            that does not, so this must never fall through to the default. */
+
+        case AST_DO_WHILE_STMT:
+            /* Rust has no do/while, and `loop` with the test at the bottom is
+               the shape the reference implementations use. */
+            indent_code(sb, indent);
+            sb_append(sb, "loop {\n");
+            generate_node_rust(sb, node->body, indent + 1);
+            indent_code(sb, indent + 1);
+            sb_append(sb, "if !(");
+            generate_expr_rust(sb, node->condition);
+            sb_append(sb, ") { break; }\n");
+            indent_code(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+
+        case AST_SWITCH_STMT: {
+            /* Not `match`: a match arm is a pattern, and SUB case values are
+               expressions -- `case n:` would bind rather than compare. */
+            static int sw_rs = 0;
+            int id = sw_rs++;
+            ASTNode *deflt = switch_default_clause(node);
+            int emitted = 0;
+
+            indent_code(sb, indent);
+            sb_append(sb, "{\n");
+            indent_code(sb, indent + 1);
+            sb_append(sb, "let _sw%d = ", id);
+            generate_expr_rust(sb, node->condition);
+            sb_append(sb, ";\n");
+
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *c = node->children[i];
+                if (!c || c->type != AST_CASE_CLAUSE || c->child_count == 0) continue;
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%sif ", emitted ? "} else " : "");
+                for (int j = 0; j < c->child_count; j++) {
+                    if (j > 0) sb_append(sb, " || ");
+                    sb_append(sb, "_sw%d == (", id);
+                    generate_expr_rust(sb, c->children[j]);
+                    sb_append(sb, ")");
+                }
+                sb_append(sb, " {\n");
+                gen_clause_rust(sb, c, indent + 2);
+                emitted = 1;
+            }
+            if (deflt) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%s{\n", emitted ? "} else " : "");
+                gen_clause_rust(sb, deflt, indent + 2);
+                emitted = 1;
+            }
+            if (emitted) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "}\n");
+            }
+            indent_code(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+        }
         case AST_BREAK_STMT:
             indent_code(sb, indent);
             sb_append(sb, "break;\n");

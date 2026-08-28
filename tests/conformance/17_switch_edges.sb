@@ -1,0 +1,69 @@
+# A switch that is nothing but a default. Every backend has to keep the
+# scrutinee it evaluated -- Go rejects an unused variable, and the target's
+# own switch statement would need at least one case label.
+switch (5) {
+    default:
+        println("only default")
+}
+
+# A switch with neither a matching case nor a default runs nothing at all.
+switch ("nope") {
+    case "yes":
+        println("matched")
+}
+println("still here")
+
+# The scrutinee is evaluated once, not once per case test: a chain that
+# re-evaluated it would print "evaluated" three times before matching.
+fn bump() {
+    println("evaluated")
+    return 2
+}
+switch (bump()) {
+    case 0:
+        println("zero")
+    case 1:
+        println("one")
+    case 2:
+        println("two")
+    default:
+        println("other")
+}
+
+# Booleans match too.
+let flag = true
+switch (flag) {
+    case false:
+        println("off")
+    case true:
+        println("on")
+}
+
+# Nested switches, with the inner one's default reached.
+for i in range(0, 2) {
+    switch (i) {
+        case 0:
+            switch ("x") {
+                case "y":
+                    println("inner y")
+                default:
+                    println("inner default")
+            }
+        default:
+            println("outer default")
+    }
+}
+
+# A switch as the very last thing in a function, with every case returning
+# and nothing after it. Java checks both that a method cannot fall off its
+# end and that no statement is unreachable, and this shape tests the first.
+fn label(n) {
+    switch (n) {
+        case 1:
+            return "one"
+        default:
+            return "many"
+    }
+}
+println(label(1))
+println(label(5))

@@ -1,0 +1,142 @@
+# switch matches on a value, and cases do not fall through: each case runs
+# only its own body. `break` is allowed and simply ends the switch.
+let k = 2
+switch (k) {
+    case 1:
+        println("one")
+        break
+    case 2:
+        println("two")
+        break
+    default:
+        println("other")
+}
+
+switch (9) {
+    case 1:
+        println("bad")
+    default:
+        println("fell through to default")
+}
+
+# One case, several values.
+for i in range(0, 5) {
+    switch (i) {
+        case 0, 2, 4:
+            println("even")
+        default:
+            println("odd")
+    }
+}
+
+# Strings are matchable too.
+let animal = "cat"
+switch (animal) {
+    case "dog":
+        println("woof")
+    case "cat":
+        println("meow")
+    default:
+        println("?")
+}
+
+# A `break` inside a case ends the switch, not the loop around it, and a
+# `continue` inside a case belongs to that loop.
+let seen = 0
+for i in range(0, 6) {
+    switch (i) {
+        case 3:
+            continue
+        default:
+            seen = seen + 1
+    }
+    seen = seen + 10
+}
+println(seen)
+
+# A loop inside a case keeps its own break.
+switch (1) {
+    case 1:
+        let n = 0
+        while (true) {
+            n = n + 1
+            if (n > 2) {
+                break
+            }
+        }
+        println(n)
+    default:
+        println("unreachable")
+}
+
+# do/while always runs its body once, even when the test is false.
+let i = 0
+do {
+    println(i)
+    i = i + 1
+} while (i < 3)
+
+let j = 10
+do {
+    println("ran once")
+    j = j + 1
+} while (j < 5)
+println(j)
+
+# A `break` in the middle of a case body -- rather than at its end, where it
+# says nothing -- skips the rest of that case and nothing else.
+for i in range(0, 4) {
+    switch (i) {
+        case 0, 1:
+            println("start")
+            if (i == 0) {
+                break
+            }
+            println("only for 1")
+        default:
+            println("other")
+    }
+    println("after switch")
+}
+
+# `return` inside a case leaves the function, not just the switch.
+fn kind(n) {
+    switch (n) {
+        case 0:
+            return "zero"
+        case 1, 2, 3:
+            return "small"
+        default:
+            return "big"
+    }
+    return "unreachable"
+}
+println(kind(0))
+println(kind(2))
+println(kind(9))
+
+# A float scrutinee, and a case value that is an expression rather than a
+# constant -- neither of which a C or Java `switch` label could hold.
+let limit = 3
+let f = 2.5
+switch (f) {
+    case 1.5:
+        println("one point five")
+    case 2.5:
+        println("two point five")
+    default:
+        println("other")
+}
+switch (6) {
+    case limit * 2:
+        println("double the limit")
+    default:
+        println("no")
+}
+
+# No default and no match: nothing runs.
+switch (42) {
+    case 1:
+        println("nope")
+}
+println("done")

@@ -1076,13 +1076,12 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
                 for (int i = 0; i < node->child_count; i++) {
                     ASTNode *clause = node->children[i];
                     if (clause) {
-                        if (clause->condition) check_expression_type(clause->condition, table);
-                        if (clause->body) check_statement_type(clause->body, table, current_function);
-                        if (clause->children) {
-                            for (int j = 0; j < clause->child_count; j++) {
-                                check_statement_type(clause->children[j], table, current_function);
-                            }
+                        /* A clause's children are its match values, which are
+                           expressions; the statements are in its body. */
+                        for (int j = 0; j < clause->child_count; j++) {
+                            check_expression_type(clause->children[j], table);
                         }
+                        if (clause->body) check_statement_type(clause->body, table, current_function);
                     }
                 }
             }

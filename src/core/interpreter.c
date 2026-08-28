@@ -1866,30 +1866,42 @@ SubVal eval(ASTNode *node, Env *env) {
         if (!node->children) return NULL_VAL;
         SubVal scrutinee = node->condition ? eval(node->condition, env) : NULL_VAL;
         ASTNode *default_clause = NULL;
-        bool matched = false;
-        for (int i = 0; i < node->child_count; i++) {
+        ASTNode *chosen = NULL;
+
+        /* Find the clause to run before running anything: a case body is a
+           statement list and may have side effects, so it must not be
+           evaluated while still deciding which case matched. */
+        for (int i = 0; i < node->child_count && !chosen; i++) {
             ASTNode *clause = node->children[i];
+            if (!clause) continue;
             if (clause->type == AST_DEFAULT_CLAUSE) {
                 default_clause = clause;
                 continue;
             }
-            if (clause->type == AST_CASE_CLAUSE && !matched) {
-                /* clause->children holds the case values; clause->body is the body */
-                bool hit = false;
-                if (clause->children) {
-                    for (int j = 0; j < clause->child_count; j++) {
-                        SubVal cv = eval(clause->children[j], env);
-                        if (values_equal(scrutinee, cv)) { hit = true; break; }
-                    }
-                }
-                if (hit) {
-                    matched = true;
-                    if (clause->body) eval(clause->body, env);
-                }
+            if (clause->type != AST_CASE_CLAUSE) continue;
+            for (int j = 0; j < clause->child_count; j++) {
+                SubVal cv = eval(clause->children[j], env);
+                bool hit = values_equal(scrutinee, cv);
+                val_free(cv);
+                if (hit) { chosen = clause; break; }
             }
         }
-        if (!matched && default_clause && default_clause->body) {
-            eval(default_clause->body, env);
+        if (!chosen) chosen = default_clause;
+        val_free(scrutinee);
+
+        if (chosen && chosen->body) {
+            /* Cases do not fall through, so `break` here means "leave the
+               switch" and must not reach an enclosing loop. `continue` and
+               `return` still belong to whatever encloses the switch. */
+            Env *scope = env_new(env);
+            eval(chosen->body, scope);
+            if (scope->returning) {
+                env->returning = 1;
+                env->ret_val   = scope->ret_val;
+            } else if (scope->continuing) {
+                env->continuing = 1;
+            }
+            env_free(scope);
         }
         return NULL_VAL;
     }

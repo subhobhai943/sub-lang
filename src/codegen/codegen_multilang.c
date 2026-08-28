@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "sub_compiler.h"
 #include "codegen_infer.h"
+#include "codegen_switch.h"
 #include "type_system.h"
 #include "windows_compat.h"
 #include <stdarg.h>
@@ -657,6 +658,107 @@ static int emit_special_binop(StringBuilder *sb, ASTNode *node,
     return 0;
 }
 
+/* Can control reach the end of this statement?
+
+   Java is the one target that needs to know. It rejects a value-returning
+   method whose body can complete normally, and separately rejects any
+   statement it can prove unreachable -- so the fallback return the first
+   rule sometimes demands is exactly what the second rule sometimes forbids.
+   These are Java's own rules (JLS 14.21) for the shapes this backend emits,
+   which is why an `if` with a constant condition still counts as completing:
+   Java deliberately does not look at the condition's value. */
+static int stmt_completes(ASTNode *n) {
+    if (!n) return 1;
+
+    switch (n->type) {
+    case AST_RETURN_STMT:
+    case AST_THROW_STMT:
+        return 0;
+
+    case AST_IF_STMT:
+        /* Without an else there is a path around it. With one, both sides
+           have to be dead ends for the whole thing to be. */
+        if (!n->right) return 1;
+        return stmt_completes(n->body) || stmt_completes(n->right);
+
+    case AST_WHILE_STMT:
+        /* `while (true)` ends only by breaking out of it. */
+        if (n->condition && n->condition->type == AST_LITERAL &&
+            n->condition->value && strcmp(n->condition->value, "true") == 0)
+            return body_has_free_break(n->body);
+        return 1;
+
+    case AST_BLOCK: {
+        ASTNode *last = NULL;
+        if (n->child_count > 0) last = n->children[n->child_count - 1];
+        else for (ASTNode *s = block_first(n); s; s = s->next) last = s;
+        return stmt_completes(last);
+    }
+
+    default:
+        /* A switch included: its chain ends in `else if (true)`, which by
+           Java's rules leaves a path through. */
+        return 1;
+    }
+}
+
+/* Loop-variable shadowing, for the targets that do not have it.
+
+   `let i = 100` followed by `for i in range(0, 3)` is ordinary SUB: the loop
+   has its own `i`, and the outer one still reads 100 afterwards. C, C++, Go,
+   Rust, Swift and Kotlin all give a `for` variable its own scope and need
+   nothing here. Two targets do:
+
+     - Java forbids a local from shadowing another local outright, so the
+       program did not compile at all.
+     - Python has no block scope: the loop variable *is* the outer one, so
+       the program compiled and quietly printed the wrong number.
+
+   Both are fixed the same way -- a loop whose variable is already in scope
+   is generated under a different name, and references to it inside the loop
+   are rewritten to match. */
+#define SHADOW_MAX 128
+static const char *g_scope[SHADOW_MAX];
+static int         g_nscope = 0;
+
+static struct { const char *from; char to[48]; } g_rename[SHADOW_MAX];
+static int g_nrename = 0;
+static int g_rename_seq = 0;
+
+static int name_in_scope(const char *name) {
+    if (!name) return 0;
+    for (int i = 0; i < g_nscope; i++)
+        if (g_scope[i] && strcmp(g_scope[i], name) == 0) return 1;
+    return 0;
+}
+
+static void scope_push(const char *name) {
+    if (name && g_nscope < SHADOW_MAX) g_scope[g_nscope++] = name;
+}
+
+/* The name to write for a SUB identifier: the innermost rename wins. */
+static const char *shadow_name(const char *name) {
+    if (!name) return "var";
+    for (int i = g_nrename - 1; i >= 0; i--)
+        if (strcmp(g_rename[i].from, name) == 0) return g_rename[i].to;
+    return name;
+}
+
+/* Give `src` a private name if it is already in scope, and record it either
+   way. Returns the name the loop should be generated under. */
+static const char *shadow_declare_loop_var(const char *src) {
+    const char *var = src;
+    if (name_in_scope(src) && g_nrename < SHADOW_MAX) {
+        g_rename[g_nrename].from = src;
+        snprintf(g_rename[g_nrename].to, sizeof g_rename[0].to,
+                 "%s__%d", src, g_rename_seq++);
+        var = g_rename[g_nrename].to;
+        g_nrename++;
+    }
+    scope_push(src);
+    return var;
+}
+
 static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
     if (!node) return;
     
@@ -676,7 +778,7 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
             }
             break;
         case AST_IDENTIFIER:
-            sb_append(sb, "%s", node->value ? node->value : "var");
+            sb_append(sb, "%s", shadow_name(node->value));
             break;
         case AST_BINARY_EXPR:
             if (emit_special_binop(sb, node, LANG_PY, generate_expr_python)) break;
@@ -884,6 +986,23 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
     }
 }
 
+/* One case body. A `break` the parser could not drop -- one in the middle of
+   the body rather than at its end -- needs something to leave, and Python has
+   no labelled block, so the body runs inside a loop that iterates once. */
+static void gen_clause_python(StringBuilder *sb, ASTNode *clause, int indent) {
+    int loop = switch_clause_breaks(clause);
+    if (loop) {
+        indent_code(sb, indent);
+        sb_append(sb, "for _ in range(1):\n");
+        indent++;
+    }
+    generate_node_python(sb, clause->body, indent);
+    if (!clause->body || block_first(clause->body) == NULL) {
+        indent_code(sb, indent);
+        sb_append(sb, "pass\n");
+    }
+}
+
 static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     
@@ -896,7 +1015,8 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_VAR_DECL:
             indent_code(sb, indent);
-            sb_append(sb, "%s = ", node->value ? node->value : "var");
+            scope_push(node->value);
+            sb_append(sb, "%s = ", shadow_name(node->value ? node->value : "var"));
             if (node->right) {
                 generate_expr_python(sb, node->right);
             } else {
@@ -907,7 +1027,8 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_CONST_DECL:
             indent_code(sb, indent);
-            sb_append(sb, "%s = ", node->value ? node->value : "CONST");
+            scope_push(node->value);
+            sb_append(sb, "%s = ", shadow_name(node->value ? node->value : "CONST"));
             if (node->right) {
                 generate_expr_python(sb, node->right);
             } else {
@@ -916,11 +1037,14 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "\n");
             break;
             
-        case AST_FUNCTION_DECL:
+        case AST_FUNCTION_DECL: {
+            int scope_mark = g_nscope, rename_mark = g_nrename;
+            g_nscope = g_nrename = 0;
             sb_append(sb, "\ndef %s(", node->value ? node->value : "func");
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
                 sb_append(sb, "%s", node->children[i]->value ? node->children[i]->value : "arg");
+                scope_push(node->children[i]->value);
             }
             sb_append(sb, "):\n");
             if (node->body) {
@@ -930,6 +1054,8 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
                 indent_code(sb, indent + 1);
                 sb_append(sb, "pass\n");
             }
+            g_nscope = scope_mark; g_nrename = rename_mark;
+        }
             sb_append(sb, "\n");
             break;
             
@@ -975,9 +1101,11 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             }
             break;
             
-        case AST_FOR_STMT:
+        case AST_FOR_STMT: {
+            int scope_mark = g_nscope, rename_mark = g_nrename;
             indent_code(sb, indent);
-            sb_append(sb, "for %s in ", node->value ? node->value : "i");
+            sb_append(sb, "for %s in ",
+                      shadow_declare_loop_var(node->value ? node->value : "i"));
             if (node->children && node->child_count > 0) {
                 ASTNode *range = node->children[0];
                 if (range && range->type == AST_RANGE_EXPR) {
@@ -1002,8 +1130,10 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
                 indent_code(sb, indent + 1);
                 sb_append(sb, "pass\n");
             }
+            g_nscope = scope_mark; g_nrename = rename_mark;
             break;
-            
+        }
+
         case AST_WHILE_STMT:
             indent_code(sb, indent);
             sb_append(sb, "while ");
@@ -1035,6 +1165,47 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
             indent_code(sb, indent);
             sb_append(sb, "continue\n");
             break;
+
+        case AST_SWITCH_STMT: {
+            /* An if/elif chain, not `match`: `match` needs Python 3.10 and
+               its case patterns cannot be arbitrary expressions. */
+            static int sw_py = 0;
+            int id = sw_py++;
+            ASTNode *deflt = switch_default_clause(node);
+            int emitted = 0;
+
+            indent_code(sb, indent);
+            sb_append(sb, "_sw%d = ", id);
+            generate_expr_python(sb, node->condition);
+            sb_append(sb, "\n");
+
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *c = node->children[i];
+                if (!c || c->type != AST_CASE_CLAUSE || c->child_count == 0) continue;
+                indent_code(sb, indent);
+                sb_append(sb, "%s ", emitted ? "elif" : "if");
+                for (int j = 0; j < c->child_count; j++) {
+                    if (j > 0) sb_append(sb, " or ");
+                    sb_append(sb, "_sw%d == (", id);
+                    generate_expr_python(sb, c->children[j]);
+                    sb_append(sb, ")");
+                }
+                sb_append(sb, ":\n");
+                gen_clause_python(sb, c, indent + 1);
+                emitted = 1;
+            }
+            if (deflt) {
+                indent_code(sb, indent);
+                sb_append(sb, "%s\n", emitted ? "else:" : "if True:");
+                gen_clause_python(sb, deflt, indent + 1);
+                emitted = 1;
+            }
+            if (!emitted) {
+                indent_code(sb, indent);
+                sb_append(sb, "pass\n");
+            }
+            break;
+        }
 
         case AST_TRY_STMT:
             indent_code(sb, indent);
@@ -1334,16 +1505,87 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
     }
 }
 
+static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent);
+
+/* See gen_clause_python: a `break` left in the middle of a case body needs
+   a construct to leave, and a one-iteration loop is one in every language. */
+static void gen_clause_js(StringBuilder *sb, ASTNode *clause, int indent) {
+    int loop = switch_clause_breaks(clause);
+    if (loop) {
+        indent_code(sb, indent);
+        sb_append(sb, "do {\n");
+        indent++;
+    }
+    generate_node_js(sb, clause->body, indent);
+    if (loop) {
+        indent_code(sb, indent - 1);
+        sb_append(sb, "} while (false);\n");
+    }
+}
+
 static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     
     switch (node->type) {
         /*  A dropped `break` turns a loop that terminates into one
            that does not, so this must never fall through to the default. */
+
+        case AST_DO_WHILE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "do {\n");
+            generate_node_js(sb, node->body, indent + 1);
+            indent_code(sb, indent);
+            sb_append(sb, "} while (");
+            generate_expr_js(sb, node->condition);
+            sb_append(sb, ");\n");
+            break;
         case AST_BREAK_STMT:
             indent_code(sb, indent);
             sb_append(sb, "break;\n");
             break;
+
+        case AST_SWITCH_STMT: {
+            static int sw_js = 0;
+            int id = sw_js++;
+            ASTNode *deflt = switch_default_clause(node);
+            int emitted = 0;
+
+            indent_code(sb, indent);
+            sb_append(sb, "{\n");
+            indent_code(sb, indent + 1);
+            sb_append(sb, "const _sw%d = ", id);
+            generate_expr_js(sb, node->condition);
+            sb_append(sb, ";\n");
+
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *c = node->children[i];
+                if (!c || c->type != AST_CASE_CLAUSE || c->child_count == 0) continue;
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%sif (", emitted ? "} else " : "");
+                for (int j = 0; j < c->child_count; j++) {
+                    if (j > 0) sb_append(sb, " || ");
+                    sb_append(sb, "_sw%d === (", id);
+                    generate_expr_js(sb, c->children[j]);
+                    sb_append(sb, ")");
+                }
+                sb_append(sb, ") {\n");
+                gen_clause_js(sb, c, indent + 2);
+                emitted = 1;
+            }
+            if (deflt) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%s{\n", emitted ? "} else " : "");
+                gen_clause_js(sb, deflt, indent + 2);
+                emitted = 1;
+            }
+            if (emitted) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "}\n");
+            }
+            indent_code(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+        }
 
         case AST_CONTINUE_STMT:
             indent_code(sb, indent);
@@ -1656,7 +1898,7 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
             }
             break;
         case AST_IDENTIFIER:
-            sb_append(sb, "%s", node->value ? node->value : "var");
+            sb_append(sb, "%s", shadow_name(node->value));
             break;
         case AST_BINARY_EXPR:
             /* `x == null` / `x != null` become NaN tests to match how a
@@ -1809,16 +2051,101 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
     }
 }
 
+static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent);
+
+/* See gen_clause_python. */
+static void gen_clause_java(StringBuilder *sb, ASTNode *clause, int indent) {
+    int loop = switch_clause_breaks(clause);
+    if (loop) {
+        indent_code(sb, indent);
+        sb_append(sb, "do {\n");
+        indent++;
+    }
+    generate_node_java(sb, clause->body, indent);
+    if (loop) {
+        indent_code(sb, indent - 1);
+        sb_append(sb, "} while (false);\n");
+    }
+}
+
 static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     
     switch (node->type) {
         /*  A dropped `break` turns a loop that terminates into one
            that does not, so this must never fall through to the default. */
+
+        case AST_DO_WHILE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "do {\n");
+            generate_node_java(sb, node->body, indent + 1);
+            indent_code(sb, indent);
+            sb_append(sb, "} while (");
+            generate_expr_java(sb, node->condition);
+            sb_append(sb, ");\n");
+            break;
         case AST_BREAK_STMT:
             indent_code(sb, indent);
             sb_append(sb, "break;\n");
             break;
+
+        case AST_SWITCH_STMT: {
+            static int sw_java = 0;
+            int id = sw_java++;
+            ASTNode *deflt = switch_default_clause(node);
+            int is_str = infer_expr_type(node->condition) == TYPE_STRING;
+            int emitted = 0;
+            (void)is_str;
+
+            indent_code(sb, indent);
+            sb_append(sb, "{\n");
+            indent_code(sb, indent + 1);
+            sb_append(sb, "var _sw%d = ", id);
+            generate_expr_java(sb, node->condition);
+            sb_append(sb, ";\n");
+
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *c = node->children[i];
+                if (!c || c->type != AST_CASE_CLAUSE || c->child_count == 0) continue;
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%sif (", emitted ? "} else " : "");
+                for (int j = 0; j < c->child_count; j++) {
+                    if (j > 0) sb_append(sb, " || ");
+                    if (is_str) {
+                        sb_append(sb, "_sw%d.equals(", id);
+                        generate_expr_java(sb, c->children[j]);
+                        sb_append(sb, ")");
+                    } else {
+                        sb_append(sb, "_sw%d == (", id);
+                        generate_expr_java(sb, c->children[j]);
+                        sb_append(sb, ")");
+                    }
+                }
+                sb_append(sb, ") {\n");
+                gen_clause_java(sb, c, indent + 2);
+                emitted = 1;
+            }
+            if (deflt) {
+                /* `else if (true)` rather than `else`. Java rejects a
+                   statement it can prove unreachable, and a chain whose every
+                   branch returns makes whatever follows the switch exactly
+                   that -- so `fn f() { switch ... } return "unreachable" }`
+                   failed to compile. JLS 14.21 deliberately ignores a
+                   constant condition on an `if`, so this is reachable again
+                   while running in precisely the same cases. */
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%s{\n", emitted ? "} else if (true) " : "");
+                gen_clause_java(sb, deflt, indent + 2);
+                emitted = 1;
+            }
+            if (emitted) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "}\n");
+            }
+            indent_code(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+        }
 
         case AST_CONTINUE_STMT:
             indent_code(sb, indent);
@@ -1845,6 +2172,7 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
                 dt = infer_expr_type(node->right);
             const char *name = node->value ? node->value
                              : (node->type == AST_CONST_DECL ? "CONST" : "var");
+            scope_push(node->value);
             if (dt == TYPE_INT || dt == TYPE_FLOAT ||
                 dt == TYPE_BOOL || dt == TYPE_STRING) {
                 sb_append(sb, "%s%s %s = ", kw, java_type(dt), name);
@@ -1862,7 +2190,13 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             break;
         }
             
-        case AST_FUNCTION_DECL:
+        case AST_FUNCTION_DECL: {
+            /* A method is its own scope: names from another one are not
+               visible here, and the parameters are. */
+            int scope_mark  = g_nscope;
+            int rename_mark = g_nrename;
+            g_nscope = g_nrename = 0;
+
             sb_append(sb, "\n");
             indent_code(sb, indent);
             g_java_fn_type = node->data_type;
@@ -1873,13 +2207,37 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
                     if (i > 0) sb_append(sb, ", ");
                     sb_append(sb, "%s %s", java_type(node->children[i]->data_type),
                               node->children[i]->value ? node->children[i]->value : "arg");
+                    scope_push(node->children[i]->value);
                 }
             }
             sb_append(sb, ") {\n");
             if (node->body) generate_node_java(sb, node->body, indent + 1);
+
+            /* Java is alone in checking both that a value-returning method
+               cannot fall off its end and that no statement is unreachable.
+               A method ending in a switch whose every case returns satisfies
+               neither on its own -- see the `else if (true)` above, which
+               keeps anything written after the switch reachable and in doing
+               so makes the method look as though it can complete. A fallback
+               return settles it, and is only written when the body does not
+               already end in one, so it can never be the unreachable
+               statement Java would reject. */
+            if (node->data_type != TYPE_VOID && stmt_completes(node->body)) {
+                indent_code(sb, indent + 1);
+                switch (node->data_type) {
+                case TYPE_INT:    sb_append(sb, "return 0L;\n");          break;
+                case TYPE_FLOAT:  sb_append(sb, "return Double.NaN;\n");  break;
+                case TYPE_BOOL:   sb_append(sb, "return false;\n");       break;
+                default:          sb_append(sb, "return null;\n");        break;
+                }
+            }
             indent_code(sb, indent);
             sb_append(sb, "}\n");
+
+            g_nscope  = scope_mark;
+            g_nrename = rename_mark;
             break;
+        }
             
         case AST_IF_STMT:
             indent_code(sb, indent);
@@ -1913,10 +2271,13 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "\n");
             break;
             
-        case AST_FOR_STMT:
+        case AST_FOR_STMT: {
+            int scope_mark  = g_nscope;
+            int rename_mark = g_nrename;
             indent_code(sb, indent);
             {
-                const char *var = node->value ? node->value : "i";
+                const char *var =
+                    shadow_declare_loop_var(node->value ? node->value : "i");
                 if (node->children && node->child_count > 0 &&
                     node->children[0]->type == AST_RANGE_EXPR) {
                     ASTNode *range = node->children[0];
@@ -1947,8 +2308,11 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             generate_node_java(sb, node->body, indent + 1);
             indent_code(sb, indent);
             sb_append(sb, "}\n");
+            g_nscope  = scope_mark;
+            g_nrename = rename_mark;
             break;
-            
+        }
+
         case AST_WHILE_STMT:
             indent_code(sb, indent);
             sb_append(sb, "while (");
@@ -2282,15 +2646,87 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
     }
 }
 
+static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent);
+
+/* See gen_clause_python. */
+static void gen_clause_swift(StringBuilder *sb, ASTNode *clause, int indent) {
+    int loop = switch_clause_breaks(clause);
+    if (loop) {
+        indent_code(sb, indent);
+        sb_append(sb, "repeat {\n");
+        indent++;
+    }
+    generate_node_swift(sb, clause->body, indent);
+    if (loop) {
+        indent_code(sb, indent - 1);
+        sb_append(sb, "} while false\n");
+    }
+}
+
 static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     switch (node->type) {
         /*  A dropped `break` turns a loop that terminates into one
            that does not, so this must never fall through to the default. */
+
+        case AST_DO_WHILE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "repeat {\n");
+            generate_node_swift(sb, node->body, indent + 1);
+            indent_code(sb, indent);
+            sb_append(sb, "} while ");
+            generate_expr_swift(sb, node->condition);
+            sb_append(sb, "\n");
+            break;
         case AST_BREAK_STMT:
             indent_code(sb, indent);
             sb_append(sb, "break\n");
             break;
+
+        case AST_SWITCH_STMT: {
+            static int sw_swift = 0;
+            int id = sw_swift++;
+            ASTNode *deflt = switch_default_clause(node);
+            int is_str = infer_expr_type(node->condition) == TYPE_STRING;
+            int emitted = 0;
+            (void)is_str;
+
+            indent_code(sb, indent);
+            sb_append(sb, "do {\n");
+            indent_code(sb, indent + 1);
+            sb_append(sb, "let _sw%d = ", id);
+            generate_expr_swift(sb, node->condition);
+            sb_append(sb, ";\n");
+
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *c = node->children[i];
+                if (!c || c->type != AST_CASE_CLAUSE || c->child_count == 0) continue;
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%sif (", emitted ? "} else " : "");
+                for (int j = 0; j < c->child_count; j++) {
+                    if (j > 0) sb_append(sb, " || ");
+                    sb_append(sb, "_sw%d == (", id);
+                    generate_expr_swift(sb, c->children[j]);
+                    sb_append(sb, ")");
+                }
+                sb_append(sb, ") {\n");
+                gen_clause_swift(sb, c, indent + 2);
+                emitted = 1;
+            }
+            if (deflt) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%s{\n", emitted ? "} else " : "");
+                gen_clause_swift(sb, deflt, indent + 2);
+                emitted = 1;
+            }
+            if (emitted) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "}\n");
+            }
+            indent_code(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+        }
 
         case AST_CONTINUE_STMT:
             indent_code(sb, indent);
@@ -2637,15 +3073,91 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
     }
 }
 
+static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent);
+
+/* See gen_clause_python. */
+static void gen_clause_kotlin(StringBuilder *sb, ASTNode *clause, int indent) {
+    int loop = switch_clause_breaks(clause);
+    if (loop) {
+        indent_code(sb, indent);
+        sb_append(sb, "do {\n");
+        indent++;
+    }
+    generate_node_kotlin(sb, clause->body, indent);
+    if (loop) {
+        indent_code(sb, indent - 1);
+        sb_append(sb, "} while (false)\n");
+    }
+}
+
 static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     switch (node->type) {
         /*  A dropped `break` turns a loop that terminates into one
            that does not, so this must never fall through to the default. */
+
+        case AST_DO_WHILE_STMT:
+            indent_code(sb, indent);
+            sb_append(sb, "do {\n");
+            generate_node_kotlin(sb, node->body, indent + 1);
+            indent_code(sb, indent);
+            sb_append(sb, "} while (");
+            generate_expr_kotlin(sb, node->condition);
+            sb_append(sb, ")\n");
+            break;
         case AST_BREAK_STMT:
             indent_code(sb, indent);
             sb_append(sb, "break\n");
             break;
+
+        case AST_SWITCH_STMT: {
+            /* No enclosing `run { }`: it is an inline lambda, and Kotlin
+               rejects a `break` or `continue` that crosses one -- a case body
+               that continues the loop around the switch would not compile.
+               The scrutinee is named uniquely instead, so it needs no scope
+               of its own. */
+            static int sw_kotlin = 0;
+            int id = sw_kotlin++;
+            ASTNode *deflt = switch_default_clause(node);
+            int emitted = 0;
+
+            indent_code(sb, indent);
+            sb_append(sb, "val _sw%d = ", id);
+            generate_expr_kotlin(sb, node->condition);
+            sb_append(sb, "\n");
+
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *c = node->children[i];
+                if (!c || c->type != AST_CASE_CLAUSE || c->child_count == 0) continue;
+                indent_code(sb, indent);
+                sb_append(sb, "%sif (", emitted ? "} else " : "");
+                for (int j = 0; j < c->child_count; j++) {
+                    if (j > 0) sb_append(sb, " || ");
+                    sb_append(sb, "_sw%d == (", id);
+                    generate_expr_kotlin(sb, c->children[j]);
+                    sb_append(sb, ")");
+                }
+                sb_append(sb, ") {\n");
+                gen_clause_kotlin(sb, c, indent + 1);
+                emitted = 1;
+            }
+            if (deflt) {
+                if (emitted) {
+                    indent_code(sb, indent);
+                    sb_append(sb, "} else {\n");
+                    gen_clause_kotlin(sb, deflt, indent + 1);
+                } else {
+                    /* Nothing to be an `else` of: the default is all there
+                       is, so it is simply the code that runs. */
+                    gen_clause_kotlin(sb, deflt, indent);
+                }
+            }
+            if (emitted) {
+                indent_code(sb, indent);
+                sb_append(sb, "}\n");
+            }
+            break;
+        }
 
         case AST_CONTINUE_STMT:
             indent_code(sb, indent);
@@ -3224,16 +3736,87 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
     }
 }
 
+/* See gen_clause_python. `1.times` is Ruby's one-iteration loop, and `break`
+   leaves the block it is written in. */
+static void gen_clause_ruby(StringBuilder *sb, ASTNode *clause, int indent) {
+    int loop = switch_clause_breaks(clause);
+    if (loop) {
+        indent_ruby(sb, indent);
+        sb_append(sb, "1.times do\n");
+        indent++;
+    }
+    generate_node_ruby(sb, clause->body, indent);
+    if (loop) {
+        indent_ruby(sb, indent - 1);
+        sb_append(sb, "end\n");
+    }
+}
+
 static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
 
     switch (node->type) {
         /* Ruby spells `continue` as `next`. A dropped `break` turns a loop that terminates into one
            that does not, so this must never fall through to the default. */
+
+        case AST_DO_WHILE_STMT:
+            /* Ruby's `begin ... end while` runs the body first, but it is a
+               quirk of `begin`, not something that reads as a loop. */
+            indent_ruby(sb, indent);
+            sb_append(sb, "while true\n");
+            generate_node_ruby(sb, node->body, indent + 1);
+            indent_ruby(sb, indent + 1);
+            sb_append(sb, "break unless (");
+            generate_expr_ruby(sb, node->condition);
+            sb_append(sb, ")\n");
+            indent_ruby(sb, indent);
+            sb_append(sb, "end\n");
+            break;
         case AST_BREAK_STMT:
             indent_ruby(sb, indent);
             sb_append(sb, "break\n");
             break;
+
+        case AST_SWITCH_STMT: {
+            /* Not `case/when`: Ruby's `when` compares with ===, which for a
+               Range or a Class means something other than equality. */
+            static int sw_ruby = 0;
+            int id = sw_ruby++;
+            ASTNode *deflt = switch_default_clause(node);
+            int emitted = 0;
+
+            indent_ruby(sb, indent);
+            sb_append(sb, "_sw%d = ", id);
+            generate_expr_ruby(sb, node->condition);
+            sb_append(sb, "\n");
+
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *c = node->children[i];
+                if (!c || c->type != AST_CASE_CLAUSE || c->child_count == 0) continue;
+                indent_ruby(sb, indent);
+                sb_append(sb, "%s ", emitted ? "elsif" : "if");
+                for (int j = 0; j < c->child_count; j++) {
+                    if (j > 0) sb_append(sb, " || ");
+                    sb_append(sb, "_sw%d == (", id);
+                    generate_expr_ruby(sb, c->children[j]);
+                    sb_append(sb, ")");
+                }
+                sb_append(sb, "\n");
+                gen_clause_ruby(sb, c, indent + 1);
+                emitted = 1;
+            }
+            if (deflt) {
+                indent_ruby(sb, indent);
+                sb_append(sb, "%s\n", emitted ? "else" : "if true");
+                gen_clause_ruby(sb, deflt, indent + 1);
+                emitted = 1;
+            }
+            if (emitted) {
+                indent_ruby(sb, indent);
+                sb_append(sb, "end\n");
+            }
+            break;
+        }
 
         case AST_CONTINUE_STMT:
             indent_ruby(sb, indent);
@@ -3777,6 +4360,23 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
     }
 }
 
+static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent);
+
+/* See gen_clause_python. */
+static void gen_clause_go(StringBuilder *sb, ASTNode *clause, int indent) {
+    int loop = switch_clause_breaks(clause);
+    if (loop) {
+        indent_go(sb, indent);
+        sb_append(sb, "for _once := 0; _once < 1; _once++ {\n");
+        indent++;
+    }
+    generate_node_go(sb, clause->body, indent);
+    if (loop) {
+        indent_go(sb, indent - 1);
+        sb_append(sb, "}\n");
+    }
+}
+
 static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
 
@@ -3979,6 +4579,59 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
             indent_go(sb, indent);
             sb_append(sb, "break\n");
             break;
+
+        case AST_SWITCH_STMT: {
+            static int sw_go = 0;
+            int id = sw_go++;
+            ASTNode *deflt = switch_default_clause(node);
+            DataType st = infer_expr_type(node->condition);
+            int is_str = st == TYPE_STRING;
+            int emitted = 0;
+            (void)is_str;
+
+            indent_go(sb, indent);
+            sb_append(sb, "{\n");
+            indent_go(sb, indent + 1);
+            /* Named type, not `:=`. An integer literal scrutinee would
+               otherwise be Go's `int` while every SUB integer around it is
+               `int64`, and Go does not mix the two. */
+            sb_append(sb, "var _sw%d %s = ", id, go_type(st));
+            generate_expr_go(sb, node->condition);
+            sb_append(sb, ";\n");
+            /* Go rejects a declared-and-unused variable, and a switch that is
+               nothing but a default never reads the scrutinee. */
+            indent_go(sb, indent + 1);
+            sb_append(sb, "_ = _sw%d\n", id);
+
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *c = node->children[i];
+                if (!c || c->type != AST_CASE_CLAUSE || c->child_count == 0) continue;
+                indent_go(sb, indent + 1);
+                sb_append(sb, "%sif (", emitted ? "} else " : "");
+                for (int j = 0; j < c->child_count; j++) {
+                    if (j > 0) sb_append(sb, " || ");
+                    sb_append(sb, "_sw%d == (", id);
+                    generate_expr_go(sb, c->children[j]);
+                    sb_append(sb, ")");
+                }
+                sb_append(sb, ") {\n");
+                gen_clause_go(sb, c, indent + 2);
+                emitted = 1;
+            }
+            if (deflt) {
+                indent_go(sb, indent + 1);
+                sb_append(sb, "%s{\n", emitted ? "} else " : "");
+                gen_clause_go(sb, deflt, indent + 2);
+                emitted = 1;
+            }
+            if (emitted) {
+                indent_go(sb, indent + 1);
+                sb_append(sb, "}\n");
+            }
+            indent_go(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+        }
 
         case AST_CONTINUE_STMT:
             indent_go(sb, indent);

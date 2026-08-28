@@ -1392,6 +1392,60 @@ static ASTNode* parse_throw(ParserState *state) {
             match <expr> { case <value> => <body> ... default => <body> }
    ======================================== */
 
+/* Statements of one `case`/`default`, gathered into a block.
+
+   They have to be a block rather than children of the clause: a clause's
+   children[] are its match values, and a body statement sitting in the same
+   array is indistinguishable from a value to every consumer downstream. */
+static ASTNode* parse_clause_body(ParserState *state, int braced) {
+    ASTNode *block = create_node(AST_BLOCK, current_token(state), NULL);
+    if (!block) return NULL;
+
+    ASTNode *first_stmt = NULL;
+    ASTNode *last_stmt = NULL;
+    while (!match(state, TOKEN_EOF)) {
+        if (braced && match(state, TOKEN_RBRACE)) break;
+        if (!braced && match(state, TOKEN_END)) break;
+        if (match(state, TOKEN_IDENTIFIER) &&
+            current_token(state)->value &&
+            (strcmp(current_token(state)->value, "case") == 0 ||
+             strcmp(current_token(state)->value, "default") == 0)) {
+            break;
+        }
+        ASTNode *stmt = parse_statement(state);
+        if (stmt) {
+            if (!first_stmt) { first_stmt = stmt; last_stmt = stmt; }
+            else { last_stmt->next = stmt; last_stmt = stmt; }
+            add_child(block, stmt);
+        } else {
+            synchronize(state);
+        }
+        skip_separators(state);
+    }
+
+    /* Cases do not fall through, so a `break` in tail position -- the way
+       almost every switch is written -- says nothing the next `}` does not
+       already say. Dropping it here means no backend has to invent a way to
+       express "leave the switch" for the common shape; C has no statement
+       for it inside an if/else chain, and Python and Ruby have none at all. */
+    if (block->child_count > 0 &&
+        block->children[block->child_count - 1]->type == AST_BREAK_STMT) {
+        ASTNode *tail = block->children[--block->child_count];
+        if (first_stmt == tail) {
+            first_stmt = NULL;
+        } else {
+            ASTNode *prev = first_stmt;
+            while (prev && prev->next != tail) prev = prev->next;
+            if (prev) prev->next = NULL;
+        }
+        tail->next = NULL;
+        parser_free_ast(tail);
+    }
+
+    block->body = first_stmt;
+    return block;
+}
+
 static ASTNode* parse_switch(ParserState *state) {
     Token *start = current_token(state);
     advance(state); /* consume 'switch' or 'match' identifier */
@@ -1444,29 +1498,7 @@ static ASTNode* parse_switch(ParserState *state) {
 
             skip_separators(state);
 
-            /* Parse default body - collect statements until next case/default or closing */
-            ASTNode *first_stmt = NULL;
-            ASTNode *last_stmt = NULL;
-            while (!match(state, TOKEN_EOF)) {
-                if (braced && match(state, TOKEN_RBRACE)) break;
-                if (!braced && match(state, TOKEN_END)) break;
-                if (match(state, TOKEN_IDENTIFIER) &&
-                    current_token(state)->value &&
-                    (strcmp(current_token(state)->value, "case") == 0 ||
-                     strcmp(current_token(state)->value, "default") == 0)) {
-                    break;
-                }
-                ASTNode *stmt = parse_statement(state);
-                if (stmt) {
-                    if (!first_stmt) { first_stmt = stmt; last_stmt = stmt; }
-                    else { last_stmt->next = stmt; last_stmt = stmt; }
-                    add_child(def_node, stmt);
-                } else {
-                    synchronize(state);
-                }
-                skip_separators(state);
-            }
-            def_node->body = first_stmt;
+            def_node->body = parse_clause_body(state, braced);
 
             add_child(switch_node, def_node);
             skip_separators(state);
@@ -1514,29 +1546,7 @@ static ASTNode* parse_switch(ParserState *state) {
 
             skip_separators(state);
 
-            /* Parse case body - collect statements until next case/default or closing */
-            ASTNode *first_stmt = NULL;
-            ASTNode *last_stmt = NULL;
-            while (!match(state, TOKEN_EOF)) {
-                if (braced && match(state, TOKEN_RBRACE)) break;
-                if (!braced && match(state, TOKEN_END)) break;
-                if (match(state, TOKEN_IDENTIFIER) &&
-                    current_token(state)->value &&
-                    (strcmp(current_token(state)->value, "case") == 0 ||
-                     strcmp(current_token(state)->value, "default") == 0)) {
-                    break;
-                }
-                ASTNode *stmt = parse_statement(state);
-                if (stmt) {
-                    if (!first_stmt) { first_stmt = stmt; last_stmt = stmt; }
-                    else { last_stmt->next = stmt; last_stmt = stmt; }
-                    add_child(case_node, stmt);
-                } else {
-                    synchronize(state);
-                }
-                skip_separators(state);
-            }
-            case_node->body = first_stmt;
+            case_node->body = parse_clause_body(state, braced);
 
             add_child(switch_node, case_node);
             skip_separators(state);

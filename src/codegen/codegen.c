@@ -898,6 +898,15 @@ static DataType find_return_type_recursive(ASTNode *node) {
     return TYPE_UNKNOWN;
 }
 
+/* Which construct a `break` belongs to at the point being generated.
+   -1 means the nearest enclosing breakable is a loop, so `break;` is right.
+   Anything else is the id of an enclosing switch, whose cases are an if/else
+   chain that `break;` would either escape wrongly or fail to compile in. */
+static int g_break_switch = -1;
+/* Set when a `break` actually emitted a jump, so an unused label -- which
+   compilers warn about -- is never written. */
+static int g_break_used = 0;
+
 static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     
@@ -1085,7 +1094,9 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
                     sb_append(sb, "for (long %s = 0; %s < 10; %s++) {\n", var, var, var);
                 }
             }
-            generate_node(sb, node->body, indent + 1);
+            { int sv = g_break_switch; g_break_switch = -1;
+              generate_node(sb, node->body, indent + 1);
+              g_break_switch = sv; }
             indent_code(sb, indent);
             sb_append(sb, "}\n");
             break;
@@ -1095,7 +1106,9 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "while (");
             generate_expression(sb, node->condition);
             sb_append(sb, ") {\n");
-            generate_node(sb, node->body, indent + 1);
+            { int sv = g_break_switch; g_break_switch = -1;
+              generate_node(sb, node->body, indent + 1);
+              g_break_switch = sv; }
             indent_code(sb, indent);
             sb_append(sb, "}\n");
             break;
@@ -1149,7 +1162,9 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_DO_WHILE_STMT:
             indent_code(sb, indent);
             sb_append(sb, "do {\n");
-            generate_node(sb, node->body, indent + 1);
+            { int sv = g_break_switch; g_break_switch = -1;
+              generate_node(sb, node->body, indent + 1);
+              g_break_switch = sv; }
             indent_code(sb, indent);
             sb_append(sb, "} while (");
             generate_expression(sb, node->condition);
@@ -1158,7 +1173,11 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
 
         case AST_BREAK_STMT:
             indent_code(sb, indent);
-            sb_append(sb, "break;\n");
+            if (g_break_switch >= 0) {
+                sb_append(sb, "goto _sw%d_end;\n", g_break_switch);
+                g_break_used = 1;
+            }
+            else                     sb_append(sb, "break;\n");
             break;
 
         case AST_CONTINUE_STMT:
@@ -1166,49 +1185,83 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "continue;\n");
             break;
 
-        case AST_SWITCH_STMT:
+        case AST_SWITCH_STMT: {
+            /* An if/else chain rather than a C `switch`. SUB matches on any
+               value, including strings and floats, and allows a case value
+               that is not a compile-time constant -- none of which a C
+               `switch` label can express. Cases do not fall through, so the
+               chain is also the exact semantics, not an approximation. */
+            static int sw_depth = 0;
+            DataType st = infer_expr_type(node->condition);
+            const char *ctype = st == TYPE_FLOAT  ? "double"
+                              : st == TYPE_STRING ? "const char*"
+                              : st == TYPE_BOOL   ? "int"
+                                                  : "long long";
+            int id = sw_depth++;
+            int used_sv = g_break_used;
+            g_break_used = 0;
+
             indent_code(sb, indent);
-            sb_append(sb, "switch ((long)(");
+            sb_append(sb, "{\n");
+            indent_code(sb, indent + 1);
+            sb_append(sb, "%s _sw%d = (", ctype, id);
             generate_expression(sb, node->condition);
-            sb_append(sb, ")) {\n");
-            if (node->children) {
-                for (int i = 0; i < node->child_count; i++) {
-                    ASTNode *clause = node->children[i];
-                    if (!clause) continue;
-                    if (clause->type == AST_CASE_CLAUSE) {
-                        indent_code(sb, indent + 1);
-                        sb_append(sb, "case (long)(");
-                        generate_expression(sb, clause->condition);
-                        sb_append(sb, "): {\n");
-                        generate_node(sb, clause->body, indent + 2);
-                        if (clause->children) {
-                            for (int j = 0; j < clause->child_count; j++) {
-                                generate_node(sb, clause->children[j], indent + 2);
-                            }
-                        }
-                        indent_code(sb, indent + 2);
-                        sb_append(sb, "break;\n");
-                        indent_code(sb, indent + 1);
-                        sb_append(sb, "}\n");
-                    } else if (clause->type == AST_DEFAULT_CLAUSE) {
-                        indent_code(sb, indent + 1);
-                        sb_append(sb, "default: {\n");
-                        generate_node(sb, clause->body, indent + 2);
-                        if (clause->children) {
-                            for (int j = 0; j < clause->child_count; j++) {
-                                generate_node(sb, clause->children[j], indent + 2);
-                            }
-                        }
-                        indent_code(sb, indent + 2);
-                        sb_append(sb, "break;\n");
-                        indent_code(sb, indent + 1);
-                        sb_append(sb, "}\n");
+            sb_append(sb, ");\n");
+            sb_append(sb, "        (void)_sw%d;\n", id);
+
+            ASTNode *deflt = NULL;
+            int emitted = 0;
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *clause = node->children[i];
+                if (!clause) continue;
+                if (clause->type == AST_DEFAULT_CLAUSE) { deflt = clause; continue; }
+                if (clause->type != AST_CASE_CLAUSE || clause->child_count == 0) continue;
+
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%sif (", emitted ? "} else " : "");
+                for (int j = 0; j < clause->child_count; j++) {
+                    if (j > 0) sb_append(sb, " || ");
+                    if (st == TYPE_STRING) {
+                        sb_append(sb, "strcmp(_sw%d, ", id);
+                        generate_expression(sb, clause->children[j]);
+                        sb_append(sb, ") == 0");
+                    } else {
+                        sb_append(sb, "_sw%d == (", id);
+                        generate_expression(sb, clause->children[j]);
+                        sb_append(sb, ")");
                     }
                 }
+                sb_append(sb, ") {\n");
+                if (clause->body) {
+                    int sv = g_break_switch; g_break_switch = id;
+                    generate_node(sb, clause->body, indent + 2);
+                    g_break_switch = sv;
+                }
+                emitted = 1;
             }
+
+            if (deflt) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%s{\n", emitted ? "} else " : "");
+                if (deflt->body) {
+                    int sv = g_break_switch; g_break_switch = id;
+                    generate_node(sb, deflt->body, indent + 2);
+                    g_break_switch = sv;
+                }
+                emitted = 1;
+            }
+            if (emitted) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "}\n");
+            }
+            /* `break` inside a case jumps here; the label needs a statement
+               after it. Only written when something actually jumps to it. */
+            if (g_break_used) sb_append(sb, "_sw%d_end: (void)0;\n", id);
+            g_break_used = used_sv;
             indent_code(sb, indent);
             sb_append(sb, "}\n");
             break;
+        }
 
         case AST_TRY_STMT:
             indent_code(sb, indent);

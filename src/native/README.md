@@ -103,11 +103,13 @@ the top of the exponent range — the output is identical.
 
 ## What is not here yet
 
-Arrays and objects, classes, `input()`, string slicing, `try`/`catch`,
-`switch`, `do`/`while`, iterating anything but `range(...)`, and functions of
+Objects, classes, `input()`, string slicing, `try`/`catch`, and functions of
 more than six parameters. These are reported by name through `nc_fail()` and
 the driver falls back to the C backend, so an unimplemented construct is
 never mis-compiled — it is declined, out loud.
+
+Arrays, `switch`, `do`/`while`, `break`/`continue` and `for x in <array>` all
+compile here now; the list above is what is left.
 
 ## Testing
 

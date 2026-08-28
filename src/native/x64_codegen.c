@@ -21,6 +21,7 @@
    ======================================== */
 
 #include "x64_internal.h"
+#include "../codegen/codegen_switch.h"
 #include "sub_compiler.h"
 #include "codegen_infer.h"
 #include <stdio.h>
@@ -43,6 +44,7 @@ typedef struct LoopCtx {
     struct LoopCtx *prev;
     size_t *brk;  int nbrk,  cbrk;
     size_t *cont; int ncont, ccont;
+    int is_switch;   /* catches `break`, but `continue` belongs to a loop */
 } LoopCtx;
 
 typedef struct { char *name; ASTNode *decl; } FnRec;
@@ -57,6 +59,7 @@ static DataType g_literal_elem = TYPE_UNKNOWN;
 /* Current function being emitted. */
 static struct {
     Local   *locals; int nloc, cloc;
+    int      peak;   /* most slots live at once: what the frame must hold */
     DataType ret_type;
     int      ret_nullable;
     size_t  *rets;   int nrets, crets;
@@ -69,6 +72,8 @@ static void gen_stmt(ASTNode *n);
 static void gen_expr(ASTNode *n);
 static void gen_as(ASTNode *n, DataType want);
 static DataType ty(ASTNode *n);
+static void gen_do_while(ASTNode *n);
+static void gen_switch(ASTNode *n);
 
 /* ----------------------------------------------------------------
    Small growable arrays
@@ -93,11 +98,23 @@ static void here(size_t site) { e_patch_rel32(T, site, C->text.len); }
    Locals
    ---------------------------------------------------------------- */
 
+/* Backwards, so an inner declaration shadows an outer one of the same name. */
 static Local *loc_find(const char *name) {
     if (!name) return NULL;
-    for (int i = 0; i < F.nloc; i++)
+    for (int i = F.nloc - 1; i >= 0; i--)
         if (strcmp(F.locals[i].name, name) == 0) return &F.locals[i];
     return NULL;
+}
+
+/* Slots live until the block that declared them ends. A loop body is a block,
+   which is what makes `for i in ...` around an outer `i` shadow it rather
+   than overwrite it -- the interpreter gives each iteration its own scope, so
+   the outer name still holds its old value once the loop is done. */
+static int loc_mark(void) { return F.nloc; }
+
+static void loc_release(int mark) {
+    for (int i = mark; i < F.nloc; i++) free(F.locals[i].name);
+    F.nloc = mark;
 }
 
 static Local *loc_add(const char *name, DataType t) {
@@ -110,6 +127,21 @@ static Local *loc_add(const char *name, DataType t) {
     e->type = t;
     e->elem = TYPE_INT;
     F.nloc++;
+    if (F.nloc > F.peak) F.peak = F.nloc;
+    return e;
+}
+
+/* A fresh slot even when the name is already taken: what a loop variable
+   needs, so that assigning to it cannot reach the outer one. */
+static Local *loc_declare(const char *name, DataType t) {
+    if (F.nloc == F.cloc) F.locals = grow(F.locals, &F.cloc, sizeof(Local));
+    Local *e = &F.locals[F.nloc];
+    e->name = strdup(name ? name : "_");
+    e->slot = F.nloc;
+    e->type = t;
+    e->elem = TYPE_INT;
+    F.nloc++;
+    if (F.nloc > F.peak) F.peak = F.nloc;
     return e;
 }
 
@@ -1022,7 +1054,91 @@ static void gen_while(ASTNode *n) {
     loop_leave(&lc, top, C->text.len);
 }
 
+static void gen_do_while(ASTNode *n) {
+    LoopCtx lc; loop_enter(&lc);
+    size_t top = C->text.len;
+    gen_block(n->body);
+    /* `continue` in a do/while goes to the test, not back to the top. */
+    size_t test = C->text.len;
+    gen_truth(n->condition);
+    e_test_r_r(T, RAX, RAX);
+    size_t again = e_jcc(T, CC_NE);
+    e_patch_rel32(T, again, top);
+    loop_leave(&lc, test, C->text.len);
+}
+
+/* Compare the scrutinee, held in `sw`, against the value in RAX and leave the
+   flags set so that CC_E means "these match". */
+static void gen_switch_cmp(Local *sw, DataType st) {
+    if (st == TYPE_STRING) {
+        e_mov_r_r(T, RSI, RAX);
+        e_mov_r_mem(T, RDI, RBP, slot_disp(sw));
+        nc_call_rt(C, RT_STRCMP);
+        e_cmp_r_imm(T, RAX, 0);
+    } else if (st == TYPE_FLOAT) {
+        e_mov_r_mem(T, RCX, RBP, slot_disp(sw));
+        e_movq_x_r(T, XMM0, RCX);
+        e_movq_x_r(T, XMM1, RAX);
+        e_ucomisd(T, XMM0, XMM1);
+    } else {
+        e_mov_r_mem(T, RCX, RBP, slot_disp(sw));
+        e_cmp_r_r(T, RCX, RAX);
+    }
+}
+
+static void gen_switch(ASTNode *n) {
+    DataType st = concrete(ty(n->condition));
+    if (st == TYPE_ARRAY) {
+        nc_fail(C, "a switch on an array is not supported by the native "
+                   "backend (line %d)", n->line);
+        return;
+    }
+
+    /* The scrutinee is evaluated once, into a slot the case tests read. */
+    Local *sw = loc_add_hidden("sw");
+    sw->type = st;
+    gen_as(n->condition, st);
+    e_mov_mem_r(T, RBP, slot_disp(sw), RAX);
+
+    ASTNode *deflt = switch_default_clause(n);
+
+    /* A switch catches `break` the way a loop does; nothing continues it. */
+    LoopCtx lc; loop_enter(&lc); lc.is_switch = 1;
+
+    size_t *ends = NULL; int nend = 0, cend = 0;
+
+    for (int i = 0; i < n->child_count; i++) {
+        ASTNode *c = n->children[i];
+        if (!c || c->type != AST_CASE_CLAUSE || c->child_count == 0) continue;
+
+        /* Each value that matches jumps to the body; falling off the end of
+           the tests moves on to the next clause. */
+        size_t *hits = NULL; int nhit = 0, chit = 0;
+        for (int j = 0; j < c->child_count; j++) {
+            gen_as(c->children[j], st);
+            gen_switch_cmp(sw, st);
+            push_site(&hits, &nhit, &chit, e_jcc(T, CC_E));
+        }
+        size_t miss = e_jmp(T);
+        for (int j = 0; j < nhit; j++) here(hits[j]);
+        free(hits);
+
+        gen_block(c->body);
+        push_site(&ends, &nend, &cend, e_jmp(T));
+        here(miss);
+    }
+
+    if (deflt) gen_block(deflt->body);
+
+    for (int i = 0; i < nend; i++) here(ends[i]);
+    free(ends);
+
+    loop_leave(&lc, C->text.len, C->text.len);
+}
+
 static void gen_for(ASTNode *n) {
+    /* The loop variable and anything the body declares belong to the loop. */
+    int mark = loc_mark();
     ASTNode *range = (n->child_count > 0 && n->children[0] &&
                       n->children[0]->type == AST_RANGE_EXPR)
                      ? n->children[0] : NULL;
@@ -1033,7 +1149,7 @@ static void gen_for(ASTNode *n) {
         DataType elem = elem_type_of(n->condition);
         Local *arr = loc_add_hidden("arr");
         Local *idx = loc_add_hidden("idx");
-        Local *var = loc_add(n->value ? n->value : "item", elem);
+        Local *var = loc_declare(n->value ? n->value : "item", elem);
         var->type = elem;
         if (elem == TYPE_ARRAY) var->elem = TYPE_INT;
 
@@ -1064,10 +1180,12 @@ static void gen_for(ASTNode *n) {
         size_t back = e_jmp(T); e_patch_rel32(T, back, top);
         here(out);
         loop_leave(&lc, step, C->text.len);
+        loc_release(mark);
         return;
     }
 
     if (!range) {
+        loc_release(mark);
         nc_fail(C, "the native backend supports `for x in range(...)` and "
                    "`for x in <array>` (line %d)", n->line);
         return;
@@ -1075,7 +1193,7 @@ static void gen_for(ASTNode *n) {
     ASTNode *start = range->right ? range->left  : NULL;
     ASTNode *end   = range->right ? range->right : range->left;
 
-    Local *l = loc_add(n->value ? n->value : "i", TYPE_INT);
+    Local *l = loc_declare(n->value ? n->value : "i", TYPE_INT);
     l->type = TYPE_INT;
 
     if (start) gen_as(start, TYPE_INT);
@@ -1099,6 +1217,7 @@ static void gen_for(ASTNode *n) {
     size_t back = e_jmp(T); e_patch_rel32(T, back, top);
     here(out);
     loop_leave(&lc, step, C->text.len);
+    loc_release(mark);
 }
 
 static void gen_return(ASTNode *n) {
@@ -1182,18 +1301,25 @@ static void gen_stmt(ASTNode *n) {
 
     case AST_IF_STMT:    gen_if(n);    break;
     case AST_WHILE_STMT: gen_while(n); break;
+    case AST_DO_WHILE_STMT: gen_do_while(n); break;
+    case AST_SWITCH_STMT: gen_switch(n); break;
     case AST_FOR_STMT:   gen_for(n);   break;
     case AST_RETURN_STMT: gen_return(n); break;
 
     case AST_BREAK_STMT:
-        if (!F.loop) { nc_fail(C, "break outside a loop (line %d)", n->line); break; }
+        if (!F.loop) { nc_fail(C, "break outside a loop or switch (line %d)", n->line); break; }
         push_site(&F.loop->brk, &F.loop->nbrk, &F.loop->cbrk, e_jmp(T));
         break;
 
-    case AST_CONTINUE_STMT:
-        if (!F.loop) { nc_fail(C, "continue outside a loop (line %d)", n->line); break; }
-        push_site(&F.loop->cont, &F.loop->ncont, &F.loop->ccont, e_jmp(T));
+    case AST_CONTINUE_STMT: {
+        /* A switch is breakable but not continuable, so `continue` inside a
+           case belongs to whatever loop encloses the switch. */
+        LoopCtx *l = F.loop;
+        while (l && l->is_switch) l = l->prev;
+        if (!l) { nc_fail(C, "continue outside a loop (line %d)", n->line); break; }
+        push_site(&l->cont, &l->ncont, &l->ccont, e_jmp(T));
         break;
+    }
 
     case AST_CALL_EXPR:
         gen_call(n);
@@ -1255,9 +1381,9 @@ static void emit_function(ASTNode *fn, const char *name) {
         e_xor_r_r(T, RAX, RAX);
 
     for (int i = 0; i < F.nrets; i++) e_patch_rel32(T, F.rets[i], C->text.len);
-    if (F.nloc > MAX_SLOTS)
+    if (F.peak > MAX_SLOTS)
         nc_fail(C, "'%s' declares %d names; the native backend supports %d",
-                name, F.nloc, MAX_SLOTS);
+                name, F.peak, MAX_SLOTS);
 
     e_leave(T);
     e_ret(T);
@@ -1277,9 +1403,9 @@ static void emit_main(ASTNode *program) {
 
     e_xor_r_r(T, RAX, RAX);
     for (int i = 0; i < F.nrets; i++) e_patch_rel32(T, F.rets[i], C->text.len);
-    if (F.nloc > MAX_SLOTS)
+    if (F.peak > MAX_SLOTS)
         nc_fail(C, "the program declares %d top-level names; the native "
-                   "backend supports %d", F.nloc, MAX_SLOTS);
+                   "backend supports %d", F.peak, MAX_SLOTS);
     e_leave(T);
     e_ret(T);
     reset_fn(TYPE_INT, 0);

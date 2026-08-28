@@ -16,19 +16,19 @@ LDFLAGS = -lm
 CFLAGS += $(EXTRA_CFLAGS)
 
 # Source files for the main compiler/transpiler (sub)
-COMPILER_SRC = src/compilers/sub.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
+COMPILER_SRC = src/compilers/sub.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_switch.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
 COMPILER_OBJ = $(COMPILER_SRC:.c=.o)
 COMPILER_TARGET = sub
 
 # Source files for the native compiler (subc). src/native/ is the built-in
 # x86-64 backend: it emits machine code and writes the ELF itself, so a
 # compiled SUB program needs no C toolchain on the machine that runs subc.
-NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/native/x64_emit.c src/native/x64_runtime.c src/native/x64_codegen.c src/native/elf64.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
+NATIVE_COMPILER_SRC = src/compilers/sub_native.c src/native/x64_emit.c src/native/x64_runtime.c src/native/x64_codegen.c src/native/elf64.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_switch.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c src/core/utils.c
 NATIVE_COMPILER_OBJ = $(NATIVE_COMPILER_SRC:.c=.o)
 NATIVE_COMPILER_TARGET = subc
 
 # Source files for the interpreter (subi)
-INTERP_SRC = src/compilers/subi.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/core/utils.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c
+INTERP_SRC = src/compilers/subi.c src/core/interpreter.c src/core/lexer.c src/core/parser_enhanced.c src/core/semantic.c src/core/type_system.c src/core/utils.c src/codegen/codegen.c src/codegen/codegen_infer.c src/codegen/codegen_switch.c src/codegen/codegen_multilang.c src/codegen/codegen_rust.c src/codegen/codegen_cpp.c
 INTERP_OBJ = $(INTERP_SRC:.c=.o)
 INTERP_TARGET = subi
 

@@ -1,0 +1,37 @@
+# A loop variable shadows an outer name of the same name: the loop sees its
+# own, and the outer one still holds its value afterwards. Java is the only
+# target that forbids writing that directly, so the backend renames there.
+let i = 100
+for i in range(0, 3) {
+    println(i)
+}
+println(i)
+
+fn work(i) {
+    let total = 0
+    for i in range(0, 3) {
+        total = total + i
+    }
+    return total + i
+}
+println(work(5))
+
+# Nesting the same name twice.
+let n = 7
+for n in range(0, 2) {
+    for n in range(0, 2) {
+        println(n)
+    }
+}
+println(n)
+
+# A shadowed name inside a while loop's body stays shadowed only there.
+let x = 1
+let guard = 0
+while (guard < 2) {
+    for x in range(0, 2) {
+        println(x)
+    }
+    guard = guard + 1
+}
+println(x)

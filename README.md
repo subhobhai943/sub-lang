@@ -154,13 +154,13 @@ else has to be installed.
 
 **Not yet in the machine-code backend:** objects, classes, `input()`, string
 slicing (`substring`, `char_at`, `replace`, `split`, `join`), `try`/`catch`,
-`switch`, `do`/`while`, iterating a string, and functions of more than six
-parameters. Programs using these compile through the C backend
-automatically, and `subc` names the construct that forced the fallback
-rather than failing silently.
+iterating a string, and functions of more than six parameters. Programs using
+these compile through the C backend automatically, and `subc` names the
+construct that forced the fallback rather than failing silently.
 
-Arrays are supported: literals, indexing, indexed assignment, `len`,
-`push`/`append`, `pop`, and `for x in a`.
+Everything else compiles to machine code, including arrays (literals,
+indexing, indexed assignment, `len`, `push`/`append`, `pop`, `for x in a`),
+`switch`, `do`/`while`, and `break`/`continue`.
 
 ### 2. Direct Interpreter (`subi`)
 
@@ -324,18 +324,28 @@ for i in range(10) {
 
 ### Pattern Matching
 
+Cases do not fall through: the clause that matches runs its body and nothing
+else, so `break` at the end of a case is optional. A `break` in the middle of
+a case skips the rest of it, and `continue` belongs to the loop around the
+switch, not to the switch.
+
 ```sub
 let choice = 2
 
 switch choice {
     case 1:
         println("First choice")
-    case 2:
+    case 2, 3:            # one clause, several values
         println("Second choice")
     default:
         println("Other choice")
 }
 ```
+
+The scrutinee can be any value, not just an integer — strings and floats
+match too, and a case value can be any expression rather than a constant.
+Every backend lowers a switch to an if/else chain for that reason, so all ten
+agree on which clause runs.
 
 ### Exception Handling
 

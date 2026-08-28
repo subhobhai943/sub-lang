@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "codegen_cpp.h"
 #include "codegen_infer.h"
+#include "codegen_switch.h"
 #include "type_system.h"
 #include "windows_compat.h"
 #include <stdarg.h>
@@ -417,6 +418,23 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
    Statement/Node Code Generator
    ======================================== */
 
+static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent);
+
+/* See gen_clause_python. */
+static void gen_clause_cpp(StringBuilder *sb, ASTNode *clause, int indent) {
+    int loop = switch_clause_breaks(clause);
+    if (loop) {
+        indent_code(sb, indent);
+        sb_append(sb, "do {\n");
+        indent++;
+    }
+    generate_node_cpp(sb, clause->body, indent);
+    if (loop) {
+        indent_code(sb, indent - 1);
+        sb_append(sb, "} while (false);\n");
+    }
+}
+
 static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
 
@@ -587,6 +605,54 @@ static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, ";\n");
             break;
 
+
+        case AST_SWITCH_STMT: {
+            /* An if/else chain rather than a C++ `switch`: SUB matches on
+               strings and floats and on values that are not constants, and a
+               case label can be none of those. */
+            static int sw_cpp = 0;
+            int id = sw_cpp++;
+            ASTNode *deflt = switch_default_clause(node);
+            int emitted = 0;
+
+            indent_code(sb, indent);
+            sb_append(sb, "{\n");
+            indent_code(sb, indent + 1);
+            sb_append(sb, "auto _sw%d = ", id);
+            generate_expr_cpp(sb, node->condition);
+            sb_append(sb, ";\n");
+            indent_code(sb, indent + 1);
+            sb_append(sb, "(void)_sw%d;\n", id);
+
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *c = node->children[i];
+                if (!c || c->type != AST_CASE_CLAUSE || c->child_count == 0) continue;
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%sif (", emitted ? "} else " : "");
+                for (int j = 0; j < c->child_count; j++) {
+                    if (j > 0) sb_append(sb, " || ");
+                    sb_append(sb, "_sw%d == (", id);
+                    generate_expr_cpp(sb, c->children[j]);
+                    sb_append(sb, ")");
+                }
+                sb_append(sb, ") {\n");
+                gen_clause_cpp(sb, c, indent + 2);
+                emitted = 1;
+            }
+            if (deflt) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "%s{\n", emitted ? "} else " : "");
+                gen_clause_cpp(sb, deflt, indent + 2);
+                emitted = 1;
+            }
+            if (emitted) {
+                indent_code(sb, indent + 1);
+                sb_append(sb, "}\n");
+            }
+            indent_code(sb, indent);
+            sb_append(sb, "}\n");
+            break;
+        }
         case AST_BREAK_STMT:
             indent_code(sb, indent);
             sb_append(sb, "break;\n");
