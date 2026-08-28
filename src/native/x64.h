@@ -43,6 +43,12 @@
    needs; the scratch buffer is where number formatting builds its digits. */
 #define X64_G_HEAPPTR   (X64_BSS_BASE + 0)
 #define X64_G_SCRATCH   (X64_BSS_BASE + 64)      /* 256 bytes */
+/* One 8-byte cell per top-level SUB variable. A frame slot is gone when its
+   function returns, so a variable a function both reads and outlives has to
+   live somewhere fixed and writable; this is the room between the scratch
+   buffer and the start of the heap. */
+#define X64_G_GLOBALS   (X64_BSS_BASE + 0x400)
+#define X64_G_GLOBAL_N  256                      /* 2 KB, ends well below the heap */
 #define X64_HEAP_START  (X64_BSS_BASE + 0x1000)
 #define X64_BSS_SIZE    (0x1000 + (64UL << 20))  /* 64 MB of bump heap */
 

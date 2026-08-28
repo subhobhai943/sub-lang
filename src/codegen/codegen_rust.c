@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include "codegen_switch.h"
+#include "codegen_globals.h"
 
 typedef struct {
     char *buffer;
@@ -73,6 +74,19 @@ static const char* rust_array_ctor(DataType elem) {
     }
 }
 
+/* The same Vec spelled for a declaration position, where the turbofish is
+   not allowed. rust_type() falls back to Vec<i64> because it has only a
+   DataType to go on; a top-level variable has its initializer too, so its
+   static can name what the elements really are. */
+static const char* rust_array_decl(DataType elem) {
+    switch (elem) {
+    case TYPE_FLOAT:  return "Vec<f64>";
+    case TYPE_STRING: return "Vec<String>";
+    case TYPE_BOOL:   return "Vec<bool>";
+    default:          return "Vec<i64>";
+    }
+}
+
 /* Which _sub_arr_* formatter prints this element type. Rust has no way to
    dispatch on it at run time here, and a float element has to go through
    the %g formatter rather than Display. */
@@ -98,6 +112,82 @@ static const char* rust_type(DataType t, int is_param) {
         case TYPE_VOID:   return "()";
         default:          return "f64";
     }
+}
+
+/* The top-level variables of the program being generated; see
+   codegen_globals.h. In Rust they become `static mut`, which is the only
+   mutable global the language has, so every mention of one has to sit inside
+   an `unsafe` block. */
+static Globals g_globals;
+
+/* A `static` initializer must be a constant expression, so a global is
+   declared with the zero of its type here and gets its real initializer in
+   main(), where it was written. String::new() and Vec::new() are both const
+   fn, so they are constant expressions too. */
+static const char* rust_zero(DataType t) {
+    switch (t) {
+        case TYPE_INT:    return "0";
+        case TYPE_FLOAT:  return "0.0";
+        case TYPE_BOOL:   return "false";
+        case TYPE_STRING: return "String::new()";
+        case TYPE_ARRAY:  return "Vec::new()";
+        default:          return "0.0";
+    }
+}
+
+/* Rust lets nothing shadow a static: not a parameter, not a `let`, not a
+   `for` binding. Renaming whatever collides is not enough, because the
+   generated prelude has parameters of its own -- `_sub_idx(i, n)` collides
+   with a program whose top-level variables are `i` and `n`. So the statics
+   are the ones given distinct names, and everything else keeps the name the
+   program wrote.
+
+   The prefix is not one a SUB program is likely to write, and the only way
+   to collide is a *local* spelled exactly SUB_G_<some global>. */
+static DataType rust_decl_type(ASTNode *node);
+
+static const char *g_rs_shadow[GLOBALS_MAX];
+static int g_rs_nshadow = 0;
+static int g_rs_fn_mark = 0;
+
+/* Whether this mention of `name` reaches the static. A parameter or a `let`
+   of the same name inside the current function means that one instead. */
+static int rust_is_global(const char *name) {
+    if (!name || !globals_has(&g_globals, name)) return 0;
+    for (int i = 0; i < g_rs_nshadow; i++)
+        if (strcmp(g_rs_shadow[i], name) == 0) return 0;
+    return 1;
+}
+
+/* Reading a `static mut` of a type that is not Copy moves it out, which Rust
+   rejects. String and Vec globals are therefore cloned on read -- but only
+   on a read: a place being written or mutated in situ must stay the static
+   itself, or the write lands on a temporary and is lost. */
+static int rust_global_is_owned(const char *name) {
+    if (!name) return 0;
+    for (int i = 0; i < g_globals.count; i++) {
+        ASTNode *d = g_globals.decls[i];
+        if (!d->value || strcmp(d->value, name) != 0) continue;
+        DataType t = rust_decl_type(d);
+        return t == TYPE_STRING || t == TYPE_ARRAY;
+    }
+    return 0;
+}
+
+static const char *rust_name(const char *name) {
+    static char buf[4][128];
+    static int slot = 0;
+    if (!name) return "v";
+    if (!rust_is_global(name)) return name;
+    slot = (slot + 1) % 4;
+    snprintf(buf[slot], sizeof buf[0], "SUB_G_%s", name);
+    return buf[slot];
+}
+
+static DataType rust_decl_type(ASTNode *node) {
+    DataType t = node->data_type;
+    if (t == TYPE_UNKNOWN && node->right) t = infer_expr_type(node->right);
+    return t;
 }
 
 static StringBuilder* sb_create(void) {
@@ -183,6 +273,16 @@ static char* escape_string_for_rust(const char *raw) {
 }
 
 static void generate_expr_rust(StringBuilder *sb, ASTNode *node);
+
+/* A position that is written or mutated in place, rather than read. A global
+   here has to be the static itself, never the clone a read gets. */
+static void rust_place(StringBuilder *sb, ASTNode *node) {
+    if (node && node->type == AST_IDENTIFIER) {
+        sb_append(sb, "%s", rust_name(node->value));
+        return;
+    }
+    generate_expr_rust(sb, node);
+}
 static void generate_expr_rust_as(StringBuilder *sb, ASTNode *node, DataType want);
 
 static ASTNode* block_first(ASTNode *node) {
@@ -315,7 +415,12 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_VAR_DECL:
             indent_code(sb, indent);
-            sb_append(sb, "let mut %s = ", node->value ? node->value : "var");
+            /* A top-level declaration was already written as a `static mut`,
+               so here only its initializer is left, as an assignment. */
+            if (globals_is_decl(&g_globals, node))
+                sb_append(sb, "%s = ", rust_name(node->value));
+            else
+                sb_append(sb, "let mut %s = ", rust_name(node->value ? node->value : "var"));
             if (node->right) {
                 generate_expr_rust(sb, node->right);
             } else {
@@ -326,9 +431,15 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
             
         case AST_FUNCTION_DECL:
             sb_append(sb, "\nfn %s(", node->value ? node->value : "func");
+            g_rs_fn_mark = g_rs_nshadow;
+            g_rs_nshadow += fn_shadowed_globals(&g_globals, node,
+                                                g_rs_shadow + g_rs_nshadow,
+                                                GLOBALS_MAX - g_rs_nshadow);
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
-                sb_append(sb, "%s: %s", node->children[i]->value ? node->children[i]->value : "arg",
+                sb_append(sb, "%s: %s",
+                          rust_name(node->children[i]->value
+                                    ? node->children[i]->value : "arg"),
                           rust_type(node->children[i]->data_type, 1));
             }
             sb_append(sb, ")");
@@ -338,8 +449,21 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
                 sb_append(sb, " -> %s", rust_type(node->data_type, 0));
             sb_append(sb, " {\n");
             if (node->body) {
-                generate_node_rust(sb, node->body, indent + 1);
+                /* One `unsafe` around the whole body rather than one per
+                   mention: a `static mut` cannot be touched outside one, and
+                   a global may be read anywhere in an expression. */
+                int uses = fn_uses_global(&g_globals, node);
+                if (uses) {
+                    indent_code(sb, indent + 1);
+                    sb_append(sb, "unsafe {\n");
+                }
+                generate_node_rust(sb, node->body, indent + (uses ? 2 : 1));
+                if (uses) {
+                    indent_code(sb, indent + 1);
+                    sb_append(sb, "}\n");
+                }
             }
+            g_rs_nshadow = g_rs_fn_mark;
             sb_append(sb, "}\n");
             break;
             
@@ -391,7 +515,16 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
             } else {
                 sb_append(sb, "for %s in 0..10 {\n", node->value ? node->value : "i");
             }
-            generate_node_rust(sb, node->body, indent + 1);
+            {
+                /* The binding is the loop's own, so inside the body the name
+                   means it and not a top-level variable of the same name. */
+                int mark = g_rs_nshadow;
+                if (node->value && globals_has(&g_globals, node->value) &&
+                    g_rs_nshadow < GLOBALS_MAX)
+                    g_rs_shadow[g_rs_nshadow++] = node->value;
+                generate_node_rust(sb, node->body, indent + 1);
+                g_rs_nshadow = mark;
+            }
             indent_code(sb, indent);
             sb_append(sb, "}\n");
             break;
@@ -422,7 +555,7 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
             indent_code(sb, indent);
             if (node->left && node->left->type == AST_ARRAY_ACCESS) {
                 sb_append(sb, "_sub_put(&mut ");
-                generate_expr_rust(sb, node->left->left);
+                rust_place(sb, node->left->left);
                 sb_append(sb, ", ");
                 generate_expr_rust(sb, node->left->right);
                 sb_append(sb, ", ");
@@ -431,7 +564,7 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
                 sb_append(sb, ");\n");
                 break;
             }
-            generate_expr_rust(sb, node->left);
+            rust_place(sb, node->left);
             sb_append(sb, " = ");
             generate_expr_rust(sb, node->right);
             sb_append(sb, ";\n");
@@ -477,7 +610,9 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
             }
             break;
         case AST_IDENTIFIER:
-            sb_append(sb, "%s", node->value);
+            sb_append(sb, "%s", rust_name(node->value));
+            if (rust_is_global(node->value) && rust_global_is_owned(node->value))
+                sb_append(sb, ".clone()");
             break;
         case AST_BINARY_EXPR:
             /* `x == null` / `x != null` become NaN tests, matching how the
@@ -591,7 +726,7 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                     infer_expr_type(node->children[0]) == TYPE_ARRAY) {
                     if ((!strcmp(node->value, "push") ||
                          !strcmp(node->value, "append")) && node->child_count >= 2) {
-                        generate_expr_rust(sb, node->children[0]);
+                        rust_place(sb, node->children[0]);
                         sb_append(sb, ".push(");
                         generate_expr_rust_as(sb, node->children[1],
                                               infer_elem_type(node->children[0]));
@@ -600,7 +735,7 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                     }
                     if (!strcmp(node->value, "pop")) {
                         sb_append(sb, "_sub_pop_arr(&mut ");
-                        generate_expr_rust(sb, node->children[0]);
+                        rust_place(sb, node->children[0]);
                         sb_append(sb, ")");
                         break;
                     }
@@ -705,7 +840,13 @@ char* codegen_rust(ASTNode *ast, const char *source) {
     (void)source; // Source is not used yet in Rust codegen
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
-    sb_append(sb, "// Generated by SUB Language Compiler (Rust Target)\n\n");
+    sb_append(sb, "// Generated by SUB Language Compiler (Rust Target)\n");
+    /* A top-level SUB variable becomes a `static mut`, which is neither
+       upper-case nor referenceable without a lint firing. unknown_lints comes
+       first so that a rustc predating static_mut_refs stays quiet too. */
+    sb_append(sb, "#![allow(unknown_lints)]\n");
+    sb_append(sb, "#![allow(static_mut_refs)]\n");
+    sb_append(sb, "#![allow(non_upper_case_globals)]\n\n");
 
     /* SUB's floor/ceil/round yield an integer, and round() breaks ties away
        from zero - which is what f64::round already does. min/max are generic
@@ -809,18 +950,35 @@ char* codegen_rust(ASTNode *ast, const char *source) {
         return NULL;
     }
 
+    globals_collect(&g_globals, ast);
+    for (int i = 0; i < g_globals.count; i++) {
+        if (!globals_is_first(&g_globals, i)) continue;
+        ASTNode *d = g_globals.decls[i];
+        DataType t = rust_decl_type(d);
+        const char *ty = t == TYPE_ARRAY
+                       ? rust_array_decl(infer_elem_type(d->right))
+                       : rust_type(t, 0);
+        sb_append(sb, "#[allow(dead_code)] static mut SUB_G_%s: %s = %s;\n",
+                  d->value, ty, rust_zero(t));
+    }
+    if (g_globals.count > 0) sb_append(sb, "\n");
+
     if (ast->type == AST_PROGRAM) {
         for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
             if (stmt->type == AST_FUNCTION_DECL) {
                 generate_node_rust(sb, stmt, 0);
             } else {
-                generate_node_rust(main_sb, stmt, 1);
+                generate_node_rust(main_sb, stmt, g_globals.count > 0 ? 2 : 1);
             }
         }
     }
 
     sb_append(sb, "fn main() {\n");
+    /* main() initializes the statics and then goes on to use them, so its
+       whole body is inside the same one `unsafe` a function body gets. */
+    if (g_globals.count > 0) sb_append(sb, "    unsafe {\n");
     sb_append(sb, "%s", main_sb->buffer);
+    if (g_globals.count > 0) sb_append(sb, "    }\n");
     sb_append(sb, "}\n");
 
     sb_free(main_sb);

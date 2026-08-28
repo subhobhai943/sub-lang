@@ -8,6 +8,7 @@
 #include "codegen_cpp.h"
 #include "codegen_infer.h"
 #include "codegen_switch.h"
+#include "codegen_globals.h"
 #include "type_system.h"
 #include "windows_compat.h"
 #include <stdarg.h>
@@ -32,6 +33,25 @@ static const char* cpp_array_type(DataType elem) {
     case TYPE_STRING: return "std::vector<std::string>";
     case TYPE_BOOL:   return "std::vector<bool>";
     default:          return "std::vector<long long>";
+    }
+}
+
+/* The top-level variables of the program being generated; see
+   codegen_globals.h. */
+static Globals g_globals;
+
+/* A local is declared `auto x = init`, which needs the initializer to be
+   there. A global is declared once at namespace scope and assigned later in
+   main(), so it has to name a concrete type instead. */
+static const char* cpp_decl_type(ASTNode *node) {
+    DataType t = node->data_type;
+    if (t == TYPE_UNKNOWN && node->right) t = infer_expr_type(node->right);
+    switch (t) {
+    case TYPE_FLOAT:  return "double";
+    case TYPE_STRING: return "std::string";
+    case TYPE_BOOL:   return "bool";
+    case TYPE_ARRAY:  return cpp_array_type(infer_elem_type(node->right));
+    default:          return "long long";
     }
 }
 
@@ -446,8 +466,17 @@ static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent) {
             break;
 
         case AST_VAR_DECL:
+        case AST_CONST_DECL: {
+            const char *dflt = node->type == AST_VAR_DECL ? "var" : "CONST";
             indent_code(sb, indent);
-            sb_append(sb, "auto %s = ", node->value ? node->value : "var");
+            /* A top-level declaration was already written at namespace scope,
+               so here only its initializer is left, as an assignment. */
+            if (globals_is_decl(&g_globals, node))
+                sb_append(sb, "%s = ", node->value);
+            else if (node->type == AST_CONST_DECL)
+                sb_append(sb, "const auto %s = ", node->value ? node->value : dflt);
+            else
+                sb_append(sb, "auto %s = ", node->value ? node->value : dflt);
             if (node->right) {
                 generate_expr_cpp(sb, node->right);
             } else {
@@ -455,17 +484,7 @@ static void generate_node_cpp(StringBuilder *sb, ASTNode *node, int indent) {
             }
             sb_append(sb, ";\n");
             break;
-
-        case AST_CONST_DECL:
-            indent_code(sb, indent);
-            sb_append(sb, "const auto %s = ", node->value ? node->value : "CONST");
-            if (node->right) {
-                generate_expr_cpp(sb, node->right);
-            } else {
-                sb_append(sb, "0");
-            }
-            sb_append(sb, ";\n");
-            break;
+        }
 
         case AST_FUNCTION_DECL:
             /* `auto` parameter types require C++20 abbreviated function
@@ -882,6 +901,17 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
     }
 
     if (ast->type == AST_PROGRAM) {
+        /* Pass 0: the top-level variables, declared at namespace scope so
+           that the functions below can name them. The initializer stays in
+           main() where it was written; see codegen_globals.h. */
+        globals_collect(&g_globals, ast);
+        for (int i = 0; i < g_globals.count; i++) {
+            if (!globals_is_first(&g_globals, i)) continue;
+        ASTNode *d = g_globals.decls[i];
+            sb_append(sb, "static %s %s;\n", cpp_decl_type(d), d->value);
+        }
+        if (g_globals.count > 0) sb_append(sb, "\n");
+
         /* Pass 1: emit function declarations at file scope */
         for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
             if (stmt->type == AST_FUNCTION_DECL ||

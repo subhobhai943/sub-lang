@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "sub_compiler.h"
 #include "codegen_infer.h"
+#include "codegen_globals.h"
 #include "windows_compat.h"
 #include <stdarg.h>
 
@@ -907,6 +908,66 @@ static int g_break_switch = -1;
    compilers warn about -- is never written. */
 static int g_break_used = 0;
 
+/* The top-level variables of the program being generated. Their declarations
+   are lifted to file scope so that functions can name them; see
+   codegen_globals.h. */
+static Globals g_globals;
+
+/* The C type a declaration needs, as a prefix to the name. Split out from
+   the declaration itself because a global is declared in one place and
+   initialized in another, and both have to spell the type the same way. */
+static const char* c_decl_type(ASTNode *node) {
+    if (!node) return "long ";
+    if (node->data_type == TYPE_STRING) return "char *";
+    if (node->data_type == TYPE_BOOL)   return "bool ";
+    if (node->data_type == TYPE_FLOAT)  return "double ";
+    if (node->data_type == TYPE_ARRAY ||
+        (node->right && (node->right->type == AST_ARRAY_LITERAL ||
+         (node->right->type == AST_CALL_EXPR && node->right->left &&
+          node->right->left->type == AST_MEMBER_ACCESS &&
+          node->right->left->value &&
+          strcmp(node->right->left->value, "split") == 0) ||
+         (node->right->type == AST_CALL_EXPR && node->right->value &&
+          strcmp(node->right->value, "split") == 0))))
+        return "SubArray *";
+    if (node->data_type == TYPE_OBJECT ||
+        (node->right && node->right->type == AST_OBJECT_LITERAL))
+        return "void *";
+    if (node->data_type == TYPE_NULL ||
+        (node->right && node->right->type == AST_LITERAL && node->right->value &&
+         (strcmp(node->right->value, "null") == 0 ||
+          strcmp(node->right->value, "nil") == 0)))
+        return "double ";
+    return "long ";
+}
+
+/* The ` = <initializer>` half, or nothing when there is no initializer. */
+static void c_decl_init(StringBuilder *sb, ASTNode *node) {
+    const char *type = c_decl_type(node);
+
+    if (node->data_type == TYPE_NULL ||
+        (node->right && node->right->type == AST_LITERAL && node->right->value &&
+         (strcmp(node->right->value, "null") == 0 ||
+          strcmp(node->right->value, "nil") == 0))) {
+        sb_append(sb, " = 0");
+        return;
+    }
+    if (!node->right) return;
+
+    if (strcmp(type, "char *") == 0) {
+        sb_append(sb, " = sub_strdup(");
+        generate_expression(sb, node->right);
+        sb_append(sb, ")");
+    } else if (strcmp(type, "long ") == 0) {
+        sb_append(sb, " = (long)(");
+        generate_expression(sb, node->right);
+        sb_append(sb, ")");
+    } else {
+        sb_append(sb, " = ");
+        generate_expression(sb, node->right);
+    }
+}
+
 static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
     if (!node) return;
     
@@ -924,69 +985,19 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             break;
 
         case AST_VAR_DECL:
-            indent_code(sb, indent);
-            if (node->data_type == TYPE_STRING) {
-                sb_append(sb, "char *%s", node->value ? node->value : "var");
-                if (node->right) {
-                    sb_append(sb, " = sub_strdup(");
-                    generate_expression(sb, node->right);
-                    sb_append(sb, ")");
-                }
-            } else if (node->data_type == TYPE_BOOL) {
-                sb_append(sb, "bool %s", node->value ? node->value : "var");
-                if (node->right) {
-                    sb_append(sb, " = ");
-                    generate_expression(sb, node->right);
-                }
-            } else if (node->data_type == TYPE_FLOAT) {
-                sb_append(sb, "double %s", node->value ? node->value : "var");
-                if (node->right) {
-                    sb_append(sb, " = ");
-                    generate_expression(sb, node->right);
-                }
-            } else if (node->data_type == TYPE_ARRAY || (node->right && (node->right->type == AST_ARRAY_LITERAL ||
-                       (node->right->type == AST_CALL_EXPR && node->right->left && node->right->left->type == AST_MEMBER_ACCESS && strcmp(node->right->left->value, "split") == 0) ||
-                       (node->right->type == AST_CALL_EXPR && node->right->value && strcmp(node->right->value, "split") == 0)))) {
-                sb_append(sb, "SubArray *%s", node->value ? node->value : "var");
-                if (node->right) {
-                    sb_append(sb, " = ");
-                    generate_expression(sb, node->right);
-                }
-            } else if (node->data_type == TYPE_OBJECT || (node->right && node->right->type == AST_OBJECT_LITERAL)) {
-                sb_append(sb, "void *%s", node->value ? node->value : "var");
-                if (node->right) {
-                    sb_append(sb, " = ");
-                    generate_expression(sb, node->right);
-                }
-            } else if (node->data_type == TYPE_NULL || (node->right && node->right->type == AST_LITERAL && node->right->value && (strcmp(node->right->value, "null") == 0 || strcmp(node->right->value, "nil") == 0))) {
-                sb_append(sb, "double %s = 0", node->value ? node->value : "var");
-            } else {
-                sb_append(sb, "long %s", node->value ? node->value : "var");
-                if (node->right) {
-                    sb_append(sb, " = (long)(");
-                    generate_expression(sb, node->right);
-                    sb_append(sb, ")");
-                }
-            }
-            sb_append(sb, ";\n");
-            break;
-            
         case AST_CONST_DECL:
             indent_code(sb, indent);
-            if (node->data_type == TYPE_STRING) {
-                sb_append(sb, "const char *%s", node->value ? node->value : "const");
-            } else if (node->data_type == TYPE_BOOL) {
-                sb_append(sb, "const bool %s", node->value ? node->value : "const");
-            } else if (node->data_type == TYPE_FLOAT) {
-                sb_append(sb, "const double %s", node->value ? node->value : "const");
-            } else {
-                sb_append(sb, "const long %s", node->value ? node->value : "const");
-            }
-            sb_append(sb, " = ");
-            generate_expression(sb, node->right);
+            /* A top-level declaration was already written at file scope, so
+               here only its initializer is left, as an assignment. */
+            if (!globals_is_decl(&g_globals, node))
+                sb_append(sb, "%s%s", c_decl_type(node), node->value
+                          ? node->value : "var");
+            else
+                sb_append(sb, "%s", node->value);
+            c_decl_init(sb, node);
             sb_append(sb, ";\n");
             break;
-            
+
         case AST_FUNCTION_DECL: {
             /* Determine return type from AST */
             const char *ret_type = "void";
@@ -1617,7 +1628,19 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "static inline char* sub_str_from_long(long v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%ld\", v); return sub_strdup(buf); }\n");
     sb_append(sb, "static inline char* sub_str_from_double(double v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%g\", v); return sub_strdup(buf); }\n\n");
     
-    /* Pass 1: Generate function declarations at file scope */
+    /* Pass 1: the top-level variables, declared at file scope so that the
+       functions below can name them. Uninitialized: C wants a constant
+       expression here, and a top-level `let` may be initialized by anything,
+       so the initializer stays in main() where it was written. */
+    globals_collect(&g_globals, ast);
+    for (int i = 0; i < g_globals.count; i++) {
+        if (!globals_is_first(&g_globals, i)) continue;
+    ASTNode *d = g_globals.decls[i];
+        sb_append(sb, "static %s%s;\n", c_decl_type(d), d->value);
+    }
+    if (g_globals.count > 0) sb_append(sb, "\n");
+
+    /* Pass 2: Generate function declarations at file scope */
     if (ast && (ast->type == AST_PROGRAM || ast->type == AST_BLOCK)) {
         for (ASTNode *stmt = block_first(ast); stmt != NULL; stmt = stmt->next) {
             if (stmt->type == AST_FUNCTION_DECL) {
@@ -1626,7 +1649,7 @@ static char* generate_c_code(ASTNode *ast) {
         }
     }
     
-    /* Pass 2: Wrap non-function top-level statements in main() */
+    /* Pass 3: Wrap non-function top-level statements in main() */
     sb_append(sb, "int main(int argc, char *argv[]) {\n");
     sb_append(sb, "    (void)argc;\n");
     sb_append(sb, "    (void)argv;\n");

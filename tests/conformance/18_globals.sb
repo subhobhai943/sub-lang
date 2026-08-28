@@ -1,0 +1,123 @@
+# A top-level variable is one variable. Every function sees it, reads the
+# value the last writer left, and assigns the same cell -- which is what the
+# interpreter does, because a function closes over the global environment.
+# Compiled backends put top-level code inside a main(), so each has to lift
+# the declaration somewhere its functions can reach.
+
+let calls = 0
+
+fn bump() {
+  calls = calls + 1
+}
+
+bump()
+bump()
+bump()
+println(calls)
+
+# Read without assigning.
+let base = 10
+
+fn scaled(n) {
+  return n * base
+}
+
+println(scaled(3))
+
+# Assigning through one function is visible to another.
+let total = 0
+
+fn add(n) {
+  total = total + n
+}
+
+fn report() {
+  println(total)
+}
+
+add(5)
+add(7)
+report()
+
+# A parameter of the same name is the parameter, not the global.
+let shadowed = 100
+
+fn takes(shadowed) {
+  return shadowed + 1
+}
+
+println(takes(1))
+println(shadowed)
+
+# A local declaration inside a function is the local, and leaves the
+# global alone.
+fn owns() {
+  let shadowed = 7
+  return shadowed
+}
+
+println(owns())
+println(shadowed)
+
+# A string global, assigned from a function.
+let name = "start"
+
+fn retitle() {
+  name = "done"
+}
+
+println(name)
+retitle()
+println(name)
+
+# A float global.
+let ratio = 0.5
+
+fn halve() {
+  ratio = ratio / 2.0
+}
+
+halve()
+println(ratio)
+
+# A bool global.
+let ready = false
+
+fn arm() {
+  ready = true
+}
+
+println(ready)
+arm()
+println(ready)
+
+# Order matters: the initializer runs where it was written, not before the
+# functions above it.
+let counter = 0
+
+fn tick() {
+  counter = counter + 1
+}
+
+tick()
+tick()
+println(counter)
+
+# A global updated inside a loop in a function.
+fn tick_many(n) {
+  for i in range(0, n) {
+    counter = counter + 1
+  }
+}
+
+tick_many(4)
+println(counter)
+
+# One function calling another that writes the same global.
+fn twice() {
+  tick()
+  tick()
+}
+
+twice()
+println(counter)

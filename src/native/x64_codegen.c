@@ -22,6 +22,7 @@
 
 #include "x64_internal.h"
 #include "../codegen/codegen_switch.h"
+#include "../codegen/codegen_globals.h"
 #include "sub_compiler.h"
 #include "codegen_infer.h"
 #include <stdio.h>
@@ -38,7 +39,10 @@
 /* `elem` is meaningful only when type is TYPE_ARRAY: SUB arrays are
    homogeneous in practice, and the element type decides how an element is
    loaded, stored and printed. */
-typedef struct { char *name; int slot; DataType type; DataType elem; } Local;
+/* `global` picks where the value lives: a frame slot off RBP, or a fixed
+   cell in the BSS. `slot` indexes whichever it is. */
+typedef struct { char *name; int slot; DataType type; DataType elem;
+                 int global; } Local;
 
 typedef struct LoopCtx {
     struct LoopCtx *prev;
@@ -98,11 +102,28 @@ static void here(size_t site) { e_patch_rel32(T, site, C->text.len); }
    Locals
    ---------------------------------------------------------------- */
 
-/* Backwards, so an inner declaration shadows an outer one of the same name. */
+/* The program's top-level variables. Unlike F.locals these outlive a
+   function, so reset_fn() leaves them alone. */
+static Local GLOB[X64_G_GLOBAL_N];
+static int   NGLOB = 0;
+static Globals g_globals;
+
+static Local *glob_find(const char *name) {
+    if (!name) return NULL;
+    for (int i = 0; i < NGLOB; i++)
+        if (strcmp(GLOB[i].name, name) == 0) return &GLOB[i];
+    return NULL;
+}
+
+/* Backwards, so an inner declaration shadows an outer one of the same name.
+   A local always wins over a global of the same name, which is what a
+   parameter or a `let` inside the function means. */
 static Local *loc_find(const char *name) {
     if (!name) return NULL;
     for (int i = F.nloc - 1; i >= 0; i--)
         if (strcmp(F.locals[i].name, name) == 0) return &F.locals[i];
+    for (int i = 0; i < NGLOB; i++)
+        if (strcmp(GLOB[i].name, name) == 0) return &GLOB[i];
     return NULL;
 }
 
@@ -117,8 +138,18 @@ static void loc_release(int mark) {
     F.nloc = mark;
 }
 
+/* Locals only. A global is never what a declaration or a parameter inside a
+   function means -- `fn takes(shadowed)` binds the parameter, and a `let` of
+   the name binds a new local -- so this must not see one. */
+static Local *loc_find_local(const char *name) {
+    if (!name) return NULL;
+    for (int i = F.nloc - 1; i >= 0; i--)
+        if (strcmp(F.locals[i].name, name) == 0) return &F.locals[i];
+    return NULL;
+}
+
 static Local *loc_add(const char *name, DataType t) {
-    Local *e = loc_find(name);
+    Local *e = loc_find_local(name);
     if (e) { if (e->type == TYPE_UNKNOWN) e->type = t; return e; }
     if (F.nloc == F.cloc) F.locals = grow(F.locals, &F.cloc, sizeof(Local));
     e = &F.locals[F.nloc];
@@ -126,6 +157,10 @@ static Local *loc_add(const char *name, DataType t) {
     e->slot = F.nloc;
     e->type = t;
     e->elem = TYPE_INT;
+    /* grow() does not zero what it hands back, and a stale non-zero here
+       sends every read of this local to the globals area instead of the
+       frame. */
+    e->global = 0;
     F.nloc++;
     if (F.nloc > F.peak) F.peak = F.nloc;
     return e;
@@ -140,6 +175,10 @@ static Local *loc_declare(const char *name, DataType t) {
     e->slot = F.nloc;
     e->type = t;
     e->elem = TYPE_INT;
+    /* grow() does not zero what it hands back, and a stale non-zero here
+       sends every read of this local to the globals area instead of the
+       frame. */
+    e->global = 0;
     F.nloc++;
     if (F.nloc > F.peak) F.peak = F.nloc;
     return e;
@@ -154,7 +193,28 @@ static Local *loc_add_hidden(const char *what) {
     return loc_add(buf, TYPE_INT);
 }
 
-static int32_t slot_disp(const Local *l) { return -8 * (l->slot + 1); }
+/* Frame displacement of a slot. Taking the slot number rather than the Local
+   is what lets a caller keep it across gen_block(): declaring a name inside
+   the body can grow F.locals, and a realloc leaves every Local* into it
+   dangling. */
+static int32_t disp(int slot) { return -8 * (slot + 1); }
+
+static int32_t slot_disp(const Local *l) { return disp(l->slot); }
+
+/* Read or write a variable wherever it lives. R11 is the scratch the entry
+   stub and the allocator already use for a BSS address, and nothing holds a
+   value in it across these. */
+static void var_load(int reg, const Local *l) {
+    if (!l->global) { e_mov_r_mem(T, reg, RBP, slot_disp(l)); return; }
+    e_mov_r_imm64(T, R11, X64_G_GLOBALS + 8ULL * (uint64_t)l->slot);
+    e_mov_r_mem(T, reg, R11, 0);
+}
+
+static void var_store(const Local *l, int reg) {
+    if (!l->global) { e_mov_mem_r(T, RBP, slot_disp(l), reg); return; }
+    e_mov_r_imm64(T, R11, X64_G_GLOBALS + 8ULL * (uint64_t)l->slot);
+    e_mov_mem_r(T, R11, 0, reg);
+}
 
 /* ----------------------------------------------------------------
    Function registry
@@ -939,7 +999,7 @@ static void gen_expr(ASTNode *n) {
                     n->value ? n->value : "?", n->line);
             return;
         }
-        e_mov_r_mem(T, RAX, RBP, slot_disp(l));
+        var_load(RAX, l);
         break;
     }
 
@@ -1012,7 +1072,7 @@ static void gen_assign_to(const char *name, ASTNode *value, int line) {
         return;
     }
     gen_bind(value, l->type);
-    e_mov_mem_r(T, RBP, slot_disp(l), RAX);
+    var_store(l, RAX);
 }
 
 static void gen_if(ASTNode *n) {
@@ -1147,36 +1207,40 @@ static void gen_for(ASTNode *n) {
        they survive the body, which is free to reassign anything visible. */
     if (!range && n->condition && concrete(ty(n->condition)) == TYPE_ARRAY) {
         DataType elem = elem_type_of(n->condition);
-        Local *arr = loc_add_hidden("arr");
-        Local *idx = loc_add_hidden("idx");
-        Local *var = loc_declare(n->value ? n->value : "item", elem);
-        var->type = elem;
-        if (elem == TYPE_ARRAY) var->elem = TYPE_INT;
+        int arr, idx, var;
+        {
+            Local *a = loc_add_hidden("arr");
+            Local *i = loc_add_hidden("idx");
+            Local *v = loc_declare(n->value ? n->value : "item", elem);
+            v->type = elem;
+            if (elem == TYPE_ARRAY) v->elem = TYPE_INT;
+            arr = a->slot; idx = i->slot; var = v->slot;
+        }
 
         gen_expr(n->condition);
-        e_mov_mem_r(T, RBP, slot_disp(arr), RAX);
+        e_mov_mem_r(T, RBP, disp(arr), RAX);
         e_xor_r_r(T, RAX, RAX);
-        e_mov_mem_r(T, RBP, slot_disp(idx), RAX);
+        e_mov_mem_r(T, RBP, disp(idx), RAX);
 
         LoopCtx lc; loop_enter(&lc);
         size_t top = C->text.len;
-        e_mov_r_mem(T, RAX, RBP, slot_disp(arr));
+        e_mov_r_mem(T, RAX, RBP, disp(arr));
         e_mov_r_mem(T, RAX, RAX, ARR_COUNT);
-        e_mov_r_mem(T, RCX, RBP, slot_disp(idx));
+        e_mov_r_mem(T, RCX, RBP, disp(idx));
         e_cmp_r_r(T, RCX, RAX);
         size_t out = e_jcc(T, CC_GE);
 
-        e_mov_r_mem(T, RDI, RBP, slot_disp(arr));
+        e_mov_r_mem(T, RDI, RBP, disp(arr));
         e_mov_r_r(T, RSI, RCX);
         nc_call_rt(C, RT_ARR_GET);
-        e_mov_mem_r(T, RBP, slot_disp(var), RAX);
+        e_mov_mem_r(T, RBP, disp(var), RAX);
 
         gen_block(n->body);
 
         size_t step = C->text.len;
-        e_mov_r_mem(T, RAX, RBP, slot_disp(idx));
+        e_mov_r_mem(T, RAX, RBP, disp(idx));
         e_add_r_imm(T, RAX, 1);
-        e_mov_mem_r(T, RBP, slot_disp(idx), RAX);
+        e_mov_mem_r(T, RBP, disp(idx), RAX);
         size_t back = e_jmp(T); e_patch_rel32(T, back, top);
         here(out);
         loop_leave(&lc, step, C->text.len);
@@ -1193,27 +1257,31 @@ static void gen_for(ASTNode *n) {
     ASTNode *start = range->right ? range->left  : NULL;
     ASTNode *end   = range->right ? range->right : range->left;
 
-    Local *l = loc_declare(n->value ? n->value : "i", TYPE_INT);
-    l->type = TYPE_INT;
+    int slot;
+    {
+        Local *l = loc_declare(n->value ? n->value : "i", TYPE_INT);
+        l->type = TYPE_INT;
+        slot = l->slot;
+    }
 
     if (start) gen_as(start, TYPE_INT);
     else       e_xor_r_r(T, RAX, RAX);
-    e_mov_mem_r(T, RBP, slot_disp(l), RAX);
+    e_mov_mem_r(T, RBP, disp(slot), RAX);
 
     LoopCtx lc; loop_enter(&lc);
     size_t top = C->text.len;
     if (end) gen_as(end, TYPE_INT);
     else     e_mov_r_imm64(T, RAX, 10);
-    e_mov_r_mem(T, RCX, RBP, slot_disp(l));
+    e_mov_r_mem(T, RCX, RBP, disp(slot));
     e_cmp_r_r(T, RCX, RAX);
     size_t out = e_jcc(T, CC_GE);
 
     gen_block(n->body);
 
     size_t step = C->text.len;
-    e_mov_r_mem(T, RAX, RBP, slot_disp(l));
+    e_mov_r_mem(T, RAX, RBP, disp(slot));
     e_add_r_imm(T, RAX, 1);
-    e_mov_mem_r(T, RBP, slot_disp(l), RAX);
+    e_mov_mem_r(T, RBP, disp(slot), RAX);
     size_t back = e_jmp(T); e_patch_rel32(T, back, top);
     here(out);
     loop_leave(&lc, step, C->text.len);
@@ -1252,7 +1320,12 @@ static void gen_stmt(ASTNode *n) {
                               : (n->data_type != TYPE_UNKNOWN &&
                                  n->data_type != TYPE_AUTO)
                                 ? n->data_type : rt);
-        Local *l = loc_add(n->value, t);
+        /* At the top level this declaration *is* the global's, so it fills
+           in the BSS cell the functions already resolve to. Anywhere else a
+           `let` of the same name is a new local. */
+        Local *l = globals_is_decl(&g_globals, n) ? glob_find(n->value)
+                                                  : loc_add(n->value, t);
+        if (!l) l = loc_add(n->value, t);
         l->type = t;
         if (t == TYPE_ARRAY) {
             /* What the variable is later pushed to beats what the literal
@@ -1264,10 +1337,10 @@ static void gen_stmt(ASTNode *n) {
         if (n->right) {
             gen_bind(n->right, t);
             g_literal_elem = TYPE_UNKNOWN;
-            e_mov_mem_r(T, RBP, slot_disp(l), RAX);
+            var_store(l, RAX);
         } else {
             e_xor_r_r(T, RAX, RAX);
-            e_mov_mem_r(T, RBP, slot_disp(l), RAX);
+            var_store(l, RAX);
         }
         break;
     }
@@ -1364,7 +1437,7 @@ static void emit_function(ASTNode *fn, const char *name) {
         int argc = fn->child_count > 6 ? 6 : fn->child_count;
         for (int i = 0; i < argc; i++) {
             ASTNode *p = fn->children[i];
-            Local *l = loc_add(p->value, concrete(p->data_type));
+            Local *l = loc_declare(p->value, concrete(p->data_type));
             l->type = concrete(p->data_type);
             e_mov_mem_r(T, RBP, slot_disp(l), ARG_REGS[i]);
         }
@@ -1417,6 +1490,35 @@ static void emit_main(ASTNode *program) {
 
 /* Compile `program` to a native executable at `out_path`.
    Returns 0 on success; on failure `err` (if given) receives the reason. */
+/* Give every top-level variable a BSS cell before anything is emitted. The
+   functions are compiled first and may read or assign one, so the name has
+   to resolve by then -- and to the same cell the top-level code writes. */
+static void globals_bind(ASTNode *program) {
+    Globals g;
+    globals_collect(&g_globals, program);
+    g = g_globals;
+    NGLOB = 0;
+    for (int i = 0; i < g.count; i++) {
+        if (!globals_is_first(&g, i)) continue;
+        ASTNode *d = g.decls[i];
+        if (NGLOB >= X64_G_GLOBAL_N) {
+            nc_fail(C, "'%s' is global number %d; the native backend supports %d",
+                    d->value ? d->value : "?", NGLOB + 1, X64_G_GLOBAL_N);
+            return;
+        }
+        DataType t = d->data_type;
+        if (t == TYPE_UNKNOWN || t == TYPE_AUTO) t = infer_expr_type(d->right);
+        Local *l = &GLOB[NGLOB];
+        l->name   = strdup(d->value ? d->value : "_");
+        l->slot   = NGLOB;
+        l->type   = concrete(t);
+        l->global = 1;
+        DataType elem = infer_elem_type_of_var(d->value);
+        l->elem = (elem != TYPE_UNKNOWN) ? elem : infer_elem_type(d->right);
+        NGLOB++;
+    }
+}
+
 int native_compile(ASTNode *program, const char *out_path,
                    char *err, size_t err_size) {
     NCtx ctx;
@@ -1428,6 +1530,7 @@ int native_compile(ASTNode *program, const char *out_path,
     memset(&F, 0, sizeof(F));
     g_fns = NULL; g_nfns = g_cfns = 0;
     fn_register(program);
+    globals_bind(program);
 
     /* The entry stub sits at offset 0 so the ELF entry point is simply the
        start of the text: point the heap at the BSS, run the program, exit. */
@@ -1444,6 +1547,9 @@ int native_compile(ASTNode *program, const char *out_path,
     for (int i = 0; i < g_nfns; i++)
         emit_function(g_fns[i].decl, g_fns[i].name);
     emit_main(program);
+
+    for (int i = 0; i < NGLOB; i++) free(GLOB[i].name);
+    NGLOB = 0;
 
     size_t rodata_off = ctx.text.len;
     buf_bytes(&ctx.text, ctx.rodata.data, ctx.rodata.len);

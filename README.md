@@ -160,7 +160,8 @@ construct that forced the fallback rather than failing silently.
 
 Everything else compiles to machine code, including arrays (literals,
 indexing, indexed assignment, `len`, `push`/`append`, `pop`, `for x in a`),
-`switch`, `do`/`while`, and `break`/`continue`.
+`switch`, `do`/`while`, `break`/`continue`, and top-level variables read and
+assigned from inside functions.
 
 ### 2. Direct Interpreter (`subi`)
 
@@ -252,6 +253,29 @@ Parameter and return types are inferred, including when compiling to a
 statically typed target - `add` above becomes `long add(long, long)` in C and
 `fn add(a: i64, b: i64) -> i64` in Rust. You can annotate explicitly when you
 want to; an explicit type always wins over inference.
+
+A function can read and assign a variable declared at the top level:
+
+```sub
+let calls = 0
+
+fn bump() {
+    calls = calls + 1
+}
+
+bump()
+bump()
+println(calls)            # 2
+```
+
+There is one `calls`, and every function shares it. A parameter or a `let` of
+the same name inside a function is that function's own and leaves the
+top-level one alone.
+
+Each backend spells this the way its target does - a file-scope variable in C
+and C++, a `static` field in Java, a `static mut` in Rust, a `$global` in
+Ruby, a `global` statement in Python, a fixed cell in the machine-code
+backend - so the program means the same thing through all ten.
 
 ### Classes & Objects
 
