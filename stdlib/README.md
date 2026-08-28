@@ -1,6 +1,6 @@
 # SUB Standard Library
 
-```sub
+```coffee
 import "math"
 import "arrays"
 import "strings"
@@ -46,7 +46,7 @@ A module that cannot be found lists every path it tried.
 
 ## math
 
-```sub
+```coffee
 import "math"
 ```
 
@@ -73,7 +73,7 @@ reject.
 
 ## arrays
 
-```sub
+```coffee
 import "arrays"
 ```
 
@@ -100,7 +100,7 @@ the library work everywhere rather than only under the interpreter.
 
 ## strings
 
-```sub
+```coffee
 import "strings"
 ```
 
@@ -126,7 +126,7 @@ backends, `find`, `starts_with` and `split_on` belong here.
 
 ## io
 
-```sub
+```coffee
 import "io"
 ```
 
@@ -163,7 +163,7 @@ each is why some obvious function is missing:
 A module is a `.sb` file. Anything it declares at the top level — functions,
 `let`, `const` — becomes visible to whatever imports it.
 
-```sub
+```coffee
 # geometry.sb
 const TAU_OVER_4 = 1.5707963267948966
 
@@ -172,7 +172,7 @@ fn area_of_circle(r: float): float {
 }
 ```
 
-```sub
+```coffee
 import "geometry"
 println(area_of_circle(2.0))
 ```

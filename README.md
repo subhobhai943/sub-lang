@@ -474,7 +474,7 @@ Four modules, written in SUB, in `stdlib/`. Every function in them produces
 identical output through all ten backends — the conformance suite checks the
 library the same way it checks the language.
 
-```sub
+```coffee
 import "math"
 import "arrays"
 import "strings"
@@ -517,14 +517,14 @@ reported rather than followed.
 
 Writing your own module is just writing a `.sb` file:
 
-```sub
+```coffee
 # geometry.sb
 fn area_of_circle(r: float): float {
     return 3.141592653589793 * r * r
 }
 ```
 
-```sub
+```coffee
 import "geometry"
 println(area_of_circle(2.0))
 ```

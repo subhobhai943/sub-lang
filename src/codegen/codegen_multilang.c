@@ -95,7 +95,8 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
     static const BuiltinSpelling kotlin[] = {
         {"str","_subStr(",")"},        {"to_string","_subStr(",")"},
         {"int","(",").toLong()"},      {"float","(",").toDouble()"},
-        {"len","(",").length"},        {"length","(",").length"},
+        {"len","(",").length.toLong()"},
+        {"length","(",").length.toLong()"},
         {"abs","kotlin.math.abs(",")"},{"sqrt","kotlin.math.sqrt((",").toDouble())"},
         {"upper","(",").uppercase()"}, {"lower","(",").lowercase()"},
         {"trim","(",").trim()"},
@@ -733,15 +734,17 @@ static int emit_special_binop(StringBuilder *sb, ASTNode *node,
            float division has to be converted at the call: round() yields an
            int64, and `round(x * scale) / scale` would not compile without
            this. The other targets promote on their own. */
-        int coerce = (lang == LANG_GO && is_flt);
+        int coerce = is_flt && (lang == LANG_GO || lang == LANG_KOTLIN);
+        const char *pre = lang == LANG_GO ? "float64(" : "(";
+        const char *post = lang == LANG_GO ? ")" : ").toDouble()";
         if (coerce && infer_expr_type(node->left) != TYPE_FLOAT) {
-            sb_append(sb, "float64("); gen(sb, node->left); sb_append(sb, ")");
+            sb_append(sb, "%s", pre); gen(sb, node->left); sb_append(sb, "%s", post);
         } else {
             gen(sb, node->left);
         }
         sb_append(sb, ", ");
         if (coerce && infer_expr_type(node->right) != TYPE_FLOAT) {
-            sb_append(sb, "float64("); gen(sb, node->right); sb_append(sb, ")");
+            sb_append(sb, "%s", pre); gen(sb, node->right); sb_append(sb, "%s", post);
         } else {
             gen(sb, node->right);
         }
