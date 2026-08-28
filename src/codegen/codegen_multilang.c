@@ -2928,6 +2928,10 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             }
             break;
         case AST_VAR_DECL:
+        case AST_CONST_DECL:
+            /* `const` is a declaration like any other. Without this case it
+               fell through to `default:` and vanished, so a top-level const
+               was declared and never given its value. */
             indent_code(sb, indent);
             sb_append(sb, "var %s = ", swift_ident(node->value ? node->value : "v"));
             if (node->right) generate_expr_swift(sb, node->right); else sb_append(sb, "nil");
@@ -3361,6 +3365,11 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
             }
             break;
         case AST_VAR_DECL:
+        case AST_CONST_DECL:
+            /* `const` is a declaration like any other. Without this case it
+               fell through to `default:` and vanished: io.sb's `const ESC`
+               got its property but never its value, so every colour helper
+               produced an escape sequence with the escape missing. */
             indent_code(sb, indent);
             /* A top-level declaration was already written as a top-level
                property, so here only its initializer is left. */
