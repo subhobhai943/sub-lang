@@ -2811,7 +2811,7 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
                 }
             }
             if (is_print_builtin(node->value)) sb_append(sb, "_subPrint(");
-            else if (node->value) sb_append(sb, "%s(", node->value);
+            else if (node->value) sb_append(sb, "%s(", swift_ident(node->value));
             else { generate_expr_swift(sb, node->left); sb_append(sb, "("); }
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
@@ -2938,7 +2938,10 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "\n"); break;
         case AST_FUNCTION_DECL:
             g_swift_fn_type = node->data_type;
-            sb_append(sb, "\nfunc %s(", node->value ? node->value : "func");
+            /* A function may be named for a Swift keyword just as a variable
+               may -- `repeat` is one -- and needs the same backticks. */
+            sb_append(sb, "\nfunc %s(",
+                      swift_ident(node->value ? node->value : "func"));
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
