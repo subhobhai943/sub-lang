@@ -2674,6 +2674,37 @@ char* codegen_java(ASTNode *ast, const char *source) {
 /* Swift reserves words that SUB does not, and `guard`, `repeat`, `where` and
    `defer` are all plausible variable names. Swift's own escape for exactly
    this is a backtick pair, which changes nothing but how the name parses. */
+/* Swift refuses a raw control byte in a source file -- "unprintable ASCII
+   character found in source file" -- and has no \xNN escape, so io.sb's
+   `const ESC = "\x1b["` could not be written literally. \u{1B} is Swift's
+   spelling. Every other backend accepts the byte as it is, which is why the
+   shared escaper leaves it alone. */
+static char *escape_string_for_swift(const char *raw) {
+    if (!raw) return strdup("");
+    size_t len = strlen(raw);
+    char *out = malloc(len * 6 + 1);
+    if (!out) return NULL;
+    size_t o = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)raw[i];
+        switch (c) {
+        case '\n': out[o++] = '\\'; out[o++] = 'n'; break;
+        case '\t': out[o++] = '\\'; out[o++] = 't'; break;
+        case '\r': out[o++] = '\\'; out[o++] = 'r'; break;
+        case '\\': out[o++] = '\\'; out[o++] = '\\'; break;
+        case '"':  out[o++] = '\\'; out[o++] = '"'; break;
+        default:
+            if (c < 0x20 || c == 0x7f) {
+                o += (size_t)snprintf(out + o, 7, "\\u{%02X}", c);
+            } else {
+                out[o++] = raw[i];
+            }
+        }
+    }
+    out[o] = '\0';
+    return out;
+}
+
 static const char *swift_ident(const char *name) {
     static const char *kw[] = {
         "associatedtype", "case", "catch", "class", "defer", "deinit", "do",
@@ -2705,7 +2736,7 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
     switch (node->type) {
         case AST_LITERAL:
             if (node->data_type == TYPE_STRING) {
-                char *escaped = escape_string_for_codegen(node->value ? node->value : "");
+                char *escaped = escape_string_for_swift(node->value ? node->value : "");
                 sb_append(sb, "\"%s\"", escaped ? escaped : "");
                 free(escaped);
             } else {

@@ -93,6 +93,20 @@ TARGETS = {
 }
 
 
+def first_errors(text, limit=600):
+    """The lines that say `error`, falling back to the head of the output.
+
+    A compiler often emits warnings before the error that actually stopped it,
+    and truncating the raw text put the warnings in the report and left the
+    error out - which is exactly backwards for the reader.
+    """
+    text = (text or "").strip()
+    if not text:
+        return "(no output)"
+    errs = [ln for ln in text.splitlines() if "error" in ln.lower()]
+    return ("\n".join(errs) if errs else text)[:limit]
+
+
 def run(argv, cwd, timeout=TIMEOUT):
     try:
         # encoding is explicit: on Windows text=True decodes with the
@@ -148,13 +162,13 @@ def check(case, target, spec, workdir):
             # is nothing to test rather than something to fail.
             if target == NATIVE and "not available for this host" in blob:
                 return "skip", "machine-code backend does not target this host"
-            return "fail", "subc failed: %s" % (err.strip() or out.strip())[:300]
+            return "fail", "subc failed: %s" % first_errors(err or out)
         rc, got, err = run([exe + EXE], workdir)
         return compare(got, rc, want, want_rc, err)
 
     rc, _, err = run([SUB, case, target], workdir)
     if rc != 0:
-        return "fail", "transpile failed: %s" % err.strip()[:200]
+        return "fail", "transpile failed: %s" % first_errors(err)
 
     # The transpiler names output after the input file, except Java, which must
     # match its public class name.
@@ -168,7 +182,7 @@ def check(case, target, spec, workdir):
         argv = [a.format(src=src, exe=exe) for a in step]
         rc, out, err = run(argv, workdir, limit)
         if rc != 0:
-            return "fail", "build failed: %s" % (err.strip() or out.strip())[:300]
+            return "fail", "build failed: %s" % first_errors(err or out)
 
     argv = [a.format(src=src, exe=exe + EXE if a == "{exe}" else exe)
             for a in spec["run"]]
@@ -219,7 +233,7 @@ def main():
             if status == "fail":
                 failures.append((name, target, detail))
                 if ANNOTATE:
-                    flat = " ".join(detail.split())[:800]
+                    flat = " ".join(detail.split())[:1200]
                     print("::error::%s [%s] %s" % (name, target, flat))
             elif status == "skip":
                 skipped.append((name, target, detail))
