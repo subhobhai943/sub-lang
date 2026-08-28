@@ -40,6 +40,7 @@ BARE_ENV = {"PATH": "/nonexistent", "HOME": os.environ.get("HOME", "/tmp")}
 
 def run(argv, env=None, cwd=None):
     p = subprocess.run(argv, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace",
                        timeout=TIMEOUT, env=env, cwd=cwd)
     return p.returncode, p.stdout, p.stderr
 

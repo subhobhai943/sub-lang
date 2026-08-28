@@ -1573,10 +1573,16 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
                 emitted = 1;
             }
             if (deflt) {
-                indent_code(sb, indent + 1);
-                sb_append(sb, "%s{\n", emitted ? "} else " : "");
-                gen_clause_js(sb, deflt, indent + 2);
-                emitted = 1;
+                if (emitted) {
+                    indent_code(sb, indent + 1);
+                    sb_append(sb, "} else {\n");
+                    gen_clause_js(sb, deflt, indent + 2);
+                } else {
+                    /* Nothing for it to be the `else` of. A bare `{ }` here
+                       is a block in most of these languages but a closure
+                       expression in Swift, so the body is simply emitted. */
+                    gen_clause_js(sb, deflt, indent + 1);
+                }
             }
             if (emitted) {
                 indent_code(sb, indent + 1);
@@ -2126,17 +2132,20 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
                 emitted = 1;
             }
             if (deflt) {
-                /* `else if (true)` rather than `else`. Java rejects a
-                   statement it can prove unreachable, and a chain whose every
-                   branch returns makes whatever follows the switch exactly
-                   that -- so `fn f() { switch ... } return "unreachable" }`
-                   failed to compile. JLS 14.21 deliberately ignores a
-                   constant condition on an `if`, so this is reachable again
-                   while running in precisely the same cases. */
-                indent_code(sb, indent + 1);
-                sb_append(sb, "%s{\n", emitted ? "} else if (true) " : "");
-                gen_clause_java(sb, deflt, indent + 2);
-                emitted = 1;
+                if (emitted) {
+                    /* `else if (true)` rather than `else`. Java rejects a
+                       statement it can prove unreachable, and a chain whose
+                       every branch returns makes whatever follows the switch
+                       exactly that -- so `fn f() { switch ... } return "x" }`
+                       failed to compile. JLS 14.21 deliberately ignores a
+                       constant condition on an `if`, so this is reachable
+                       again while running in precisely the same cases. */
+                    indent_code(sb, indent + 1);
+                    sb_append(sb, "} else if (true) {\n");
+                    gen_clause_java(sb, deflt, indent + 2);
+                } else {
+                    gen_clause_java(sb, deflt, indent + 1);
+                }
             }
             if (emitted) {
                 indent_code(sb, indent + 1);
@@ -2521,6 +2530,35 @@ char* codegen_java(ASTNode *ast, const char *source) {
    SWIFT CODE GENERATOR - FULL AST
    ======================================== */
 
+/* Swift reserves words that SUB does not, and `guard`, `repeat`, `where` and
+   `defer` are all plausible variable names. Swift's own escape for exactly
+   this is a backtick pair, which changes nothing but how the name parses. */
+static const char *swift_ident(const char *name) {
+    static const char *kw[] = {
+        "associatedtype", "case", "catch", "class", "defer", "deinit", "do",
+        "else", "enum", "extension", "fallthrough", "fileprivate", "for",
+        "func", "guard", "if", "import", "in", "init", "inout", "internal",
+        "let", "operator", "private", "protocol", "public", "repeat",
+        "rethrows", "return", "self", "static", "struct", "subscript",
+        "super", "switch", "throw", "throws", "try", "typealias", "var",
+        "where", "while", "Any", "Protocol", "Self", "Type", "as", "is",
+        "nil", "true", "false", "some", "any", NULL
+    };
+    static char buf[4][64];
+    static int slot = 0;
+
+    if (!name) return "v";
+    for (int i = 0; kw[i]; i++) {
+        if (strcmp(name, kw[i]) != 0) continue;
+        /* A few live at once -- a declaration names one while its
+           initialiser reads another -- so the buffers rotate. */
+        slot = (slot + 1) % 4;
+        snprintf(buf[slot], sizeof buf[0], "`%s`", name);
+        return buf[slot];
+    }
+    return name;
+}
+
 static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
     if (!node) return;
     switch (node->type) {
@@ -2533,7 +2571,7 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
                 sb_append(sb, "%s", node->value ? node->value : "nil");
             }
             break;
-        case AST_IDENTIFIER: sb_append(sb, "%s", node->value ? node->value : "var"); break;
+        case AST_IDENTIFIER: sb_append(sb, "%s", swift_ident(node->value)); break;
         case AST_ARRAY_LITERAL: {
             /* The element type is written out: an empty literal has nothing
                for Swift to infer from, and Int is 64-bit here as in SUB. */
@@ -2697,6 +2735,10 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "let _sw%d = ", id);
             generate_expr_swift(sb, node->condition);
             sb_append(sb, ";\n");
+            /* A switch of nothing but a default never reads the scrutinee,
+               and Swift warns about a `let` that is never used. */
+            indent_code(sb, indent + 1);
+            sb_append(sb, "_ = _sw%d\n", id);
 
             for (int i = 0; i < node->child_count; i++) {
                 ASTNode *c = node->children[i];
@@ -2714,10 +2756,16 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
                 emitted = 1;
             }
             if (deflt) {
-                indent_code(sb, indent + 1);
-                sb_append(sb, "%s{\n", emitted ? "} else " : "");
-                gen_clause_swift(sb, deflt, indent + 2);
-                emitted = 1;
+                if (emitted) {
+                    indent_code(sb, indent + 1);
+                    sb_append(sb, "} else {\n");
+                    gen_clause_swift(sb, deflt, indent + 2);
+                } else {
+                    /* Nothing for it to be the `else` of. A bare `{ }` here
+                       is a block in most of these languages but a closure
+                       expression in Swift, so the body is simply emitted. */
+                    gen_clause_swift(sb, deflt, indent + 1);
+                }
             }
             if (emitted) {
                 indent_code(sb, indent + 1);
@@ -2740,7 +2788,7 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             break;
         case AST_VAR_DECL:
             indent_code(sb, indent);
-            sb_append(sb, "var %s = ", node->value ? node->value : "var");
+            sb_append(sb, "var %s = ", swift_ident(node->value ? node->value : "v"));
             if (node->right) generate_expr_swift(sb, node->right); else sb_append(sb, "nil");
             sb_append(sb, "\n"); break;
         case AST_FUNCTION_DECL:
@@ -2749,7 +2797,7 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
-                    sb_append(sb, "_ %s: %s", node->children[i]->value ? node->children[i]->value : "arg",
+                    sb_append(sb, "_ %s: %s", swift_ident(node->children[i]->value ? node->children[i]->value : "arg"),
                               swift_type(node->children[i]->data_type));
                 }
             }
@@ -2764,7 +2812,7 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             if (node->children && node->child_count > 0 &&
                 node->children[0]->type == AST_RANGE_EXPR) {
                 ASTNode *range = node->children[0];
-                sb_append(sb, "for %s in ", node->value ? node->value : "i");
+                sb_append(sb, "for %s in ", swift_ident(node->value ? node->value : "i"));
                 if (range->right) {
                     if (range->left) generate_expr_swift(sb, range->left);
                     else sb_append(sb, "0");
@@ -2778,11 +2826,11 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
                 }
                 sb_append(sb, " {\n");
             } else if (node->condition) {
-                sb_append(sb, "for %s in ", node->value ? node->value : "i");
+                sb_append(sb, "for %s in ", swift_ident(node->value ? node->value : "i"));
                 generate_expr_swift(sb, node->condition);
                 sb_append(sb, " {\n");
             } else {
-                sb_append(sb, "for %s in 0..<10 {\n", node->value ? node->value : "i");
+                sb_append(sb, "for %s in 0..<10 {\n", swift_ident(node->value ? node->value : "i"));
             }
             generate_node_swift(sb, node->body, indent + 1);
             indent_code(sb, indent);
@@ -4619,10 +4667,16 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
                 emitted = 1;
             }
             if (deflt) {
-                indent_go(sb, indent + 1);
-                sb_append(sb, "%s{\n", emitted ? "} else " : "");
-                gen_clause_go(sb, deflt, indent + 2);
-                emitted = 1;
+                if (emitted) {
+                    indent_go(sb, indent + 1);
+                    sb_append(sb, "} else {\n");
+                    gen_clause_go(sb, deflt, indent + 2);
+                } else {
+                    /* Nothing for it to be the `else` of. A bare `{ }` here
+                       is a block in most of these languages but a closure
+                       expression in Swift, so the body is simply emitted. */
+                    gen_clause_go(sb, deflt, indent + 1);
+                }
             }
             if (emitted) {
                 indent_go(sb, indent + 1);

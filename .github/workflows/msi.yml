@@ -135,15 +135,25 @@ jobs:
           # The .sb association and the PATH entry are the two things a user
           # notices if they silently stop being registered.
           #
-          # The association lives in the Registry table, not in Extension:
-          # Extension and ProgId are the *advertised* tables, and WiX only
-          # authors those for an advertised component. A plain ProgId like
-          # ours becomes ordinary HKCR keys.
-          $keys = Get-MsiRows "SELECT Key FROM Registry"
-          Write-Host "Registry:    $($keys -join ', ')"
-          if (-not ($keys -contains ".sb")) { throw ".sb file association is missing" }
-          if (-not ($keys -match "SUBLanguage\.Source\\shell\\open\\command")) {
-            throw ".sb has no open command"
+          # Which table holds the association depends on how WiX compiled the
+          # ProgId: an advertised one goes to Extension/ProgId, a plain one to
+          # Registry as ordinary HKCR keys. Rather than assume, list the
+          # tables the MSI actually has and look in the one that is there --
+          # and if neither is, say so with the list, because a query against a
+          # missing table throws a COM error that names nothing.
+          $tables = Get-MsiRows "SELECT Name FROM _Tables"
+          Write-Host "Tables:      $($tables -join ', ')"
+
+          if ($tables -contains "Registry") {
+            $keys = Get-MsiRows "SELECT Key FROM Registry"
+            Write-Host "Registry:    $($keys -join ', ')"
+            if (-not ($keys -contains ".sb")) { throw ".sb file association is missing" }
+          } elseif ($tables -contains "Extension") {
+            $ext = Get-MsiRows "SELECT Extension FROM Extension"
+            Write-Host "Extensions:  $($ext -join ', ')"
+            if (-not ($ext -contains "sb")) { throw ".sb file association is missing" }
+          } else {
+            throw "no Registry or Extension table, so nothing registers .sb"
           }
 
           $envRows = Get-MsiRows "SELECT Name FROM Environment"

@@ -281,10 +281,13 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
                 emitted = 1;
             }
             if (deflt) {
-                indent_code(sb, indent + 1);
-                sb_append(sb, "%s{\n", emitted ? "} else " : "");
-                gen_clause_rust(sb, deflt, indent + 2);
-                emitted = 1;
+                if (emitted) {
+                    indent_code(sb, indent + 1);
+                    sb_append(sb, "} else {\n");
+                    gen_clause_rust(sb, deflt, indent + 2);
+                } else {
+                    gen_clause_rust(sb, deflt, indent + 1);
+                }
             }
             if (emitted) {
                 indent_code(sb, indent + 1);

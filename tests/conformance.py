@@ -95,7 +95,12 @@ TARGETS = {
 
 def run(argv, cwd, timeout=TIMEOUT):
     try:
+        # encoding is explicit: on Windows text=True decodes with the
+        # locale codec, and a compiler that emits a byte cp1252 has no
+        # mapping for killed the run with a UnicodeDecodeError rather than
+        # reporting a failing case.
         p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace",
                            timeout=timeout)
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
