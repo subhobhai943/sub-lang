@@ -145,7 +145,10 @@ jobs:
           Write-Host "Tables:      $($tables -join ', ')"
 
           if ($tables -contains "Registry") {
-            $keys = Get-MsiRows "SELECT Key FROM Registry"
+            # `Key` is an MSI SQL reserved word; it only parses backquoted,
+            # and a backquote needs a single-quoted PowerShell string to
+            # survive (in a double-quoted one it is the escape character).
+            $keys = Get-MsiRows 'SELECT `Key` FROM Registry'
             Write-Host "Registry:    $($keys -join ', ')"
             if (-not ($keys -contains ".sb")) { throw ".sb file association is missing" }
           } elseif ($tables -contains "Extension") {

@@ -1880,14 +1880,15 @@ SubVal eval(ASTNode *node, Env *env) {
             }
             if (clause->type != AST_CASE_CLAUSE) continue;
             for (int j = 0; j < clause->child_count; j++) {
+                /* Not freed: env_get hands out the live value rather than a
+                   copy, so a scrutinee or case value that is just a variable
+                   is the environment's own, and releasing it here left the
+                   environment holding a dangling pointer. */
                 SubVal cv = eval(clause->children[j], env);
-                bool hit = values_equal(scrutinee, cv);
-                val_free(cv);
-                if (hit) { chosen = clause; break; }
+                if (values_equal(scrutinee, cv)) { chosen = clause; break; }
             }
         }
         if (!chosen) chosen = default_clause;
-        val_free(scrutinee);
 
         if (chosen && chosen->body) {
             /* Cases do not fall through, so `break` here means "leave the
