@@ -606,6 +606,23 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                     node->data_type = TYPE_STRING;
                     return TYPE_STRING;
                 }
+                /* `contains` answers a question, so it is a bool rather
+                   than a string -- typing it with the group above made every
+                   statically typed backend declare `let hit = contains(s, x)`
+                   as a string and then compare it to `true`. */
+                if (fn_name && strcmp(fn_name, "contains") == 0) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_BOOL;
+                    return TYPE_BOOL;
+                }
+                /* split() hands back the pieces, not a string. */
+                if (fn_name && strcmp(fn_name, "split") == 0) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_ARRAY;
+                    return TYPE_ARRAY;
+                }
                 /* Array mutation built-ins */
                 if (fn_name && (strcmp(fn_name, "push") == 0 || strcmp(fn_name, "pop") == 0)) {
                     for (int i = 0; i < node->child_count; i++)
@@ -767,6 +784,46 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
 // Statement Type Checking
 // ========================================
 
+/* What `for x in <collection>` binds x to.
+
+   Iterating a string yields its characters and a range yields integers; an
+   array yields whatever it holds, which is only knowable here for a literal
+   and for split(), the one builtin that builds an array of something other
+   than numbers. Anything else answers TYPE_AUTO -- "not known" -- because the
+   alternative, assuming int, reported `for w in split(s, ",")` as an integer
+   and every use of w as a type error. */
+static DataType loop_element_type(ASTNode *collection) {
+    if (!collection) return TYPE_AUTO;
+
+    if (collection->type == AST_RANGE_EXPR) return TYPE_INT;
+
+    if (collection->data_type == TYPE_STRING ||
+        (collection->type == AST_LITERAL && collection->value &&
+         !isdigit((unsigned char)collection->value[0])))
+        return TYPE_STRING;
+
+    if (collection->type == AST_ARRAY_LITERAL) {
+        DataType t = TYPE_AUTO;
+        for (int i = 0; i < collection->child_count; i++) {
+            ASTNode *e = collection->children[i];
+            if (!e || e->data_type == TYPE_UNKNOWN) return TYPE_AUTO;
+            if (t == TYPE_AUTO) t = e->data_type;
+            else if (t != e->data_type) return TYPE_AUTO;
+        }
+        return t;
+    }
+
+    if (collection->type == AST_CALL_EXPR) {
+        const char *fn = collection->value;
+        if (!fn && collection->left && collection->left->type == AST_MEMBER_ACCESS)
+            fn = collection->left->value;
+        if (fn && strcmp(fn, "split") == 0) return TYPE_STRING;
+        if (fn && strcmp(fn, "range") == 0) return TYPE_INT;
+    }
+
+    return TYPE_AUTO;
+}
+
 static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSymbolEntry *current_function) {
     if (!node) return;
     
@@ -914,11 +971,12 @@ static void check_statement_type(ASTNode *node, LocalSymbolTable *table, LocalSy
             }
 
             if (node->value) {
-                DataType loop_var_type = TYPE_INT;
-                if (node->condition && (node->condition->data_type == TYPE_STRING ||
-                    (node->condition->type == AST_LITERAL && node->condition->value && !isdigit((unsigned char)node->condition->value[0])))) {
-                    loop_var_type = TYPE_STRING;
-                }
+                /* A `for i in 0..n` keeps its range in children[0]; a
+                   collection loop keeps it in condition. */
+                ASTNode *collection = node->condition;
+                if (!collection && node->child_count > 0 && node->children)
+                    collection = node->children[0];
+                DataType loop_var_type = loop_element_type(collection);
                 LocalSymbolEntry *loop_var = add_symbol(table, node->value, NULL, loop_var_type);
                 if (loop_var) {
                     loop_var->is_initialized = true;

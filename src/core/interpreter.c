@@ -1042,6 +1042,13 @@ SubVal eval(ASTNode *node, Env *env) {
         const char *op = node->value;
         SubVal rhs = eval(node->right, env);
 
+        /* Whatever this assigns to takes ownership, so a value that is still
+           some binding's has to be copied first. `a[0] = a[1]` on an array of
+           strings freed the element it was overwriting and then stored the
+           other element's own pointer, leaving the array holding one string
+           twice -- a double free at exit. */
+        if (expr_borrows_binding(node->right)) rhs = val_copy(rhs);
+
         /* Compound assignment on identifier */
         if (node->left && node->left->type == AST_IDENTIFIER) {
             const char *name = node->left->value;
@@ -1292,7 +1299,12 @@ SubVal eval(ASTNode *node, Env *env) {
                 /* Array iteration */
                 for (int i = 0; i < collection.arr->count && !env->returning && !g_exception_thrown && !g_runtime_aborted; i++) {
                     Env *loop = env_new(env);
-                    env_define(loop, node->value, collection.arr->items[i]);
+                    /* A copy: the loop scope owns what it is handed and frees
+                       it at the end of the iteration, so binding the array's
+                       own element freed the array out from under itself. An
+                       array of numbers survived that because freeing a number
+                       does nothing; an array of strings did not. */
+                    env_define(loop, node->value, val_copy(collection.arr->items[i]));
                     r = eval(node->body, loop);
                     if (propagate_loop_control(loop, env)) {
                         env_free(loop);
@@ -1732,10 +1744,22 @@ SubVal eval(ASTNode *node, Env *env) {
             return v;
         }
 
-        /* split: split string into array */
+        /* split(s[, sep]) */
         if (fn && strcmp(fn, "split") == 0 && node->child_count > 0) {
-            return eval_string_method(
-                eval(node->children[0], env).sv, "split", node, env);
+            SubVal sv = eval(node->children[0], env);
+            if (sv.type == VAL_STRING) {
+                /* Every other function-form builtin here shifts the argument
+                   list past the subject before handing it to the method
+                   helper. This one passed `node` through unshifted, so the
+                   helper read the string itself as the separator and
+                   split("a,,b", ",") answered ["a", ""] -- the string cut on
+                   itself -- rather than ["a", "", "b"]. */
+                ASTNode temp = *node;
+                temp.child_count = node->child_count - 1;
+                temp.children    = node->child_count > 1 ? &node->children[1] : NULL;
+                return eval_string_method(sv.sv, "split", &temp, env);
+            }
+            return make_array_val();
         }
 
         /* join: join array elements with separator */
@@ -1812,6 +1836,11 @@ SubVal eval(ASTNode *node, Env *env) {
             SubVal arr = eval(node->children[0], env);
             if (arr.type == VAL_ARRAY && arr.arr) {
                 SubVal item = eval(node->children[1], env);
+                /* The array takes ownership, so a value that is still a
+                   binding's has to be copied first -- otherwise the array and
+                   the scope both free it. */
+                if (expr_borrows_binding(node->children[1]))
+                    item = val_copy(item);
                 array_push(arr.arr, item);
             }
             return NULL_VAL;
@@ -1822,6 +1851,11 @@ SubVal eval(ASTNode *node, Env *env) {
             SubVal arr = eval(node->children[0], env);
             if (arr.type == VAL_ARRAY && arr.arr) {
                 SubVal item = eval(node->children[1], env);
+                /* The array takes ownership, so a value that is still a
+                   binding's has to be copied first -- otherwise the array and
+                   the scope both free it. */
+                if (expr_borrows_binding(node->children[1]))
+                    item = val_copy(item);
                 array_push(arr.arr, item);
             }
             return NULL_VAL;
