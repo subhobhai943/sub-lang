@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" alt="SUB lang" width="260" />
+  <img src="docs/sub-lang-logo.png" alt="SUB lang" width="260" />
 </p>
 
 <h1 align="center">SUB Programming Language</h1>
@@ -48,7 +48,9 @@
 - [Numbers, division and errors](#numbers-division-and-errors)
 - [Testing](#testing)
 - [Architecture](#architecture)
-- [Contributing & License](#license)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
 
 ---
 
@@ -747,6 +749,29 @@ them. The interpreter bypasses it entirely, since it carries real values at
 runtime.
 
 ---
+
+## Contributing
+
+Pull requests are welcome. [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) covers
+the layout, the build, how to add a builtin or a backend, and the one rule that
+governs everything: the interpreter is the specification, and every backend has
+to agree with it.
+
+The quickest way to see whether a change is sound:
+
+```bash
+make
+python3 tests/run_tests.py
+python3 tests/conformance.py        # every target whose toolchain is installed
+```
+
+## Security
+
+To report a vulnerability, please use
+[private vulnerability reporting](https://github.com/subhobhai943/sub-lang/security/advisories/new)
+rather than a public issue. [`SECURITY.md`](SECURITY.md) sets out what is in
+scope, what is not — running a `.sb` program is running code, and there is no
+sandbox — and what the language can reach at all.
 
 ## License
 

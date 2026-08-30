@@ -1,415 +1,221 @@
-# Contributing to SUB Language
+# Contributing to SUB
 
-Thank you for your interest in contributing to SUB Language! This guide will help you contribute to the project step by step.
-
-## 🌍 Language Integration
-
-**Any contributor can integrate their favorite language into SUB!** Whether it's Python, JavaScript, Java, or any other language, you can help expand SUB's cross-platform capabilities. Follow the steps below to get started.
-
-## 📋 Step-by-Step Contribution Guide
-
-### Step 1: Fork and Clone
-```bash
-# Fork the repository on GitHub, then clone your fork
-git clone https://github.com/YOUR_USERNAME/sub-lang.git
-cd sub-lang
-```
-
-### Step 2: Create a Feature Branch
-```bash
-git checkout -b feature/your-feature-name
-# Example: git checkout -b feature/rust-compiler-backend
-```
-
-### Step 3: Set Up Development Environment
-```bash
-# Install prerequisites (GCC/Clang, Make)
-make clean
-make
-```
-
-### Step 4: Make Your Changes
-- Add your language backend in appropriate files
-- Follow the coding standards (see below)
-- Test thoroughly on your platform
-
-### Step 5: Test Your Changes
-```bash
-make clean
-make
-./sub example.sb [your-target]
-```
-
-### Step 6: Commit and Push
-```bash
-git add .
-git commit -m "Add: Brief description of your changes"
-git push origin feature/your-feature-name
-```
-
-### Step 7: Create Pull Request
-- Go to your fork on GitHub
-- Click "New Pull Request"
-- Describe your changes in detail
-- Reference any related issues
-- Wait for review and address feedback
-
-## ⚠️ Known Issues
-
-### Windows Compatibility (v1.0.3)
-
-**Current Status:** v1.0.3 does not support Windows due to POSIX-specific functions.
-
-#### Issues:
-
-| Issue        | Location          | Problem                  |
-|--------------|-------------------|--------------------------|  
-| `strdup()`   | 20+ files         | MSVC wants `_strdup()`   |
-| `<strings.h>`| sub_multilang.c:9 | Doesn't exist on Windows |
-| `strcasecmp()`| sub_multilang.c  | Windows uses `_stricmp()`|
-
-#### The Fix for v1.0.4:
-
-**Contributors can fix this in v1.0.4!** Add this at the top of affected files:
-
-```c
-#ifdef _WIN32
-#define strdup _strdup
-#define strcasecmp _stricmp
-#endif
-```
-
-And replace `<strings.h>` include:
-
-```c
-// From:
-#include <strings.h>
-
-// To:
-#ifndef _WIN32
-#include <strings.h>
-#endif
-```
-
-**Affected Files:** Check all C files using these functions (20+ files need updates).
-
-## 🎯 Roadmap & Future Targets
-
-Our next major goals are:
-
-1. **Rust Compiler Architecture Integration** - Add Rust as a compilation target
-2. **C++ Compiler Architecture Integration** - Enhanced C++ backend support  
-3. **C Compiler Architecture Integration** - Improved C code generation
-4. **Full Windows Support (v1.0.4)** - Fix POSIX compatibility issues
-
-Want to work on these? See detailed guides below!
-
-## 🦀 Rust Compiler Architecture Integration
-
-### Overview
-Integrate Rust as a compilation target for SUB Language, allowing `.sb` files to compile to native Rust code with performance and safety benefits.
-
-### Step-by-Step Integration:
-
-#### Step 1: Create Rust Backend Module
-```bash
-# Create new file: src/codegen/rust_backend.c
-touch src/codegen/rust_backend.c
-touch src/codegen/rust_backend.h
-```
-
-#### Step 2: Implement Rust Code Generator
-Create functions to translate SUB AST to Rust code:
-
-```c
-// In rust_backend.c
-void generate_rust_code(ASTNode* node, FILE* output) {
-    // Translate SUB syntax to Rust
-    // Handle:
-    // - #variable declarations -> let mut / let
-    // - #function definitions -> fn
-    // - #loop / #if -> loop / if statements
-    // - Type inference and ownership rules
-}
-```
-
-#### Step 3: Add Rust Target to Compiler
-Modify `sub_multilang.c` to recognize "rust" target:
-
-```c
-if (strcasecmp(target, "rust") == 0) {
-    compile_to_rust(ast, output_file);
-}
-```
-
-#### Step 4: Handle SUB to Rust Syntax Mapping
-| SUB Syntax | Rust Equivalent |
-|------------|----------------|
-| `#variable x = 10;` | `let mut x = 10;` |
-| `#function add(a, b)` | `fn add(a: i32, b: i32) -> i32` |
-| `#loop(i, 0, 10)` | `for i in 0..10` |
-| `#if (condition)` | `if condition` |
-
-#### Step 5: Test Rust Compilation
-```bash
-./sub example.sb rust
-rustc output.rs -o program
-./program
-```
-
-#### Step 6: Documentation
-- Add Rust examples to `examples/` directory
-- Update README.md with Rust compilation instructions
-- Document Rust-specific features and limitations
-
-## ⚙️ C++ Compiler Architecture Integration
-
-### Overview
-Enhance C++ backend support with modern C++ features (C++11/14/17/20) for better performance and object-oriented programming support.
-
-### Step-by-Step Integration:
-
-#### Step 1: Create Enhanced C++ Backend
-```bash
-# Create/update: src/codegen/cpp_backend.c
-touch src/codegen/cpp_backend.h
-```
-
-#### Step 2: Implement Modern C++ Features
-
-```c
-// In cpp_backend.c
-void generate_cpp_code(ASTNode* node, FILE* output) {
-    // Support:
-    // - Smart pointers (unique_ptr, shared_ptr)
-    // - Lambda functions
-    // - Range-based for loops
-    // - Auto type inference
-    // - STL containers
-}
-```
-
-#### Step 3: SUB to C++ Syntax Mapping
-| SUB Syntax | C++ Equivalent |
-|------------|----------------|
-| `#variable x = 10;` | `auto x = 10;` |
-| `#function add(a, b)` | `auto add(int a, int b) -> int` |
-| `#array nums = [1,2,3];` | `std::vector<int> nums = {1,2,3};` |
-| `#loop(i, 0, 10)` | `for(int i = 0; i < 10; i++)` |
-
-#### Step 4: Add C++ Standard Support
-```c
-// Allow users to specify C++ version
-if (strcasecmp(target, "cpp17") == 0) {
-    compile_to_cpp(ast, output_file, CPP_17);
-} else if (strcasecmp(target, "cpp20") == 0) {
-    compile_to_cpp(ast, output_file, CPP_20);
-}
-```
-
-#### Step 5: Test C++ Compilation
-```bash
-./sub example.sb cpp
-g++ -std=c++17 output.cpp -o program
-./program
-```
-
-#### Step 6: Add OOP Support
-- Implement class/struct generation from SUB
-- Support inheritance and polymorphism
-- Add namespace management
-
-## 🔧 C Compiler Architecture Integration
-
-### Overview
-Improve C code generation with optimized output, better memory management, and support for different C standards (C99, C11, C17).
-
-### Step-by-Step Integration:
-
-#### Step 1: Enhance Existing C Backend
-```bash
-# Update: src/codegen/c_backend.c
-# Create: src/codegen/c_optimizer.c
-```
-
-#### Step 2: Implement C Standard Support
-
-```c
-// In c_backend.c
-void generate_c_code(ASTNode* node, FILE* output, CStandard standard) {
-    // Generate code for:
-    // - C99: Variable-length arrays, inline functions
-    // - C11: Anonymous structs, static assertions
-    // - C17: Bug fixes and clarifications
-}
-```
-
-#### Step 3: Optimize Generated C Code
-
-```c
-void optimize_c_output(ASTNode* node) {
-    // Apply optimizations:
-    // - Constant folding
-    // - Dead code elimination
-    // - Inline small functions
-    // - Reduce memory allocations
-}
-```
-
-#### Step 4: SUB to C Syntax Mapping
-| SUB Syntax | C Equivalent |
-|------------|----------------|
-| `#variable x = 10;` | `int x = 10;` |
-| `#function add(a, b)` | `int add(int a, int b)` |
-| `#array nums = [1,2,3];` | `int nums[] = {1,2,3};` |
-| `#loop(i, 0, 10)` | `for(int i = 0; i < 10; i++)` |
-
-#### Step 5: Add Multiple C Standard Targets
-```c
-// Support different C versions
-if (strcasecmp(target, "c99") == 0) {
-    compile_to_c(ast, output_file, C99);
-} else if (strcasecmp(target, "c11") == 0) {
-    compile_to_c(ast, output_file, C11);
-}
-```
-
-#### Step 6: Memory Management Improvements
-- Add automatic cleanup generation
-- Implement buffer overflow protection
-- Generate valgrind-clean code
-- Add memory leak detection helpers
-
-#### Step 7: Test C Compilation
-```bash
-./sub example.sb c99
-gcc -std=c99 output.c -o program
-./program
-
-# Test with different standards
-./sub example.sb c11
-gcc -std=c11 output.c -o program
-```
-
-## 🔄 Common Integration Tasks (All Architectures)
-
-### Required Files to Modify:
-1. `src/codegen/[language]_backend.c` - Core code generation
-2. `src/codegen/[language]_backend.h` - Header file
-3. `sub_multilang.c` - Add target recognition
-4. `Makefile` - Add compilation rules
-5. `README.md` - Update documentation
-6. `examples/` - Add example programs
-
-### Testing Checklist:
-- [ ] Basic syntax compilation (variables, functions)
-- [ ] Control flow (if, loops, switch)
-- [ ] Data structures (arrays, structs)
-- [ ] Memory management (no leaks)
-- [ ] Cross-platform compatibility
-- [ ] Performance benchmarks
-- [ ] Error handling
-- [ ] Edge cases
-
-### Integration Best Practices:
-1. **Start Small** - Begin with basic syntax translation
-2. **Test Incrementally** - Test each feature as you add it
-3. **Follow Patterns** - Look at existing backends (web, android, ios)
-4. **Document Everything** - Add comments and examples
-5. **Ask for Help** - Open issues or discussions if stuck
-
-## 🐛 Reporting Bugs
-
-- Use GitHub Issues to report bugs
-- Include:
-  - SUB version (e.g., v1.0.3)
-  - Operating System (Windows/macOS/Linux)
-  - Steps to reproduce
-  - Sample .sb code demonstrating the issue
-
-## 💡 Suggesting Features
-
-- Open a GitHub Issue with the "enhancement" label
-- Describe the feature and its use case
-- Explain how it improves SUB Language
-
-## 📝 Coding Standards
-
-### C Code Style
-- **Indentation:** 4 spaces (no tabs)
-- **Bracing:** K&R style
-- **Comments:** Add for complex logic
-- **Function Length:** Keep under 50 lines when possible
-
-### Naming Conventions
-- **Functions:** `snake_case` (e.g., `compile_to_rust`)
-- **Structs:** `PascalCase` (e.g., `ASTNode`)
-- **Constants:** `UPPER_SNAKE_CASE` (e.g., `MAX_BUFFER_SIZE`)
-- **Variables:** `snake_case` (e.g., `token_count`)
-
-### Cross-Platform Considerations
-- Always test on multiple platforms when possible
-- Use `#ifdef` for platform-specific code
-- Avoid POSIX-only functions (see Windows compatibility above)
-- Document platform limitations
-
-### Documentation
-- Update README.md for user-facing changes
-- Add inline comments for complex algorithms
-- Update language specification for syntax changes
-- Add examples for new features
-
-## 🏭 Development Setup
-
-### Prerequisites
-- **Compiler:** GCC or Clang
-- **Build System:** Make
-- **Version Control:** Git
-- **OS:** Linux/macOS (Windows support coming in v1.0.4)
-- **Optional:** Rust, C++ compiler for testing backends
-
-### Building from Source
-```bash
-make clean
-make
-```
-
-### Running Examples
-```bash
-# Compile to web
-./sub example.sb web
-
-# Compile to Android
-./sub example.sb android
-
-# Compile to iOS
-./sub example.sb ios
-
-# Future targets:
-./sub example.sb rust
-./sub example.sb cpp
-./sub example.sb c99
-```
-
-## 🎨 Language Design Principles
-
-When contributing to SUB, keep these principles in mind:
-
-1. **Simplicity First** - Code should be intuitive and easy to read
-2. **Blockchain Method** - Use `#` syntax for visual clarity
-3. **Cross-Platform** - Support all target platforms equally
-4. **Performance** - Optimize for speed without sacrificing readability
-5. **Compatibility** - Maintain backward compatibility when possible
-6. **Accessibility** - Make it the "world's easiest" language to use
-
-## ❓ Questions or Help?
-
-Feel free to:
-- Open a GitHub Issue for questions
-- Start a GitHub Discussion
-- Contact the maintainers
-- Ask about specific compiler architecture integration
+Thanks for wanting to work on this. This page is what the project actually
+looks like today, so you can get a change reviewed without guessing.
 
 ---
 
-**Thank you for contributing to SUB Language! Together we're building the world's easiest cross-platform programming language.** 🚀
+## The one rule that matters
+
+**The interpreter is the specification.** `subi` defines what a program prints
+and what status it exits with. Every other backend has to agree with it, and
+`tests/conformance.py` is what holds them to it: it runs each program in
+`tests/conformance/` under the interpreter, then transpiles, builds and runs
+the same program through every target whose toolchain is installed, and diffs
+the output and the exit status.
+
+That has two consequences worth internalising before you start:
+
+- **A change to one backend is almost never finished.** If you fix how Go
+  spells something, ask what Rust, Swift, Kotlin and the machine-code backend
+  do with the same program. The suite will tell you, but it is faster to think
+  about it first.
+- **A bug in the interpreter makes all ten backends agree on the wrong
+  answer** and the suite still passes. Interpreter behaviour has to be checked
+  against something independent — what C, Python and Ruby actually do, or a
+  value you worked out by hand. This has bitten us: `split("a,,b", ",")`
+  returned two fields for months because nothing outside the interpreter could
+  run `split` at all.
+
+---
+
+## Getting set up
+
+```bash
+git clone https://github.com/subhobhai943/sub-lang.git
+cd sub-lang
+make            # builds sub, subc and subi
+```
+
+You need a C compiler (GCC or Clang) and Make. Nothing else is required to
+build or to run the machine-code backend.
+
+The three tools:
+
+| | |
+|---|---|
+| `subi` | interprets a `.sb` file, or starts a REPL with no arguments |
+| `subc` | compiles to a native binary — `--native` emits x86-64 machine code itself, `--via-c` goes through your C compiler |
+| `sub`  | transpiles to another language: `python`, `javascript`, `typescript`, `java`, `c`, `cpp`, `rust`, `go`, `swift`, `kotlin`, `ruby`, `assembly`, `css`, plus the `android` / `ios` / `web` / `windows` / `macos` / `linux` platform targets |
+
+Run `./sub --help`, `./subc --help` or `./subi --help` for the current list.
+
+---
+
+## Testing
+
+```bash
+python3 tests/run_tests.py            # the tools start, build and run
+python3 tests/conformance.py          # every target whose toolchain is installed
+python3 tests/conformance.py c rust   # just these
+python3 tests/grammar_keywords.py     # the editor grammar matches the lexer
+```
+
+`conformance.py` skips a target whose compiler is not installed and says so.
+You do not need all twelve locally — CI runs the full set — but **run what you
+have** before opening a pull request, and say in the PR which targets you
+could not run.
+
+### Adding a conformance case
+
+Drop a `.sb` file into `tests/conformance/`, named `NN_topic.sb`. There is no
+expected-output file: the interpreter produces it. Aim each case at behaviour
+that could plausibly differ between backends — integer division, float
+formatting, string edges, out-of-range indices — rather than at whether the
+language runs at all.
+
+A program that stops with a runtime error is a legitimate case. Every backend
+has to agree on the error too: the interpreter exits 70, and so must the rest,
+with the same output before the error. `11_division_by_zero.sb`,
+`14_array_bounds.sb` and `22_char_at_range.sb` are the examples to copy.
+
+---
+
+## Where things live
+
+```
+src/core/        lexer, parser, semantic analysis, the interpreter, modules
+src/codegen/     the transpiling backends and the shared type inference
+src/native/      the x86-64 machine-code backend and its ELF writer
+src/compilers/   the sub / subc / subi front ends
+stdlib/          the standard library, written in SUB
+tests/conformance/   the differential suite
+.vscode-extension/   the editor grammar and snippets
+```
+
+Two files carry more weight than their size suggests:
+
+- **`src/codegen/codegen_infer.c`** — the shared type inference. Every typed
+  backend asks it what an expression is and what an array holds. Most
+  "backend X emits the wrong type" bugs are really bugs here, and fixing them
+  here fixes them everywhere at once.
+- **`src/core/parser_enhanced.c`** — among other things, it rewrites the
+  method spelling of a builtin (`s.substring(0, 3)`) into the function
+  spelling (`substring(s, 0, 3)`), so everything downstream sees one shape.
+  Adding a builtin with a method spelling means adding its name to that list,
+  not adding a branch to ten backends.
+
+---
+
+## Adding a builtin
+
+This is the most common non-trivial contribution, and the order matters:
+
+1. **Implement it in the interpreter** (`src/core/interpreter.c`), in both the
+   function and method spellings, and work out the edge cases deliberately —
+   negative indices, empty arguments, out of range. Whatever you decide is now
+   the specification.
+2. **Declare its type** in `src/core/semantic.c` (so it is not "Undefined
+   function") and in the table at the top of `src/codegen/codegen_infer.c` (so
+   the typed backends know what it returns).
+3. **Write the conformance case first**, and watch it fail on nine backends.
+4. **Implement it in each backend**, running the case as you go.
+5. If it has a method spelling, add its name to `is_builtin_method()` in the
+   parser.
+
+Do not reach for the target language's obvious spelling without checking it
+against the interpreter. Python's `s[a:b]` counts a negative start from the
+end where SUB clamps it to 0; `str.replace` with an empty pattern inserts
+between every character where SUB returns the string unchanged; Ruby's
+`split` drops trailing empty fields; C's `strtok` treats the separator as a
+set of characters. Each of those was a real bug. Every backend calls a helper
+in its own prelude for exactly this reason.
+
+---
+
+## Adding a backend
+
+There is no plugin interface — a backend is a function that walks the AST and
+appends to a `StringBuilder`. The shortest path:
+
+1. Read `src/codegen/codegen_cpp.c`. It is the smallest complete backend and
+   shows the shape: a builtin-spelling table, a type mapper, an expression
+   generator, a statement generator, and a runtime prelude.
+2. Add your generator, and a case for the target name in
+   `src/compilers/sub.c`.
+3. Add the target to `TARGETS` in `tests/conformance.py` with its file
+   extension, the tool it needs, and how to build and run it.
+4. Get all of `tests/conformance/` passing. Expect this to be the bulk of the
+   work — the existing suite is dense with the cases that break backends.
+
+---
+
+## Style
+
+Match the file you are editing. Beyond that:
+
+- 4 spaces, no tabs. K&R bracing. `snake_case` functions, `PascalCase` types,
+  `UPPER_SNAKE_CASE` constants.
+- **Comments say why, not what.** The codebase is full of notes explaining
+  which bug a line prevents, and they are the most valuable thing in it. If
+  you fix something subtle, leave the reason behind: the next person will
+  otherwise "simplify" it straight back.
+- The build must stay warning-free. CI compiles with `-Wall -Wextra` and
+  fails on new warnings.
+- No trailing whitespace, and no reformatting of code you did not change.
+
+---
+
+## Pull requests
+
+Branch off `main`, and in the description say:
+
+- what changed and why,
+- which targets you ran locally and which you could not,
+- any behaviour that is now different, however small.
+
+CI runs on every pull request: Linux (gcc and clang, x86-64 and arm64), macOS
+arm64, Windows via mingw, the full twelve-target conformance sweep, the MSI
+build, and the syntax-highlighting checks. All of it has to be green.
+
+Two things CI catches that local testing usually does not:
+
+- **Windows is LLP64** — `long` is 32 bits there and a pointer is 64. Casting
+  a pointer through `long` works everywhere else and silently truncates on
+  Windows. Anything stored in a SUB array goes through
+  `(long long)(intptr_t)`.
+- **Swift and Kotlin** are only in the full conformance job. If you do not
+  have those toolchains, say so in the PR rather than claiming a clean run.
+
+---
+
+## Reporting a bug
+
+Open an issue with the `.sb` program that shows it, what you ran
+(`subi` / `subc` / `sub <target>`), what you expected, what happened, and your
+OS and version (`./subi --version`). A backend disagreeing with the
+interpreter is always a bug — say which backend, and the suite will usually
+reproduce it in one case.
+
+For anything with a security dimension, see [SECURITY.md](../SECURITY.md)
+instead.
+
+---
+
+## Things that need doing
+
+Currently open, roughly in order of how much they would help:
+
+- **A language server.** Design and staging are settled; the first step is
+  turning diagnostics into data rather than text on stderr, which is worth
+  doing on its own.
+- **`str()` of an array** is still interpreter-only.
+- **Error line numbers from imported modules** are ambiguous with the main
+  file's, because a spliced module's nodes carry only a line.
+- **The machine-code backend** does not yet do objects, classes, `input()`,
+  `try`/`catch`, iterating a string, or functions of more than six
+  parameters. Programs using them fall back to the C backend, and `subc` names
+  what forced the fallback.
+
+Ask on an issue before starting something large, so two people do not write
+the same backend.
