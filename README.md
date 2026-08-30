@@ -153,16 +153,16 @@ through memory - so it gives up roughly 4x against `gcc -O2` while still
 running about 90x faster than the interpreter. What it buys is that nothing
 else has to be installed.
 
-**Not yet in the machine-code backend:** objects, classes, `input()`, string
-slicing (`substring`, `char_at`, `replace`, `split`, `join`), `try`/`catch`,
-iterating a string, and functions of more than six parameters. Programs using
-these compile through the C backend automatically, and `subc` names the
-construct that forced the fallback rather than failing silently.
+**Not yet in the machine-code backend:** objects, classes, `input()`,
+`try`/`catch`, iterating a string, and functions of more than six parameters.
+Programs using these compile through the C backend automatically, and `subc`
+names the construct that forced the fallback rather than failing silently.
 
 Everything else compiles to machine code, including arrays (literals,
 indexing, indexed assignment, `len`, `push`/`append`, `pop`, `for x in a`),
-`switch`, `do`/`while`, `break`/`continue`, and top-level variables read and
-assigned from inside functions.
+the string builtins (`substring`, `char_at`, `contains`, `replace`, `split`,
+`join`), `switch`, `do`/`while`, `break`/`continue`, and top-level variables
+read and assigned from inside functions.
 
 ### 2. Direct Interpreter (`subi`)
 
@@ -393,14 +393,19 @@ println(s.length)              # 11
 println(s.upper())             # HELLO WORLD
 println(s.lower())             # hello world
 println(s.substring(0, 5))     # Hello
-println(s.contains("World"))   # 1 (true)
+println(s.contains("World"))   # true
 println(s.replace("World", "SUB")) # Hello SUB
 println(s.trim())              # trims whitespace
 println(s.char_at(0))          # H
 
 let parts = "a,b,c".split(",")
 println(parts[0])              # a
+println(parts.join("|"))       # a|b|c
 ```
+
+`s.substring(0, 5)` and `substring(s, 0, 5)` are the same call: the parser
+rewrites the method spelling into the function one, so both mean the same
+thing under the interpreter and all ten backends.
 
 #### Arrays
 ```coffee
@@ -458,13 +463,20 @@ ui.window(title="SUB App", width=800, height=600) {
 | `min(a, b)` / `max(a, b)` | Minimum / Maximum of two values | `max(10, 20)` |
 | `floor(x)` / `ceil(x)` / `round(x)` | Rounding operations | `floor(3.7)` -> `3` |
 | `push(arr, val)` / `pop(arr)` | Array operations | `push(arr, 10)` |
-| `join(arr, sep)` | Join array to string | `join(arr, ", ")` |
-| `trim(s)` / `char_at(s, i)` | String operations | `trim(" hi ")` |
+| `upper(s)` / `lower(s)` / `trim(s)` | Case and whitespace | `upper("hi")` |
+| `substring(s, start[, end])` | A slice; both bounds are clamped | `substring("hello", 1, 3)` -> `"el"` |
+| `char_at(s, i)` | One character; `i` may count from the end | `char_at("abc", -1)` -> `"c"` |
+| `contains(s, needle)` | Substring test | `contains("hello", "ell")` |
+| `replace(s, old, new)` | Every occurrence | `replace("a-b", "-", "+")` |
+| `split(s[, sep])` | Cut into an array; empty fields kept | `split("a,,b", ",")` |
+| `join(arr[, sep])` | Join an array into a string | `join(arr, ", ")` |
 
-Note that the character-level string builtins — `substring`, `char_at`,
-`contains`, `replace`, `split`, `join` — currently work under `subi` only.
-They are unmapped or unimplemented in the compiled backends, so a program
-using them interprets but does not compile.
+All ten backends and the interpreter agree on these, down to the edge cases:
+`substring` clamps a negative bound to 0 rather than counting from the end,
+`replace` with an empty pattern changes nothing, `split` keeps empty fields
+and always yields at least one, and `char_at` outside the string stops the
+program with the interpreter's exit status. `tests/conformance/21_strings.sb`
+is what holds them to it.
 
 ---
 

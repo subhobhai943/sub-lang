@@ -61,4 +61,4 @@ heading("io")
 
 ok("everything above ran through the same library")
 info("and the same source compiles to all ten backends")
-warn("the string module is small on purpose -- see stdlib/README.md")
+warn("substring/split/join and friends now compile too -- see stdlib/README.md")

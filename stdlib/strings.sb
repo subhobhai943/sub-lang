@@ -3,19 +3,13 @@
 #
 #   import "strings"
 #
-# This module is deliberately small, and the reason is worth stating plainly:
-# SUB's character-level string builtins do not work outside the interpreter.
-# `substring`, `char_at`, `contains`, `replace`, `split` and `join` are
-# implemented in the interpreter and are either unmapped or unimplemented in
-# every compiled backend, so anything built on them would run under `subi` and
-# fail to compile under `sub` and `subc`.
+# Everything here produces identical output through all ten backends and the
+# interpreter; tests/conformance/19_stdlib.sb and 21_strings.sb check it.
 #
-# What is portable is `len`, `upper`, `lower`, `trim`, `+` and comparison, so
-# that is what this module is built from. Everything here produces identical
-# output through all ten backends; see tests/conformance/19_stdlib.sb.
-#
-# When the character builtins are wired into the backends, this module is
-# where find/starts_with/split_on and friends belong.
+# This module used to stop at padding, because `substring`, `char_at`,
+# `contains`, `replace`, `split` and `join` existed only in the interpreter
+# and anything built on them failed to compile under `sub` and `subc`. They
+# are wired into all ten backends now, so searching and cutting live here too.
 # ============================================================
 
 fn is_empty(s: string): bool {
@@ -78,4 +72,132 @@ fn center(s: string, width: int, pad: string): string {
 # A line of `n` copies of `s`, which is what a report separator wants.
 fn line(s: string, n: int): string {
     return repeat(s, n)
+}
+
+# ---------- searching ----------
+
+# The index of the first occurrence of `needle`, or -1. An empty needle is
+# found at 0, which is what `contains` reports for it too.
+fn find(s: string, needle: string): int {
+    let n = len(s)
+    let m = len(needle)
+    if m == 0 {
+        return 0
+    }
+    let i = 0
+    while i + m <= n {
+        if substring(s, i, i + m) == needle {
+            return i
+        }
+        i = i + 1
+    }
+    return 0 - 1
+}
+
+fn starts_with(s: string, prefix: string): bool {
+    return substring(s, 0, len(prefix)) == prefix
+}
+
+fn ends_with(s: string, suffix: string): bool {
+    let n = len(s)
+    let m = len(suffix)
+    if m > n {
+        return false
+    }
+    return substring(s, n - m, n) == suffix
+}
+
+# How many non-overlapping times `needle` occurs. Cutting on it and counting
+# the pieces is both shorter and harder to get wrong than a search loop.
+fn count_of(s: string, needle: string): int {
+    if len(needle) == 0 {
+        return 0
+    }
+    return len(split(s, needle)) - 1
+}
+
+# ---------- trimming to shape ----------
+
+fn strip_prefix(s: string, prefix: string): string {
+    if starts_with(s, prefix) {
+        return substring(s, len(prefix), len(s))
+    }
+    return s
+}
+
+fn strip_suffix(s: string, suffix: string): string {
+    if ends_with(s, suffix) {
+        return substring(s, 0, len(s) - len(suffix))
+    }
+    return s
+}
+
+# `s` cut to `width`, with the last characters given over to `ellipsis` when
+# something was actually removed. A width shorter than the ellipsis just cuts.
+fn truncate(s: string, width: int, ellipsis: string): string {
+    if len(s) <= width {
+        return s
+    }
+    if width <= len(ellipsis) {
+        return substring(s, 0, width)
+    }
+    return substring(s, 0, width - len(ellipsis)) + ellipsis
+}
+
+# ---------- reshaping ----------
+
+fn reverse(s: string): string {
+    let out = ""
+    let i = len(s) - 1
+    while i >= 0 {
+        out = out + char_at(s, i)
+        i = i - 1
+    }
+    return out
+}
+
+fn capitalize(s: string): string {
+    if len(s) == 0 {
+        return s
+    }
+    return upper(char_at(s, 0)) + lower(substring(s, 1, len(s)))
+}
+
+# Every space-separated word capitalized. Runs of spaces are preserved, since
+# splitting keeps empty fields.
+fn title(s: string): string {
+    let parts = split(s, " ")
+    let out = []
+    for w in parts {
+        push(out, capitalize(w))
+    }
+    return join(out, " ")
+}
+
+# The words of `s`, with empty fields dropped -- which is what a run of spaces
+# or a leading space would otherwise leave behind.
+fn words(s: string) {
+    let out = []
+    for w in split(trim(s), " ") {
+        if len(w) > 0 {
+            push(out, w)
+        }
+    }
+    return out
+}
+
+fn lines(s: string) {
+    return split(s, "\n")
+}
+
+# Only the first occurrence, where `replace` changes every one.
+fn replace_first(s: string, old: string, repl: string): string {
+    if len(old) == 0 {
+        return s
+    }
+    let at = find(s, old)
+    if at < 0 {
+        return s
+    }
+    return substring(s, 0, at) + repl + substring(s, at + len(old), len(s))
 }

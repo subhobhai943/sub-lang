@@ -1,0 +1,54 @@
+# The half of stdlib/strings.sb that could not exist while the character-level
+# builtins were interpreter-only. Everything here is written in SUB on top of
+# substring/char_at/contains/replace/split/join, so it is also a check that
+# those compose the same way through all ten backends.
+
+import "strings"
+
+# ---------- searching ----------
+
+println(find("hello world", "world"))
+println(find("hello world", "o"))
+println(find("hello", "zz"))
+println(find("hello", ""))
+println(find("", "x"))
+println(starts_with("hello", "he"))
+println(starts_with("hello", "lo"))
+println(starts_with("hi", "hello"))
+println(ends_with("hello", "lo"))
+println(ends_with("hello", "he"))
+println(ends_with("he", "hello"))
+println(count_of("a,b,c", ","))
+println(count_of("aaa", "aa"))
+println(count_of("abc", "z"))
+println(count_of("abc", ""))
+
+# ---------- trimming to shape ----------
+
+println(strip_prefix("unhappy", "un"))
+println(strip_prefix("happy", "un"))
+println(strip_suffix("file.sb", ".sb"))
+println(strip_suffix("file.sb", ".rs"))
+println(truncate("hello world", 8, "..."))
+println(truncate("hi", 8, "..."))
+println(truncate("hello", 2, "..."))
+
+# ---------- reshaping ----------
+
+println(reverse("abc"))
+println(reverse(""))
+println(reverse("a"))
+println(capitalize("hELLO"))
+println(capitalize(""))
+println(title("hello wide world"))
+println(len(words("  one   two  ")))
+println(join(words(" a b "), "|"))
+println(len(lines("a")))
+println(replace_first("a-b-c", "-", "+"))
+println(replace_first("abc", "z", "+"))
+
+# ---------- with the rest of the module ----------
+
+println(pad_left(str(find("abc", "c")), 3, "0"))
+println(center(capitalize("sub"), 9, "-"))
+println(join(words(title("the sub language")), "_"))

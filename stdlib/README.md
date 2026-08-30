@@ -112,17 +112,24 @@ import "strings"
 | `pad_left(s, w, pad)`, `pad_right(s, w, pad)` | pad to a width; never truncates |
 | `center(s, w, pad)` | centre, odd column to the right |
 | `line(s, n)` | a separator |
+| `find(s, needle)` | index of the first occurrence, or `-1` |
+| `starts_with(s, prefix)`, `ends_with(s, suffix)` | edges |
+| `count_of(s, needle)` | how many non-overlapping times it occurs |
+| `strip_prefix(s, p)`, `strip_suffix(s, x)` | remove if present |
+| `truncate(s, width, ellipsis)` | cut to a width, marking that it was cut |
+| `reverse(s)` | reversed |
+| `capitalize(s)` | first letter up, the rest down |
+| `title(s)` | every space-separated word capitalized |
+| `words(s)` | space-separated words, empties dropped |
+| `lines(s)` | split on newlines |
+| `replace_first(s, old, new)` | only the first occurrence |
 
-**This module is small on purpose.** SUB's character-level string builtins —
-`substring`, `char_at`, `contains`, `replace`, `split`, `join` — are
-implemented in the interpreter and are unmapped or unimplemented in every
-compiled backend. Anything built on them would run under `subi` and fail to
-compile under `sub` and `subc`, which is precisely the trap the previous
-version of this library fell into.
-
-What *is* portable is `len`, `upper`, `lower`, `trim`, `+` and comparison, so
-that is what this module is built from. When those builtins are wired into the
-backends, `find`, `starts_with` and `split_on` belong here.
+This module used to stop at the padding functions. SUB's character-level
+builtins — `substring`, `char_at`, `contains`, `replace`, `split`, `join` —
+were implemented in the interpreter and unmapped in every compiled backend, so
+anything built on them ran under `subi` and failed to compile under `sub` and
+`subc`. They are wired into all ten backends now, which is what the second
+half of this table is built from.
 
 ## io
 
@@ -149,8 +156,6 @@ so write plain output when something else will read it.
 These are properties of the language and the backends, not of the library, and
 each is why some obvious function is missing:
 
-- **No character-level string work outside the interpreter** (above). This is
-  the biggest gap.
 - **`str()` of an array** is interpreter-only; print arrays directly with
   `println(a)`.
 - **No file or process access.** There are no builtins for either, so there is
