@@ -101,7 +101,15 @@ static const CppBuiltin* cpp_builtin(const char *name) {
    argument, which cannot express min(a, b). */
 static const CppBuiltin* cpp_builtin_multi(const char *name) {
     static const CppBuiltin table[] = {
-        {"min","std::min(",")"}, {"max","std::max(",")"}, {NULL,NULL,NULL}
+        {"min","std::min(",")"}, {"max","std::max(",")"},
+        /* The character-level string builtins. Each is a free function in the
+           prelude because std::string spells all of them differently, and
+           substring/split have overloads for the form that omits the last
+           argument. */
+        {"substring","sub_substring(",")"}, {"char_at","sub_char_at(",")"},
+        {"contains","sub_contains(",")"},   {"replace","sub_replace(",")"},
+        {"split","sub_split(",")"},         {"join","sub_join(",")"},
+        {NULL,NULL,NULL}
     };
     if (!name) return NULL;
     for (int i = 0; table[i].sub_name; i++)
@@ -335,7 +343,11 @@ static void generate_expr_cpp(StringBuilder *sb, ASTNode *node) {
                     break;
                 }
                 cb = cpp_builtin_multi(node->value);
-                if (cb && node->child_count >= 2) {
+                /* One argument is enough for split() and join(), whose
+                   separator is optional; the prelude carries an overload for
+                   each. min and max are the only other entries in that table
+                   and are meaningless with one argument either way. */
+                if (cb && node->child_count >= 1) {
                     sb_append(sb, "%s", cb->prefix);
                     for (int i = 0; i < node->child_count; i++) {
                         if (i > 0) sb_append(sb, ", ");
@@ -971,6 +983,72 @@ char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) 
     sb_append(sb, "    size_t b = s.find_first_not_of(\" \\t\\n\\r\");\n");
     sb_append(sb, "    size_t e = s.find_last_not_of(\" \\t\\n\\r\");\n");
     sb_append(sb, "    return b == std::string::npos ? \"\" : s.substr(b, e - b + 1);\n}\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "static std::string sub_substring(const std::string &s, long long start, long long end) {\n");
+    sb_append(sb, "    long long len = (long long)s.size();\n");
+    sb_append(sb, "    if (start < 0) start = 0;\n");
+    sb_append(sb, "    if (end < 0) end = 0;\n");
+    sb_append(sb, "    if (start > len) start = len;\n");
+    sb_append(sb, "    if (end > len) end = len;\n");
+    sb_append(sb, "    if (start > end) start = end;\n");
+    sb_append(sb, "    return s.substr((size_t)start, (size_t)(end - start));\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "/* An overload rather than a default argument: the interpreter clamps a\n");
+    sb_append(sb, "   negative end to 0, so no negative value is free to mean \"to the end\". */\n");
+    sb_append(sb, "static std::string sub_substring(const std::string &s, long long start) {\n");
+    sb_append(sb, "    return sub_substring(s, start, (long long)s.size());\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "static std::string sub_char_at(const std::string &s, long long idx) {\n");
+    sb_append(sb, "    long long len = (long long)s.size();\n");
+    sb_append(sb, "    if (idx < 0) idx += len;\n");
+    sb_append(sb, "    if (idx < 0 || idx >= len) sub_die(\"char_at index out of range\");\n");
+    sb_append(sb, "    return std::string(1, s[(size_t)idx]);\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "static bool sub_contains(const std::string &s, const std::string &sub) {\n");
+    sb_append(sb, "    return s.find(sub) != std::string::npos;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "static std::string sub_replace(const std::string &s, const std::string &o,\n");
+    sb_append(sb, "                               const std::string &n) {\n");
+    sb_append(sb, "    if (o.empty()) return s;\n");
+    sb_append(sb, "    std::string r;\n");
+    sb_append(sb, "    size_t p = 0;\n");
+    sb_append(sb, "    for (;;) {\n");
+    sb_append(sb, "        size_t hit = s.find(o, p);\n");
+    sb_append(sb, "        if (hit == std::string::npos) { r += s.substr(p); break; }\n");
+    sb_append(sb, "        r += s.substr(p, hit - p);\n");
+    sb_append(sb, "        r += n;\n");
+    sb_append(sb, "        p = hit + o.size();\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    return r;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "/* Every field is kept, including empty ones, and the result always has at\n");
+    sb_append(sb, "   least one element. An empty separator splits into characters. */\n");
+    sb_append(sb, "static std::vector<std::string> sub_split(const std::string &s, const std::string &sep) {\n");
+    sb_append(sb, "    std::vector<std::string> out;\n");
+    sb_append(sb, "    if (sep.empty()) {\n");
+    sb_append(sb, "        for (size_t i = 0; i < s.size(); i++) out.push_back(std::string(1, s[i]));\n");
+    sb_append(sb, "        return out;\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    size_t p = 0;\n");
+    sb_append(sb, "    for (;;) {\n");
+    sb_append(sb, "        size_t hit = s.find(sep, p);\n");
+    sb_append(sb, "        if (hit == std::string::npos) { out.push_back(s.substr(p)); break; }\n");
+    sb_append(sb, "        out.push_back(s.substr(p, hit - p));\n");
+    sb_append(sb, "        p = hit + sep.size();\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    return out;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "static std::vector<std::string> sub_split(const std::string &s) { return sub_split(s, \" \"); }\n");
+    sb_append(sb, "template <class T> std::string sub_join(const std::vector<T> &a, const std::string &sep) {\n");
+    sb_append(sb, "    std::string r;\n");
+    sb_append(sb, "    for (size_t i = 0; i < a.size(); i++) {\n");
+    sb_append(sb, "        if (i) r += sep;\n");
+    sb_append(sb, "        r += sub_elem_str(a[i]);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    return r;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "template <class T> std::string sub_join(const std::vector<T> &a) "
+                  "{ return sub_join(a, \"\"); }\n");
 
     if (ast->type == AST_PROGRAM) {
         /* Pass 0: the top-level variables, declared at namespace scope so

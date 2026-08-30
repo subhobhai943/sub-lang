@@ -250,6 +250,16 @@ ASTNode *infer_enter_function(ASTNode *fn) {
     return prev;
 }
 
+/* Whether `name` is a parameter of `fn`. */
+static int param_of(ASTNode *fn, const char *name) {
+    if (!fn || !name) return 0;
+    for (int i = 0; i < fn->child_count; i++) {
+        ASTNode *p = fn->children[i];
+        if (p && p->value && strcmp(p->value, name) == 0) return 1;
+    }
+    return 0;
+}
+
 /* The element type of an array parameter of the function being generated. */
 static DataType param_elem_in_current_fn(const char *name) {
     if (!g_current_fn || !name) return TYPE_UNKNOWN;
@@ -422,6 +432,26 @@ static void collect_return_types(ASTNode *node, DataType *acc, int *saw_value_re
     for (int i = 0; i < node->child_count; i++)
         collect_return_types(node->children[i], acc, saw_value_return);
     collect_return_types(node->next,      acc, saw_value_return);
+}
+
+/* The element type of the arrays a function returns, for callers that need to
+   know what join() or an index will hand back. Stored on the declaration's
+   elem_type, the same field a parameter uses. */
+static void collect_return_elem(ASTNode *node, DataType *acc) {
+    if (!node) return;
+    if (node->type == AST_FUNCTION_DECL || node->type == AST_ARROW_FUNCTION)
+        return;
+    if (node->type == AST_RETURN_STMT && node->right &&
+        infer_expr_type(node->right) == TYPE_ARRAY)
+        *acc = type_merge(*acc, infer_elem_type(node->right));
+
+    collect_return_elem(node->left,      acc);
+    collect_return_elem(node->right,     acc);
+    collect_return_elem(node->condition, acc);
+    collect_return_elem(node->body,      acc);
+    for (int i = 0; i < node->child_count; i++)
+        collect_return_elem(node->children[i], acc);
+    collect_return_elem(node->next,      acc);
 }
 
 DataType infer_return_type(ASTNode *body) {
@@ -684,6 +714,19 @@ static void infer_var_decls(ASTNode *node) {
             infer_expr_type(node->right) == TYPE_ARRAY)
             elem_record(node->value, infer_elem_type(node->right));
     }
+    /* `for w in <collection>` binds w to an element. Recorded before the body
+       is walked, so a push(out, w) inside it can see what w is: without this
+       `for w in split(s, ",")` left w at the semantic pass's default and the
+       typed backends built a list of integers out of the pieces. */
+    if (node->type == AST_FOR_STMT && node->value && node->condition) {
+        DataType ct = infer_expr_type(node->condition);
+        if (ct == TYPE_STRING) {
+            var_record(node->value, TYPE_STRING);
+        } else if (ct == TYPE_ARRAY) {
+            DataType et = infer_elem_type(node->condition);
+            if (!type_is_unresolved(et)) var_record(node->value, et);
+        }
+    }
     /* push(a, x) tells us what a holds just as surely as the literal does,
        and it is often the only thing that does - `let a = []` says nothing. */
     if (node->type == AST_CALL_EXPR && node->value && node->child_count >= 2 &&
@@ -707,6 +750,36 @@ static void infer_var_decls(ASTNode *node) {
     infer_var_decls(node->next);
 }
 
+/* `let out = []` is declared before anything is pushed into it, so its type
+   has to be written back onto the literal once the pushes have been seen -
+   every backend asks the initializer what the elements are, and an empty
+   literal on its own can only answer "integers". */
+static void stamp_empty_array_elems(ASTNode *node) {
+    if (!node) return;
+
+    if ((node->type == AST_VAR_DECL || node->type == AST_CONST_DECL) &&
+        node->value && node->right &&
+        node->right->type == AST_ARRAY_LITERAL &&
+        node->right->child_count == 0) {
+        DataType et = infer_elem_type_of_var(node->value);
+        if (!type_is_unresolved(et) && et != TYPE_GENERIC)
+            node->right->elem_type = et;
+    }
+
+    ASTNode *saved = g_current_fn;
+    if (node->type == AST_FUNCTION_DECL) g_current_fn = node;
+
+    stamp_empty_array_elems(node->left);
+    stamp_empty_array_elems(node->right);
+    stamp_empty_array_elems(node->condition);
+    stamp_empty_array_elems(node->body);
+    for (int i = 0; i < node->child_count; i++)
+        stamp_empty_array_elems(node->children[i]);
+
+    g_current_fn = saved;
+    stamp_empty_array_elems(node->next);
+}
+
 /* Second pass: stamp the declaration's type onto every identifier that refers
    to it. The semantic pass leaves identifier nodes carrying its own int
    default, which short-circuits any later lookup - so the type has to be
@@ -715,9 +788,19 @@ static void propagate_var_types_to_identifiers(ASTNode *node) {
     if (!node) return;
 
     if (node->type == AST_IDENTIFIER && node->value) {
-        DataType t = var_lookup(node->value);
-        if (!type_is_unresolved(t) && t != TYPE_NULL) node->data_type = t;
+        /* A parameter of the enclosing function is not the variable of the
+           same name somewhere else. The registry is keyed by name and falls
+           back to the top-level scope, so `for s in scores` at the top level
+           was retyping the `s` parameter of every function in the program --
+           io.sb's bold(s: string) printed its argument with %ld. */
+        if (!param_of(g_current_fn, node->value)) {
+            DataType t = var_lookup(node->value);
+            if (!type_is_unresolved(t) && t != TYPE_NULL) node->data_type = t;
+        }
     }
+
+    ASTNode *saved = g_current_fn;
+    if (node->type == AST_FUNCTION_DECL) g_current_fn = node;
 
     propagate_var_types_to_identifiers(node->left);
     propagate_var_types_to_identifiers(node->right);
@@ -725,6 +808,8 @@ static void propagate_var_types_to_identifiers(ASTNode *node) {
     propagate_var_types_to_identifiers(node->body);
     for (int i = 0; i < node->child_count; i++)
         propagate_var_types_to_identifiers(node->children[i]);
+
+    g_current_fn = saved;
     propagate_var_types_to_identifiers(node->next);
 }
 
@@ -757,6 +842,11 @@ DataType infer_elem_type(ASTNode *expr) {
     if (!expr) return TYPE_INT;
 
     if (expr->type == AST_ARRAY_LITERAL) {
+        /* `let out = []` says nothing about its elements; what the pushes
+           into it said is stamped onto the literal by the pass below, and is
+           the only thing that can answer here. */
+        if (expr->child_count == 0 && !type_is_unresolved(expr->elem_type))
+            return expr->elem_type;
         DataType t = TYPE_UNKNOWN;
         for (int i = 0; i < expr->child_count; i++) {
             DataType e = infer_expr_type(expr->children[i]);
@@ -776,6 +866,23 @@ DataType infer_elem_type(ASTNode *expr) {
         DataType t = elem_lookup(expr->value);
         if (!type_is_unresolved(t)) return t;
         return TYPE_INT;
+    }
+
+    /* split() is the one builtin that builds an array of something other
+       than numbers. Without this a `let parts = split(s, ",")` was an array
+       of int as far as every typed backend was concerned, and parts[0] came
+       back as an integer that was really a char* -- which compiled, and
+       segfaulted at the first comparison. */
+    if (expr->type == AST_CALL_EXPR) {
+        const char *fn = expr->value;
+        if (!fn && expr->left && expr->left->type == AST_MEMBER_ACCESS)
+            fn = expr->left->value;
+        if (fn && strcmp(fn, "split") == 0) return TYPE_STRING;
+        if (fn) {
+            ASTNode *decl = fn_lookup(fn);
+            if (decl && !type_is_unresolved(decl->elem_type))
+                return decl->elem_type;
+        }
     }
 
     /* pop(a) yields an element, so its element type is one level further in;
@@ -1002,7 +1109,21 @@ void infer_function_signatures(ASTNode *program) {
         propagate_param_types_to_identifiers(fn, fn->body);
     }
     infer_var_decls(program);
+    stamp_empty_array_elems(program);
     propagate_var_types_to_identifiers(program);
+
+    /* After the locals: `return out` can only say what it holds once the
+       pushes into `out` have been seen. */
+    for (int i = 0; i < g_fns.count; i++) {
+        ASTNode *fn = g_fns.items[i].decl;
+        if (fn->data_type != TYPE_ARRAY || !type_is_unresolved(fn->elem_type))
+            continue;
+        g_current_fn = fn;
+        DataType et = TYPE_UNKNOWN;
+        collect_return_elem(fn->body, &et);
+        g_current_fn = NULL;
+        if (!type_is_unresolved(et) && et != TYPE_GENERIC) fn->elem_type = et;
+    }
 
     if (getenv("SUB_INFER_DEBUG")) {
         for (int i = 0; i < g_fns.count; i++) {

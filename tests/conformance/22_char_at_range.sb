@@ -1,0 +1,9 @@
+# char_at counts a negative index from the end, and stops the program when the
+# result is still outside the string -- the same shape as an array index, and
+# the same exit status. Every backend has to agree on where the output stops
+# as well as on the status.
+let s = "abc"
+println(char_at(s, 0 - 3))
+println("before")
+println(char_at(s, 3))
+println("unreachable")

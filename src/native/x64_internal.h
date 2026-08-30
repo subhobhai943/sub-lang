@@ -31,6 +31,17 @@ typedef enum {
     RT_STRCMP,     /* rdi=a, rsi=b               -> rax=difference */
     RT_STRCASE,    /* rdi=ptr, rsi=1 upper/0 lower -> rax=ptr      */
     RT_TRIM,       /* rdi=ptr                    -> rax=ptr        */
+
+    /* The character-level string builtins. RT_FIND is the search the other
+       three are built on: contains asks whether it found anything, replace
+       walks it to the end, and split cuts at each hit. */
+    RT_FIND,       /* rdi=hay, rsi=needle, rdx=from -> rax=index or -1 */
+    RT_SUBSTR,     /* rdi=ptr, rsi=start, rdx=end   -> rax=ptr         */
+    RT_CHARAT,     /* rdi=ptr, rsi=index            -> rax=ptr         */
+    RT_CONTAINS,   /* rdi=hay, rsi=needle           -> rax=0/1         */
+    RT_REPLACE,    /* rdi=ptr, rsi=old, rdx=new     -> rax=ptr         */
+    RT_SPLIT,      /* rdi=ptr, rsi=sep              -> rax=array       */
+    RT_JOIN,       /* rdi=array, rsi=sep            -> rax=ptr         */
     RT_DIE,        /* rdi=message : print "RuntimeError: ..." and exit 70 */
     RT_IDIV,       /* rdi, rsi                   -> rax            */
     RT_IMOD,       /* rdi, rsi                   -> rax            */

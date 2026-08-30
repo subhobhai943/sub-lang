@@ -347,6 +347,11 @@ static DataType ty(ASTNode *n) {
 static DataType elem_type_of(ASTNode *n) {
     if (!n) return TYPE_INT;
     if (n->type == AST_ARRAY_LITERAL) {
+        /* `let out = []` says nothing on its own; the shared inference pass
+           writes what the pushes into it revealed onto the literal. */
+        if (n->child_count == 0 && n->elem_type != TYPE_UNKNOWN &&
+            n->elem_type != TYPE_AUTO)
+            return n->elem_type;
         DataType t = TYPE_UNKNOWN;
         for (int i = 0; i < n->child_count; i++) {
             DataType e = ty(n->children[i]);
@@ -368,6 +373,15 @@ static DataType elem_type_of(ASTNode *n) {
         if (l && l->type == TYPE_ARRAY && l->elem != TYPE_UNKNOWN) return l->elem;
         DataType t = infer_elem_type_of_var(n->value);
         if (t != TYPE_UNKNOWN) return t;
+    }
+    /* split() builds an array of strings, and a user function that returns an
+       array carries what it holds on its declaration. */
+    if (n->type == AST_CALL_EXPR && n->value) {
+        if (!strcmp(n->value, "split")) return TYPE_STRING;
+        ASTNode *decl = fn_find(n->value);
+        if (decl && decl->elem_type != TYPE_UNKNOWN &&
+            decl->elem_type != TYPE_AUTO)
+            return decl->elem_type;
     }
     return TYPE_INT;
 }
@@ -939,6 +953,85 @@ static void gen_call(ASTNode *n) {
         gen_as(a0, TYPE_STRING);
         e_mov_r_r(T, RDI, RAX);
         nc_call_rt(C, RT_TRIM);
+        return;
+    }
+
+    /* The character-level string builtins. Each argument is evaluated and
+       pushed before the next, because gen_expr uses RAX and the argument
+       registers freely; the runtime routines themselves are in
+       x64_runtime.c. */
+    if (!strcmp(fn, "substring") && n->child_count >= 2) {
+        gen_as(a0, TYPE_STRING);
+        e_push(T, RAX);
+        gen_as(n->children[1], TYPE_INT);
+        e_push(T, RAX);
+        if (n->child_count > 2) {
+            gen_as(n->children[2], TYPE_INT);
+            e_mov_r_r(T, RDX, RAX);
+            e_pop(T, RSI);
+            e_pop(T, RDI);
+        } else {
+            /* No end: the whole rest of the string. */
+            e_pop(T, RSI);
+            e_pop(T, RDI);
+            e_push(T, RDI);
+            e_push(T, RSI);
+            nc_call_rt(C, RT_STRLEN);
+            e_mov_r_r(T, RDX, RAX);
+            e_pop(T, RSI);
+            e_pop(T, RDI);
+        }
+        nc_call_rt(C, RT_SUBSTR);
+        return;
+    }
+    if (!strcmp(fn, "char_at") && n->child_count >= 2) {
+        gen_as(a0, TYPE_STRING);
+        e_push(T, RAX);
+        gen_as(n->children[1], TYPE_INT);
+        e_mov_r_r(T, RSI, RAX);
+        e_pop(T, RDI);
+        nc_call_rt(C, RT_CHARAT);
+        return;
+    }
+    if (!strcmp(fn, "contains") && n->child_count >= 2) {
+        gen_as(a0, TYPE_STRING);
+        e_push(T, RAX);
+        gen_as(n->children[1], TYPE_STRING);
+        e_mov_r_r(T, RSI, RAX);
+        e_pop(T, RDI);
+        nc_call_rt(C, RT_CONTAINS);
+        return;
+    }
+    if (!strcmp(fn, "replace") && n->child_count >= 3) {
+        gen_as(a0, TYPE_STRING);
+        e_push(T, RAX);
+        gen_as(n->children[1], TYPE_STRING);
+        e_push(T, RAX);
+        gen_as(n->children[2], TYPE_STRING);
+        e_mov_r_r(T, RDX, RAX);
+        e_pop(T, RSI);
+        e_pop(T, RDI);
+        nc_call_rt(C, RT_REPLACE);
+        return;
+    }
+    if (!strcmp(fn, "split") && n->child_count >= 1) {
+        gen_as(a0, TYPE_STRING);
+        e_push(T, RAX);
+        if (n->child_count > 1) gen_as(n->children[1], TYPE_STRING);
+        else nc_load_cstr(C, RAX, " ");
+        e_mov_r_r(T, RSI, RAX);
+        e_pop(T, RDI);
+        nc_call_rt(C, RT_SPLIT);
+        return;
+    }
+    if (!strcmp(fn, "join") && n->child_count >= 1) {
+        gen_expr(a0);
+        e_push(T, RAX);
+        if (n->child_count > 1) gen_as(n->children[1], TYPE_STRING);
+        else nc_load_cstr(C, RAX, "");
+        e_mov_r_r(T, RSI, RAX);
+        e_pop(T, RDI);
+        nc_call_rt(C, RT_JOIN);
         return;
     }
     if (!strcmp(fn, "sqrt")) {

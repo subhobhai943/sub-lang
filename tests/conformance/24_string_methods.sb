@@ -1,0 +1,29 @@
+# The method spelling. `s.substring(0, 5)` and `substring(s, 0, 5)` are the
+# same call, and the parser rewrites the first into the second so that the
+# interpreter and the ten backends each have one form to handle rather than
+# two. The README documents this spelling; before the rewrite it worked in
+# about half of them.
+
+let s = "Hello, World"
+
+println(s.substring(0, 5))
+println(s.substring(7))
+println(s.char_at(0))
+println(s.char_at(0 - 1))
+println(s.contains("World"))
+println(s.contains("zzz"))
+println(s.replace("World", "SUB"))
+
+let parts = "a,b,c".split(",")
+println(len(parts))
+println(parts[1])
+println(parts.join("+"))
+
+let nums = [1, 2, 3]
+println(nums.join(" - "))
+println(nums.join())
+
+# Mixed with the function spelling, and nested.
+println(upper(s.substring(7, 12)))
+println(join(split(s, ", "), "|"))
+println("a b c".split(" ").join(""))

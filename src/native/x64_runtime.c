@@ -464,6 +464,377 @@ static void emit_trim(NCtx *c) {
    killed by SIGFPE; and `x / -1` is special-cased because IDIV raises #DE on
    LLONG_MIN / -1. */
 
+/* ----------------------------------------------------------------
+   RT_FIND, RT_SUBSTR, RT_CHARAT, RT_CONTAINS, RT_REPLACE, RT_SPLIT, RT_JOIN
+
+   The character-level string builtins. The interpreter is the specification
+   for all of them, and it is stricter than the obvious implementation in
+   several places: substring clamps both bounds into the string rather than
+   counting a negative one from the end, replace leaves the string alone when
+   the pattern is empty, split keeps empty fields and always yields at least
+   one, and char_at counts a negative index from the end but stops the
+   program when the result is still outside.
+   ---------------------------------------------------------------- */
+
+/* rdi=haystack, rsi=needle, rdx=start -> rax = index, or -1.
+   An empty needle matches at `start`, which is what makes contains(s, "")
+   true the way strstr does. */
+static void emit_find(NCtx *c) {
+    e_push(T, R12); e_push(T, R13); e_push(T, R14);
+    e_mov_r_r(T, R12, RDI);
+    e_mov_r_r(T, R13, RSI);
+    e_mov_r_r(T, R14, RDX);              /* i */
+
+    size_t loop = T->len;
+    e_mov_r_r(T, RCX, R12);
+    e_add_r_r(T, RCX, R14);              /* p = hay + i */
+    e_mov_r_r(T, RDX, R13);              /* q = needle */
+
+    size_t inner = T->len;
+    e_movzx_r_mem8(T, R8, RDX, 0);
+    e_test_r_r(T, R8, R8);
+    size_t found = e_jcc(T, CC_E);       /* needle ran out: a match */
+    e_movzx_r_mem8(T, R9, RCX, 0);
+    e_test_r_r(T, R9, R9);
+    size_t missing = e_jcc(T, CC_E);     /* haystack ran out: no match */
+    e_cmp_r_r(T, R8, R9);
+    size_t advance = e_jcc(T, CC_NE);
+    e_add_r_imm(T, RCX, 1);
+    e_add_r_imm(T, RDX, 1);
+    size_t back = e_jmp(T); e_patch_rel32(T, back, inner);
+
+    here(c, advance);
+    e_add_r_imm(T, R14, 1);
+    size_t again = e_jmp(T); e_patch_rel32(T, again, loop);
+
+    here(c, found);
+    e_mov_r_r(T, RAX, R14);
+    size_t out = e_jmp(T);
+
+    here(c, missing);
+    e_mov_r_imm64(T, RAX, (uint64_t)-1);
+
+    here(c, out);
+    e_pop(T, R14); e_pop(T, R13); e_pop(T, R12);
+    e_ret(T);
+}
+
+/* rdi=ptr, rsi=start, rdx=end -> rax = a fresh copy of [start, end) */
+static void emit_substr(NCtx *c) {
+    e_push(T, RBX); e_push(T, R12); e_push(T, R13); e_push(T, R14);
+    e_mov_r_r(T, R12, RDI);
+    e_mov_r_r(T, R13, RSI);              /* start */
+    e_mov_r_r(T, R14, RDX);              /* end */
+
+    e_mov_r_r(T, RDI, R12);
+    nc_call_rt(c, RT_STRLEN);
+    e_mov_r_r(T, RBX, RAX);              /* n */
+
+    /* Both bounds into [0, n], then start no further along than end. */
+    e_xor_r_r(T, RCX, RCX);
+    e_cmp_r_r(T, R13, RCX);
+    e_cmovcc_r_r(T, CC_L, R13, RCX);
+    e_cmp_r_r(T, R14, RCX);
+    e_cmovcc_r_r(T, CC_L, R14, RCX);
+    e_cmp_r_r(T, R13, RBX);
+    e_cmovcc_r_r(T, CC_G, R13, RBX);
+    e_cmp_r_r(T, R14, RBX);
+    e_cmovcc_r_r(T, CC_G, R14, RBX);
+    e_cmp_r_r(T, R13, R14);
+    e_cmovcc_r_r(T, CC_G, R13, R14);
+
+    e_sub_r_r(T, R14, R13);              /* length */
+    e_mov_r_r(T, RDI, R14);
+    e_add_r_imm(T, RDI, 1);
+    nc_call_rt(c, RT_ALLOC);
+
+    e_mov_r_r(T, RCX, RAX);              /* write cursor; rax is the answer */
+    e_mov_r_r(T, RDX, R12);
+    e_add_r_r(T, RDX, R13);              /* read cursor */
+    e_xor_r_r(T, R9, R9);
+    size_t top = T->len;
+    e_cmp_r_r(T, R9, R14);
+    size_t done = e_jcc(T, CC_GE);
+    e_movzx_r_mem8(T, R8, RDX, 0);
+    e_mov_mem8_r(T, RCX, 0, R8);
+    e_add_r_imm(T, RCX, 1);
+    e_add_r_imm(T, RDX, 1);
+    e_add_r_imm(T, R9, 1);
+    size_t back = e_jmp(T); e_patch_rel32(T, back, top);
+    here(c, done);
+    e_xor_r_r(T, R8, R8);
+    e_mov_mem8_r(T, RCX, 0, R8);
+
+    e_pop(T, R14); e_pop(T, R13); e_pop(T, R12); e_pop(T, RBX);
+    e_ret(T);
+}
+
+/* rdi=ptr, rsi=index -> rax = a one-character string. A negative index
+   counts from the end; anything still outside stops the program. */
+static void emit_charat(NCtx *c) {
+    e_push(T, R12); e_push(T, R13); e_push(T, R14);
+    e_mov_r_r(T, R12, RDI);
+    e_mov_r_r(T, R13, RSI);
+
+    e_mov_r_r(T, RDI, R12);
+    nc_call_rt(c, RT_STRLEN);
+    e_mov_r_r(T, R14, RAX);              /* n */
+
+    e_xor_r_r(T, RCX, RCX);
+    e_cmp_r_r(T, R13, RCX);
+    size_t nonneg = e_jcc(T, CC_GE);
+    e_add_r_r(T, R13, R14);
+    here(c, nonneg);
+
+    e_xor_r_r(T, RCX, RCX);
+    e_cmp_r_r(T, R13, RCX);
+    size_t low = e_jcc(T, CC_L);
+    e_cmp_r_r(T, R13, R14);
+    size_t high = e_jcc(T, CC_GE);
+    size_t ok = e_jmp(T);
+    here(c, low); here(c, high);
+    nc_load_cstr(c, RDI, "char_at index out of range");
+    nc_call_rt(c, RT_DIE);
+    here(c, ok);
+
+    e_mov_r_imm64(T, RDI, 2);
+    nc_call_rt(c, RT_ALLOC);
+    e_mov_r_r(T, RCX, R12);
+    e_add_r_r(T, RCX, R13);
+    e_movzx_r_mem8(T, R8, RCX, 0);
+    e_mov_mem8_r(T, RAX, 0, R8);
+    e_xor_r_r(T, R8, R8);
+    e_mov_mem8_r(T, RAX, 1, R8);
+
+    e_pop(T, R14); e_pop(T, R13); e_pop(T, R12);
+    e_ret(T);
+}
+
+/* rdi=haystack, rsi=needle -> rax = 0 or 1 */
+static void emit_contains(NCtx *c) {
+    e_xor_r_r(T, RDX, RDX);
+    nc_call_rt(c, RT_FIND);
+    e_mov_r_imm64(T, RCX, (uint64_t)-1);
+    e_cmp_r_r(T, RAX, RCX);
+    e_setcc(T, CC_NE, RAX);
+    e_movzx_r_r8(T, RAX, RAX);
+    e_ret(T);
+}
+
+/* rdi=ptr, rsi=old, rdx=new -> rax = ptr. An empty pattern gives the string
+   back unchanged rather than being inserted between every character.
+
+   Built by concatenation -- the run before each hit, then the replacement.
+   That allocates more than a counted single pass would, and it is a great
+   deal easier to be sure of; RBP is pressed into service as a sixth
+   callee-saved register to hold the search position across the calls. */
+static void emit_replace(NCtx *c) {
+    e_push(T, RBX); e_push(T, RBP); e_push(T, R12);
+    e_push(T, R13); e_push(T, R14); e_push(T, R15);
+    e_mov_r_r(T, R12, RDI);              /* s */
+    e_mov_r_r(T, R13, RSI);              /* old */
+    e_mov_r_r(T, R14, RDX);              /* new */
+
+    e_mov_r_r(T, RDI, R13);
+    nc_call_rt(c, RT_STRLEN);
+    e_mov_r_r(T, R15, RAX);              /* old length */
+    e_test_r_r(T, R15, R15);
+    size_t nonempty = e_jcc(T, CC_NE);
+    e_mov_r_r(T, RAX, R12);
+    size_t bail = e_jmp(T);
+    here(c, nonempty);
+
+    nc_load_cstr(c, RBX, "");            /* result so far */
+    e_xor_r_r(T, RBP, RBP);              /* pos */
+
+    size_t loop = T->len;
+    e_mov_r_r(T, RDI, R12);
+    e_mov_r_r(T, RSI, R13);
+    e_mov_r_r(T, RDX, RBP);
+    nc_call_rt(c, RT_FIND);
+    e_mov_r_imm64(T, RCX, (uint64_t)-1);
+    e_cmp_r_r(T, RAX, RCX);
+    size_t tail = e_jcc(T, CC_E);
+    e_mov_r_r(T, R9, RAX);               /* hit */
+
+    e_mov_r_r(T, RDI, R12);
+    e_mov_r_r(T, RSI, RBP);
+    e_mov_r_r(T, RDX, R9);
+    e_mov_r_r(T, RBP, R9);
+    e_add_r_r(T, RBP, R15);              /* pos = hit + old length */
+    nc_call_rt(c, RT_SUBSTR);
+    e_mov_r_r(T, RSI, RAX);
+    e_mov_r_r(T, RDI, RBX);
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, RDI, RAX);
+    e_mov_r_r(T, RSI, R14);
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, RBX, RAX);
+    size_t again = e_jmp(T); e_patch_rel32(T, again, loop);
+
+    here(c, tail);
+    e_mov_r_r(T, RDI, R12);
+    nc_call_rt(c, RT_STRLEN);
+    e_mov_r_r(T, RDX, RAX);
+    e_mov_r_r(T, RDI, R12);
+    e_mov_r_r(T, RSI, RBP);
+    nc_call_rt(c, RT_SUBSTR);
+    e_mov_r_r(T, RSI, RAX);
+    e_mov_r_r(T, RDI, RBX);
+    nc_call_rt(c, RT_CONCAT);
+
+    here(c, bail);
+    e_pop(T, R15); e_pop(T, R14); e_pop(T, R13);
+    e_pop(T, R12); e_pop(T, RBP); e_pop(T, RBX);
+    e_ret(T);
+}
+
+/* rdi=ptr, rsi=sep -> rax = array of strings. Every field is kept, and the
+   result always has at least one element. An empty separator cuts the string
+   into single characters. */
+static void emit_split(NCtx *c) {
+    e_push(T, RBX); e_push(T, RBP); e_push(T, R12);
+    e_push(T, R13); e_push(T, R14); e_push(T, R15);
+    e_mov_r_r(T, R12, RDI);              /* s */
+    e_mov_r_r(T, R13, RSI);              /* sep */
+
+    e_mov_r_imm64(T, RDI, 4);
+    e_mov_r_imm64(T, RSI, AK_STRING);
+    nc_call_rt(c, RT_ARR_NEW);
+    e_mov_r_r(T, RBX, RAX);              /* the array */
+
+    e_mov_r_r(T, RDI, R13);
+    nc_call_rt(c, RT_STRLEN);
+    e_mov_r_r(T, R15, RAX);              /* separator length */
+    e_test_r_r(T, R15, R15);
+    size_t by_sep = e_jcc(T, CC_NE);
+
+    /* No separator: one element per character. */
+    e_xor_r_r(T, R14, R14);
+    size_t ch_loop = T->len;
+    e_mov_r_r(T, RCX, R12);
+    e_add_r_r(T, RCX, R14);
+    e_movzx_r_mem8(T, R8, RCX, 0);
+    e_test_r_r(T, R8, R8);
+    size_t ch_done = e_jcc(T, CC_E);
+    e_mov_r_r(T, RDI, R12);
+    e_mov_r_r(T, RSI, R14);
+    e_mov_r_r(T, RDX, R14);
+    e_add_r_imm(T, RDX, 1);
+    nc_call_rt(c, RT_SUBSTR);
+    e_mov_r_r(T, RSI, RAX);
+    e_mov_r_r(T, RDI, RBX);
+    nc_call_rt(c, RT_ARR_PUSH);
+    e_add_r_imm(T, R14, 1);
+    size_t ch_back = e_jmp(T); e_patch_rel32(T, ch_back, ch_loop);
+    here(c, ch_done);
+    size_t finish = e_jmp(T);
+
+    here(c, by_sep);
+    e_xor_r_r(T, RBP, RBP);              /* pos */
+    size_t loop = T->len;
+    e_mov_r_r(T, RDI, R12);
+    e_mov_r_r(T, RSI, R13);
+    e_mov_r_r(T, RDX, RBP);
+    nc_call_rt(c, RT_FIND);
+    e_mov_r_imm64(T, RCX, (uint64_t)-1);
+    e_cmp_r_r(T, RAX, RCX);
+    size_t last = e_jcc(T, CC_E);
+    e_mov_r_r(T, R14, RAX);              /* hit */
+
+    e_mov_r_r(T, RDI, R12);
+    e_mov_r_r(T, RSI, RBP);
+    e_mov_r_r(T, RDX, R14);
+    nc_call_rt(c, RT_SUBSTR);
+    e_mov_r_r(T, RSI, RAX);
+    e_mov_r_r(T, RDI, RBX);
+    nc_call_rt(c, RT_ARR_PUSH);
+    e_mov_r_r(T, RBP, R14);
+    e_add_r_r(T, RBP, R15);              /* pos = hit + separator length */
+    size_t again = e_jmp(T); e_patch_rel32(T, again, loop);
+
+    here(c, last);
+    e_mov_r_r(T, RDI, R12);
+    nc_call_rt(c, RT_STRLEN);
+    e_mov_r_r(T, RDX, RAX);
+    e_mov_r_r(T, RDI, R12);
+    e_mov_r_r(T, RSI, RBP);
+    nc_call_rt(c, RT_SUBSTR);
+    e_mov_r_r(T, RSI, RAX);
+    e_mov_r_r(T, RDI, RBX);
+    nc_call_rt(c, RT_ARR_PUSH);
+
+    here(c, finish);
+    e_mov_r_r(T, RAX, RBX);
+    e_pop(T, R15); e_pop(T, R14); e_pop(T, R13);
+    e_pop(T, R12); e_pop(T, RBP); e_pop(T, RBX);
+    e_ret(T);
+}
+
+/* rdi=array, rsi=separator -> rax = ptr. The same walk as printing an array,
+   without the brackets and with the caller's separator. */
+static void emit_join(NCtx *c) {
+    e_push(T, RBX); e_push(T, R12); e_push(T, R13);
+    e_push(T, R14); e_push(T, R15);
+    e_mov_r_r(T, R12, RDI);
+    e_mov_r_r(T, R15, RSI);
+
+    nc_load_cstr(c, RBX, "");
+
+    e_xor_r_r(T, R13, R13);
+    size_t loop = T->len;
+    e_mov_r_mem(T, RCX, R12, ARR_COUNT);
+    e_cmp_r_r(T, R13, RCX);
+    size_t done = e_jcc(T, CC_GE);
+
+    e_test_r_r(T, R13, R13);
+    size_t first = e_jcc(T, CC_E);
+    e_mov_r_r(T, RDI, RBX);
+    e_mov_r_r(T, RSI, R15);
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, RBX, RAX);
+    here(c, first);
+
+    e_mov_r_mem(T, RCX, R12, ARR_DATA);
+    e_mov_r_r(T, RDX, R13);
+    e_shl_r_imm8(T, RDX, 3);
+    e_add_r_r(T, RCX, RDX);
+    e_mov_r_mem(T, RDI, RCX, 0);
+    e_mov_r_mem(T, R14, R12, ARR_KIND);
+
+    e_cmp_r_imm(T, R14, AK_FLOAT);
+    size_t not_f = e_jcc(T, CC_NE);
+    nc_call_rt(c, RT_F2S);
+    size_t have = e_jmp(T);
+    here(c, not_f);
+    e_cmp_r_imm(T, R14, AK_STRING);
+    size_t not_s = e_jcc(T, CC_NE);
+    e_mov_r_r(T, RAX, RDI);
+    size_t have2 = e_jmp(T);
+    here(c, not_s);
+    e_cmp_r_imm(T, R14, AK_BOOL);
+    size_t not_b = e_jcc(T, CC_NE);
+    nc_call_rt(c, RT_B2S);
+    size_t have3 = e_jmp(T);
+    here(c, not_b);
+    nc_call_rt(c, RT_I2S);
+    here(c, have); here(c, have2); here(c, have3);
+
+    e_mov_r_r(T, RSI, RAX);
+    e_mov_r_r(T, RDI, RBX);
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, RBX, RAX);
+
+    e_add_r_imm(T, R13, 1);
+    size_t again = e_jmp(T); e_patch_rel32(T, again, loop);
+    here(c, done);
+
+    e_mov_r_r(T, RAX, RBX);
+    e_pop(T, R15); e_pop(T, R14); e_pop(T, R13);
+    e_pop(T, R12); e_pop(T, RBX);
+    e_ret(T);
+}
+
 /* RT_DIE - report a runtime error the way the interpreter does and stop.
    The interpreter exits 70 on `7 / 0`; a compiled program that returned 0
    and carried on would be a different language.
@@ -1358,6 +1729,13 @@ void nc_emit_runtime(NCtx *c) {
         { RT_STRCMP,  emit_strcmp  },
         { RT_STRCASE, emit_strcase },
         { RT_TRIM,    emit_trim    },
+        { RT_FIND,     emit_find     },
+        { RT_SUBSTR,   emit_substr   },
+        { RT_CHARAT,   emit_charat   },
+        { RT_CONTAINS, emit_contains },
+        { RT_REPLACE,  emit_replace  },
+        { RT_SPLIT,    emit_split    },
+        { RT_JOIN,     emit_join     },
         { RT_DIE,     emit_die     },
         { RT_IDIV,    emit_idiv    },
         { RT_IMOD,    emit_imod    },

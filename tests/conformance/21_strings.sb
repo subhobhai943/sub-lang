@@ -1,0 +1,85 @@
+# The character-level string builtins. These were implemented in the
+# interpreter and unmapped in every compiled backend, so a program using them
+# ran under `subi` and failed to build under `sub` and `subc`. This case is
+# what holds the ten backends to the interpreter's exact behaviour, which is
+# not the obvious spelling in any of them: Python's s[a:b] reads a negative
+# start from the end, Ruby's split drops trailing empty fields, and str.replace
+# with an empty pattern inserts between every character in most of them.
+
+# ---------- substring: both bounds are clamped into the string ----------
+
+println(substring("hello world", 0, 5))
+println(substring("hello world", 6, 11))
+println(substring("hello", 1, 3))
+println(substring("hello", 3, 3))          # empty
+println(substring("hello", 0 - 2, 3))      # a negative start is 0, not "from the end"
+println(substring("hello", 2, 99))         # an end past the end is the end
+println(substring("hello", 4, 2))          # start beyond end collapses
+println(substring("hello", 9, 99))         # wholly outside
+println(substring("hello", 2))             # no end: the rest
+println(substring("", 0, 3))
+
+# ---------- char_at ----------
+
+println(char_at("abc", 0))
+println(char_at("abc", 2))
+println(char_at("abc", 0 - 1))             # counts from the end
+
+# ---------- contains ----------
+
+println(contains("hello world", "world"))
+println(contains("hello", "ell"))
+println(contains("hello", "zzz"))
+println(contains("hello", ""))             # an empty needle is always present
+println(contains("", "x"))
+
+# ---------- replace ----------
+
+println(replace("a-b-c", "-", "+"))
+println(replace("aaa", "aa", "b"))         # left to right, non-overlapping
+println(replace("abc", "b", ""))
+println(replace("abc", "", "X"))           # an empty pattern changes nothing
+println(replace("abc", "z", "y"))
+println(replace("aaa", "a", "bb"))         # a replacement that grows
+
+# ---------- split ----------
+
+let a = split("a,b,c", ",")
+println(len(a))
+println(a[0])
+println(a[2])
+
+let empties = split("a,,b", ",")           # empty fields are kept
+println(len(empties))
+println(empties[1] == "")
+
+let chars = split("abc", "")               # an empty separator cuts characters
+println(len(chars))
+println(chars[1])
+
+let none = split("", ",")                  # always at least one field
+println(len(none))
+
+let multi = split("a--b--c", "--")         # the separator is a string, not a set
+println(len(multi))
+println(multi[1])
+
+let spaced = split("one two")              # no separator given: a space
+println(len(spaced))
+println(spaced[1])
+
+# ---------- join ----------
+
+println(join(["x", "y", "z"], "-"))
+println(join(["x"], "-"))
+println(join([], "-"))
+println(join([1, 2, 3], ","))
+println(join([true, false], " "))
+println(join(["a", "b"]))                  # no separator given: none
+
+# ---------- they compose ----------
+
+println(join(split("a,b,c", ","), "|"))
+println(upper(substring("hello world", 6, 11)))
+println(replace(join(split("1 2 3", " "), "-"), "-", "+"))
+println(contains(join(["ab", "cd"], ""), "bc"))

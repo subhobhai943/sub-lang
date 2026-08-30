@@ -125,6 +125,7 @@ static char* escape_c_string_literal(const char *raw) {
 /* Forward declarations */
 static void generate_node(StringBuilder *sb, ASTNode *node, int indent);
 static void generate_expression(StringBuilder *sb, ASTNode *node);
+static int join_elem_kind(ASTNode *arr);
 static void optimize_remove_dead_code(ASTNode *node);
 static bool is_node_pure(ASTNode *node);
 static void optimize_constant_folding(ASTNode *node);
@@ -580,7 +581,7 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, "), ");
                     if (node->child_count > 0) generate_expression(sb, node->children[0]);
                     else sb_append(sb, "\"\"");
-                    sb_append(sb, ")");
+                    sb_append(sb, ", %d)", join_elem_kind(node->left->left));
                 } else if (method && strcmp(method, "upper") == 0) {
                     sb_append(sb, "sub_str_upper((const char*)(");
                     generate_expression(sb, node->left->left);
@@ -833,7 +834,8 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                         sb_append(sb, "), ");
                         if (node->child_count > 1) generate_expression(sb, node->children[1]);
                         else sb_append(sb, "\"\"");
-                        sb_append(sb, ")");
+                        sb_append(sb, ", %d)",
+                                  node->child_count > 0 ? join_elem_kind(node->children[0]) : 0);
                     }
                     else if (strcmp(fn, "trim") == 0) {
                         sb_append(sb, "sub_str_trim((const char*)(");
@@ -848,6 +850,54 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                         else sb_append(sb, "0");
                         sb_append(sb, "))");
                     }
+                    else if (strcmp(fn, "substring") == 0) {
+                        /* The two-argument form runs to the end of the string.
+                           The helper cannot be told that with a sentinel: the
+                           interpreter clamps a negative end to 0, so -1 has to
+                           mean the empty string rather than "the rest". */
+                        sb_append(sb, node->child_count > 2 ? "sub_str_substring((const char*)("
+                                                            : "sub_str_substring_from((const char*)(");
+                        if (node->child_count > 0) generate_expression(sb, node->children[0]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "), (long)(");
+                        if (node->child_count > 1) generate_expression(sb, node->children[1]);
+                        else sb_append(sb, "0");
+                        if (node->child_count > 2) {
+                            sb_append(sb, "), (long)(");
+                            generate_expression(sb, node->children[2]);
+                        }
+                        sb_append(sb, "))");
+                    }
+                    else if (strcmp(fn, "split") == 0) {
+                        sb_append(sb, "sub_str_split((const char*)(");
+                        if (node->child_count > 0) generate_expression(sb, node->children[0]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "), ");
+                        if (node->child_count > 1) generate_expression(sb, node->children[1]);
+                        else sb_append(sb, "\" \"");
+                        sb_append(sb, ")");
+                    }
+                    else if (strcmp(fn, "contains") == 0) {
+                        sb_append(sb, "sub_str_contains((const char*)(");
+                        if (node->child_count > 0) generate_expression(sb, node->children[0]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "), ");
+                        if (node->child_count > 1) generate_expression(sb, node->children[1]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, ")");
+                    }
+                    else if (strcmp(fn, "replace") == 0) {
+                        sb_append(sb, "sub_str_replace((const char*)(");
+                        if (node->child_count > 0) generate_expression(sb, node->children[0]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "), ");
+                        if (node->child_count > 1) generate_expression(sb, node->children[1]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, ", ");
+                        if (node->child_count > 2) generate_expression(sb, node->children[2]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, ")");
+                    }
                     else {
                         char fn_buf[128];
                         sb_append(sb, "%s(", sanitize_c_identifier(fn, fn_buf, sizeof(fn_buf)));
@@ -856,6 +906,8 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     if (strcmp(fn, "type") != 0 && strcmp(fn, "push") != 0 && strcmp(fn, "pop") != 0 &&
                         strcmp(fn, "join") != 0 && strcmp(fn, "trim") != 0 && strcmp(fn, "char_at") != 0 &&
                         strcmp(fn, "upper") != 0 && strcmp(fn, "lower") != 0 &&
+                        strcmp(fn, "substring") != 0 && strcmp(fn, "split") != 0 &&
+                        strcmp(fn, "contains") != 0 && strcmp(fn, "replace") != 0 &&
                         strcmp(fn, "len") != 0 && strcmp(fn, "length") != 0 &&
                         (strcmp(fn, "str") != 0 || node->child_count > 0) &&
                         (strcmp(fn, "to_string") != 0 || node->child_count > 0)) {
@@ -925,6 +977,18 @@ static int g_break_used = 0;
    are lifted to file scope so that functions can name them; see
    codegen_globals.h. */
 static Globals g_globals;
+
+/* How sub_array_join should read an element of this array: 0 int, 1 string,
+   2 float, 3 bool. The generator knows; the runtime cannot tell a char* from
+   a small integer once both are stored as long long. */
+static int join_elem_kind(ASTNode *arr) {
+    switch (infer_elem_type(arr)) {
+        case TYPE_STRING: return 1;
+        case TYPE_FLOAT:  return 2;
+        case TYPE_BOOL:   return 3;
+        default:          return 0;
+    }
+}
 
 /* The C type a declaration needs, as a prefix to the name. Split out from
    the declaration itself because a global is declared in one place and
@@ -1509,31 +1573,41 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    return a ? a->count : 0;\n");
     sb_append(sb, "}\n\n");
     
-    sb_append(sb, "static inline char* sub_array_join(SubArray *a, const char *sep) {\n");
+    sb_append(sb, "/* `kind` says how to read an element: 0 int, 1 string, 2 float, 3 bool.\n");
+    sb_append(sb, "   It used to be guessed by dereferencing the element and asking whether the\n");
+    sb_append(sb, "   first byte looked like printable ASCII, which read address 1 for the array\n");
+    sb_append(sb, "   [1, 2, 3] and crashed. The generator knows the element type, so it says so. */\n");
+    sb_append(sb, "static inline char* sub_array_join(SubArray *a, const char *sep, int kind) {\n");
     sb_append(sb, "    if (!a || a->count == 0) return sub_strdup(\"\");\n");
     sb_append(sb, "    if (!sep) sep = \"\";\n");
-    sb_append(sb, "    char buf[4096];\n");
-    sb_append(sb, "    buf[0] = '\\0';\n");
-    sb_append(sb, "    size_t cur = 0;\n");
+    sb_append(sb, "    size_t sep_len = strlen(sep);\n");
+    sb_append(sb, "    size_t cap = sep_len * (size_t)(a->count - 1) + 1;\n");
+    sb_append(sb, "    char **parts = (char**)malloc(sizeof(char*) * (size_t)a->count);\n");
+    sb_append(sb, "    char scratch[64];\n");
     sb_append(sb, "    for (long i = 0; i < a->count; i++) {\n");
-    sb_append(sb, "        if (i > 0) {\n");
-    sb_append(sb, "            size_t slen = strlen(sep);\n");
-    sb_append(sb, "            if (cur + slen < sizeof(buf) - 1) { strcat(buf, sep); cur += slen; }\n");
-    sb_append(sb, "        }\n");
-    sb_append(sb, "        char temp[64];\n");
-    sb_append(sb, "        const char *cand = (const char*)a->items[i];\n");
-    sb_append(sb, "        if (cand && (unsigned char)cand[0] >= 32 && (unsigned char)cand[0] <= 126) {\n");
-    sb_append(sb, "            size_t clen = strlen(cand);\n");
-    sb_append(sb, "            if (cur + clen < sizeof(buf) - 1) { strcat(buf, cand); cur += clen; }\n");
-    sb_append(sb, "        } else {\n");
-    sb_append(sb, "            snprintf(temp, sizeof(temp), \"%%lld\", a->items[i]);\n");
-    sb_append(sb, "            size_t tlen = strlen(temp);\n");
-    sb_append(sb, "            if (cur + tlen < sizeof(buf) - 1) { strcat(buf, temp); cur += tlen; }\n");
-    sb_append(sb, "        }\n");
+    sb_append(sb, "        const char *piece;\n");
+    sb_append(sb, "        if (kind == 1) piece = (const char*)a->items[i] ? (const char*)a->items[i] : \"\";\n");
+    sb_append(sb, "        else if (kind == 2) { double d; memcpy(&d, &a->items[i], sizeof(double));\n");
+    sb_append(sb, "                              snprintf(scratch, sizeof(scratch), \"%%g\", d); piece = scratch; }\n");
+    sb_append(sb, "        else if (kind == 3) piece = a->items[i] ? \"true\" : \"false\";\n");
+    sb_append(sb, "        else { snprintf(scratch, sizeof(scratch), \"%%lld\", a->items[i]); piece = scratch; }\n");
+    sb_append(sb, "        parts[i] = sub_strdup(piece);\n");
+    sb_append(sb, "        cap += strlen(parts[i]);\n");
     sb_append(sb, "    }\n");
-    sb_append(sb, "    return sub_strdup(buf);\n");
-    sb_append(sb, "}\n\n");
-    
+    sb_append(sb, "    char *res = (char*)malloc(cap);\n");
+    sb_append(sb, "    res[0] = 0;\n");
+    sb_append(sb, "    char *w = res;\n");
+    sb_append(sb, "    for (long i = 0; i < a->count; i++) {\n");
+    sb_append(sb, "        if (i > 0) { memcpy(w, sep, sep_len); w += sep_len; }\n");
+    sb_append(sb, "        size_t n = strlen(parts[i]);\n");
+    sb_append(sb, "        memcpy(w, parts[i], n); w += n;\n");
+    sb_append(sb, "        free(parts[i]);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    *w = 0;\n");
+    sb_append(sb, "    free(parts);\n");
+    sb_append(sb, "    return res;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "\n");
     sb_append(sb, "/* String Methods */\n");
     /* Integer division by zero is undefined behaviour in C and arrives as
        SIGFPE. SUB reports the interpreter's runtime error and exits 70. */
@@ -1567,57 +1641,85 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    for (char *p = res; *p; p++) *p = (char)tolower((unsigned char)*p);\n");
     sb_append(sb, "    return res;\n");
     sb_append(sb, "}\n");
+    sb_append(sb, "static inline void sub_runtime_error(const char *fmt, long a, long b) {\n");
+    sb_append(sb, "    fflush(stdout);\n");
+    sb_append(sb, "    fprintf(stderr, fmt, a, b);\n");
+    sb_append(sb, "    fputc(10, stderr);\n");
+    sb_append(sb, "    exit(70);\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "/* [start, end) with the interpreter's clamping: a negative bound is 0, a\n");
+    sb_append(sb, "   bound past the end is the length, and a start past the end collapses to\n");
+    sb_append(sb, "   it. Every one of those cases is reachable from user arithmetic. */\n");
     sb_append(sb, "static inline char* sub_str_substring(const char *s, long start, long end) {\n");
     sb_append(sb, "    if (!s) return sub_strdup(\"\");\n");
     sb_append(sb, "    long len = (long)strlen(s);\n");
     sb_append(sb, "    if (start < 0) start = 0;\n");
-    sb_append(sb, "    if (end > len || end < 0) end = len;\n");
-    sb_append(sb, "    if (start >= end) return sub_strdup(\"\");\n");
-    sb_append(sb, "    long sub_len = end - start;\n");
-    sb_append(sb, "    char *res = (char*)malloc(sub_len + 1);\n");
-    sb_append(sb, "    memcpy(res, s + start, sub_len);\n");
-    sb_append(sb, "    res[sub_len] = '\\0';\n");
+    sb_append(sb, "    if (end < 0) end = 0;\n");
+    sb_append(sb, "    if (start > len) start = len;\n");
+    sb_append(sb, "    if (end > len) end = len;\n");
+    sb_append(sb, "    if (start > end) start = end;\n");
+    sb_append(sb, "    long n = end - start;\n");
+    sb_append(sb, "    char *res = (char*)malloc((size_t)n + 1);\n");
+    sb_append(sb, "    memcpy(res, s + start, (size_t)n);\n");
+    sb_append(sb, "    res[n] = 0;\n");
     sb_append(sb, "    return res;\n");
     sb_append(sb, "}\n");
-    sb_append(sb, "static inline SubArray* sub_str_split(const char *s, const char *delim) {\n");
+    sb_append(sb, "static inline char* sub_str_substring_from(const char *s, long start) {\n");
+    sb_append(sb, "    return sub_str_substring(s, start, s ? (long)strlen(s) : 0);\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "/* strtok is the wrong tool and was the bug here: it treats the separator as\n");
+    sb_append(sb, "   a set of characters, collapses runs of them, and drops empty fields, so\n");
+    sb_append(sb, "   split(\"a,,b\", \",\") came back with two elements instead of three. The\n");
+    sb_append(sb, "   separator is one string, every field is kept, and the result always has\n");
+    sb_append(sb, "   at least one element. An empty separator splits into characters. */\n");
+    sb_append(sb, "static inline SubArray* sub_str_split(const char *s, const char *sep) {\n");
     sb_append(sb, "    SubArray *arr = sub_array_create();\n");
-    sb_append(sb, "    if (!s) return arr;\n");
-    sb_append(sb, "    if (!delim || !*delim) {\n");
+    sb_append(sb, "    if (!s) { sub_array_push(arr, (long)sub_strdup(\"\")); return arr; }\n");
+    sb_append(sb, "    if (!sep || !*sep) {\n");
     sb_append(sb, "        for (long i = 0; s[i]; i++) {\n");
-    sb_append(sb, "            char ch[2] = {s[i], '\\0'};\n");
+    sb_append(sb, "            char ch[2]; ch[0] = s[i]; ch[1] = 0;\n");
     sb_append(sb, "            sub_array_push(arr, (long)sub_strdup(ch));\n");
     sb_append(sb, "        }\n");
     sb_append(sb, "        return arr;\n");
     sb_append(sb, "    }\n");
-    sb_append(sb, "    char *copy = sub_strdup(s);\n");
-    sb_append(sb, "    char *token = strtok(copy, delim);\n");
-    sb_append(sb, "    while (token) {\n");
-    sb_append(sb, "        sub_array_push(arr, (long)sub_strdup(token));\n");
-    sb_append(sb, "        token = strtok(NULL, delim);\n");
+    sb_append(sb, "    size_t sep_len = strlen(sep);\n");
+    sb_append(sb, "    const char *p = s;\n");
+    sb_append(sb, "    for (;;) {\n");
+    sb_append(sb, "        const char *next = strstr(p, sep);\n");
+    sb_append(sb, "        size_t n = next ? (size_t)(next - p) : strlen(p);\n");
+    sb_append(sb, "        char *part = (char*)malloc(n + 1);\n");
+    sb_append(sb, "        memcpy(part, p, n);\n");
+    sb_append(sb, "        part[n] = 0;\n");
+    sb_append(sb, "        sub_array_push(arr, (long)part);\n");
+    sb_append(sb, "        if (!next) break;\n");
+    sb_append(sb, "        p = next + sep_len;\n");
     sb_append(sb, "    }\n");
-    sb_append(sb, "    free(copy);\n");
     sb_append(sb, "    return arr;\n");
     sb_append(sb, "}\n");
-    sb_append(sb, "static inline long sub_str_contains(const char *s, const char *sub) {\n");
+    sb_append(sb, "static inline int sub_str_contains(const char *s, const char *sub) {\n");
     sb_append(sb, "    if (!s || !sub) return 0;\n");
-    sb_append(sb, "    return strstr(s, sub) != NULL ? 1 : 0;\n");
+    sb_append(sb, "    return strstr(s, sub) != NULL;\n");
     sb_append(sb, "}\n");
+    sb_append(sb, "/* Sized to the result rather than written into a fixed buffer: the old\n");
+    sb_append(sb, "   4096-byte array silently truncated a longer string and overflowed on a\n");
+    sb_append(sb, "   replacement that grew it. */\n");
     sb_append(sb, "static inline char* sub_str_replace(const char *s, const char *old_sub, const char *new_sub) {\n");
     sb_append(sb, "    if (!s) return sub_strdup(\"\");\n");
     sb_append(sb, "    if (!old_sub || !*old_sub) return sub_strdup(s);\n");
     sb_append(sb, "    if (!new_sub) new_sub = \"\";\n");
-    sb_append(sb, "    char buf[4096];\n");
-    sb_append(sb, "    buf[0] = '\\0';\n");
-    sb_append(sb, "    const char *p = s;\n");
-    sb_append(sb, "    const char *found;\n");
-    sb_append(sb, "    size_t old_len = strlen(old_sub);\n");
-    sb_append(sb, "    while ((found = strstr(p, old_sub)) != NULL) {\n");
-    sb_append(sb, "        strncat(buf, p, found - p);\n");
-    sb_append(sb, "        strcat(buf, new_sub);\n");
-    sb_append(sb, "        p = found + old_len;\n");
+    sb_append(sb, "    size_t old_len = strlen(old_sub), new_len = strlen(new_sub);\n");
+    sb_append(sb, "    size_t count = 0;\n");
+    sb_append(sb, "    for (const char *p = s; (p = strstr(p, old_sub)) != NULL; p += old_len) count++;\n");
+    sb_append(sb, "    size_t size = strlen(s) + count * (new_len > old_len ? new_len - old_len : 0) + 1;\n");
+    sb_append(sb, "    char *res = (char*)malloc(size);\n");
+    sb_append(sb, "    char *w = res;\n");
+    sb_append(sb, "    for (const char *p = s; *p; ) {\n");
+    sb_append(sb, "        if (strncmp(p, old_sub, old_len) == 0) {\n");
+    sb_append(sb, "            memcpy(w, new_sub, new_len); w += new_len; p += old_len;\n");
+    sb_append(sb, "        } else *w++ = *p++;\n");
     sb_append(sb, "    }\n");
-    sb_append(sb, "    strcat(buf, p);\n");
-    sb_append(sb, "    return sub_strdup(buf);\n");
+    sb_append(sb, "    *w = 0;\n");
+    sb_append(sb, "    return res;\n");
     sb_append(sb, "}\n");
     sb_append(sb, "static inline char* sub_str_trim(const char *s) {\n");
     sb_append(sb, "    if (!s) return sub_strdup(\"\");\n");
@@ -1632,8 +1734,11 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    return res;\n");
     sb_append(sb, "}\n");
     sb_append(sb, "static inline char* sub_str_char_at(const char *s, long idx) {\n");
-    sb_append(sb, "    if (!s || idx < 0 || idx >= (long)strlen(s)) return sub_strdup(\"\");\n");
-    sb_append(sb, "    char ch[2] = {s[idx], '\\0'};\n");
+    sb_append(sb, "    long len = s ? (long)strlen(s) : 0;\n");
+    sb_append(sb, "    if (idx < 0) idx += len;\n");
+    sb_append(sb, "    if (idx < 0 || idx >= len)\n");
+    sb_append(sb, "        sub_runtime_error(\"RuntimeError: char_at(%ld) out of range [0, %ld)\", idx, len);\n");
+    sb_append(sb, "    char ch[2]; ch[0] = s[idx]; ch[1] = 0;\n");
     sb_append(sb, "    return sub_strdup(ch);\n");
     sb_append(sb, "}\n\n");
     

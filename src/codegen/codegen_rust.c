@@ -477,7 +477,7 @@ static void generate_node_rust(StringBuilder *sb, ASTNode *node, int indent) {
             /* Rust requires the return type in the signature; omitting it
                declares `-> ()` and every `return <value>` fails to compile. */
             if (node->data_type != TYPE_VOID && node->data_type != TYPE_UNKNOWN)
-                sb_append(sb, " -> %s", rust_type(node->data_type, 0));
+                sb_append(sb, " -> %s", rust_param_type(node));
             sb_append(sb, " {\n");
             if (node->body) {
                 /* One `unsafe` around the whole body rather than one per
@@ -784,6 +784,49 @@ static void generate_expr_rust(StringBuilder *sb, ASTNode *node) {
                         break;
                     }
                 }
+                /* The character-level string builtins. Rust has no
+                   overloading, so the form that omits the last argument is a
+                   separate function rather than a default; and join picks its
+                   formatter from the element type the way printing does. */
+                if (node->value && node->child_count >= 1 &&
+                    (strcmp(node->value, "substring") == 0 ||
+                     strcmp(node->value, "char_at") == 0 ||
+                     strcmp(node->value, "contains") == 0 ||
+                     strcmp(node->value, "replace") == 0 ||
+                     strcmp(node->value, "split") == 0 ||
+                     strcmp(node->value, "join") == 0)) {
+                    const char *fn = node->value;
+                    const char *callee = NULL;
+                    if (strcmp(fn, "substring") == 0)
+                        callee = node->child_count > 2 ? "_sub_substring"
+                                                       : "_sub_substring_from";
+                    else if (strcmp(fn, "char_at") == 0)  callee = "_sub_char_at";
+                    else if (strcmp(fn, "contains") == 0) callee = "_sub_contains";
+                    else if (strcmp(fn, "replace") == 0)  callee = "_sub_replace";
+                    else if (strcmp(fn, "split") == 0)    callee = "_sub_split";
+                    else callee = infer_elem_type(node->children[0]) == TYPE_FLOAT
+                                    ? "_sub_join_f" : "_sub_join";
+
+                    sb_append(sb, "%s(", callee);
+                    for (int i = 0; i < node->child_count; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        /* Everything but an index is borrowed: passing a
+                           String by value would move a variable the program
+                           goes on to use. */
+                        int by_ref = (strcmp(fn, "join") == 0 && i == 0) ||
+                                     infer_expr_type(node->children[i]) == TYPE_STRING;
+                        if (by_ref) sb_append(sb, "&(");
+                        generate_expr_rust(sb, node->children[i]);
+                        if (by_ref) sb_append(sb, ")");
+                    }
+                    /* split(s) separates on a space, as the interpreter does. */
+                    if (strcmp(fn, "split") == 0 && node->child_count < 2)
+                        sb_append(sb, ", \" \"");
+                    if (strcmp(fn, "join") == 0 && node->child_count < 2)
+                        sb_append(sb, ", \"\"");
+                    sb_append(sb, ")");
+                    break;
+                }
                 const RustBuiltin *rb = rust_builtin(node->value);
                 if (rb && node->child_count == 1) {
                     sb_append(sb, "%s", rb->prefix);
@@ -894,6 +937,45 @@ char* codegen_rust(ASTNode *ast, const char *source) {
        so one helper serves both the integer and the floating-point call. */
     sb_append(sb, "#[allow(dead_code)] fn _sub_str<T: std::fmt::Display>(v: T) -> String "
                   "{ v.to_string() }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_substring(s: &str, start: i64, end: i64) -> String {\n");
+    sb_append(sb, "    let n = s.chars().count() as i64;\n");
+    sb_append(sb, "    let start = if start < 0 { 0 } else if start > n { n } else { start };\n");
+    sb_append(sb, "    let end = if end < 0 { 0 } else if end > n { n } else { end };\n");
+    sb_append(sb, "    let start = if start > end { end } else { start };\n");
+    sb_append(sb, "    s.chars().skip(start as usize).take((end - start) as usize).collect()\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_substring_from(s: &str, start: i64) -> String {\n");
+    sb_append(sb, "    let n = s.chars().count() as i64;\n");
+    sb_append(sb, "    _sub_substring(s, start, n)\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_char_at(s: &str, idx: i64) -> String {\n");
+    sb_append(sb, "    let n = s.chars().count() as i64;\n");
+    sb_append(sb, "    let i = if idx < 0 { idx + n } else { idx };\n");
+    sb_append(sb, "    if i < 0 || i >= n {\n");
+    sb_append(sb, "        eprintln!(\"RuntimeError: char_at({}) out of range [0, {})\", i, n);\n");
+    sb_append(sb, "        std::process::exit(70);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    s.chars().nth(i as usize).unwrap().to_string()\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_contains(s: &str, sub: &str) -> bool { s.contains(sub) }\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_replace(s: &str, old: &str, new: &str) -> String {\n");
+    sb_append(sb, "    if old.is_empty() { return s.to_string() }\n");
+    sb_append(sb, "    s.replace(old, new)\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_split(s: &str, sep: &str) -> Vec<String> {\n");
+    sb_append(sb, "    if sep.is_empty() { return s.chars().map(|c| c.to_string()).collect() }\n");
+    sb_append(sb, "    s.split(sep).map(|p| p.to_string()).collect()\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_join<T: std::fmt::Display>(a: &Vec<T>, sep: &str) -> String {\n");
+    sb_append(sb, "    let mut s = String::new();\n");
+    sb_append(sb, "    for (i, v) in a.iter().enumerate() { if i > 0 { s.push_str(sep) } s.push_str(&v.to_string()) }\n");
+    sb_append(sb, "    s\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "#[allow(dead_code)] fn _sub_join_f(a: &Vec<f64>, sep: &str) -> String {\n");
+    sb_append(sb, "    let mut s = String::new();\n");
+    sb_append(sb, "    for (i, v) in a.iter().enumerate() { if i > 0 { s.push_str(sep) } s.push_str(&_sub_fmt(*v)) }\n");
+    sb_append(sb, "    s\n");
+    sb_append(sb, "}\n");
 
     /* Arrays. SUB spells one [a, b, c] with no quotes on strings, and
        indexing or popping out of range stops the program the way the

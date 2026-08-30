@@ -556,6 +556,95 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node);
 static void generate_expr_go(StringBuilder *sb, ASTNode *node);
 static void generate_expr_ruby(StringBuilder *sb, ASTNode *node);
 
+/* ----------------------------------------------------------------
+   The character-level string builtins, normalised.
+
+   SUB writes these two ways -- substring(s, 0, 3) and s.substring(0, 3) --
+   and they reach the generator as different node shapes. Every backend below
+   needs the same thing from both: the name, and the subject followed by the
+   arguments. Doing that once here is what keeps the seven backends from each
+   growing two nearly identical dispatch chains.
+
+   The interpreter is the specification, and it does not agree with the
+   obvious spelling in any of these languages: Python's s[a:b] reads a
+   negative start from the end where SUB clamps it to 0, "".join splits into
+   characters where Python's str.split raises, and str.replace with an empty
+   pattern inserts between every character where SUB returns the string
+   unchanged. So each backend emits a call to a helper in its preamble rather
+   than the native spelling. */
+typedef struct {
+    const char *name;
+    ASTNode    *args[4];   /* subject first, then the arguments */
+    int         argc;
+} StrBuiltin;
+
+static int str_builtin(ASTNode *node, StrBuiltin *out) {
+    static const char *names[] = {
+        "substring", "char_at", "contains", "replace", "split", "join", NULL
+    };
+    if (!node || node->type != AST_CALL_EXPR) return 0;
+
+    const char *fn = NULL;
+    ASTNode *subject = NULL;
+    if (node->left && node->left->type == AST_MEMBER_ACCESS) {
+        fn = node->left->value;
+        subject = node->left->left;
+    } else if (node->value) {
+        fn = node->value;
+    }
+    if (!fn) return 0;
+
+    int known = 0;
+    for (int i = 0; names[i]; i++)
+        if (strcmp(names[i], fn) == 0) { known = 1; break; }
+    if (!known) return 0;
+
+    out->name = fn;
+    out->argc = 0;
+    if (subject) out->args[out->argc++] = subject;
+    for (int i = 0; i < node->child_count && out->argc < 4; i++)
+        out->args[out->argc++] = node->children[i];
+    /* A subjectless call still needs one: substring() with nothing to act on
+       is not something to generate a call for. */
+    return out->argc > 0;
+}
+
+/* The helper name each backend gives a builtin.
+
+   `camel` picks the spelling that language's preamble already uses -- JS,
+   Java, Swift and Kotlin write _subPop, Python, Ruby and Go write _sub_pop.
+
+   `defaults` says whether the language can express an optional last argument.
+   Where it cannot -- Go -- substring(s, start) has to be a differently named
+   helper, because no sentinel end value is free: the interpreter clamps a
+   negative end to 0, so -1 already means the empty string. */
+/* The argument a call left out. split() separates on a space and join()
+   on nothing, following the interpreter; spelling that at the call site is
+   what lets the statically typed backends declare one signature per helper
+   instead of an overload per arity. */
+static const char* str_builtin_default(const StrBuiltin *b) {
+    if (b->argc >= 2) return "";
+    if (strcmp(b->name, "split") == 0) return ", \" \"";
+    if (strcmp(b->name, "join") == 0)  return ", \"\"";
+    return "";
+}
+
+static const char* str_builtin_fn(const StrBuiltin *b, int camel, int defaults) {
+    static char buf[64];
+    const char *n = b->name;
+    int from = (strcmp(n, "substring") == 0 && b->argc < 3 && !defaults);
+    if (camel) {
+        if (strcmp(n, "substring") == 0) return from ? "_subSubstringFrom" : "_subSubstring";
+        if (strcmp(n, "char_at") == 0)  return "_subCharAt";
+        if (strcmp(n, "contains") == 0) return "_subContains";
+        if (strcmp(n, "replace") == 0)  return "_subReplace";
+        if (strcmp(n, "split") == 0)    return "_subSplit";
+        return "_subJoin";
+    }
+    snprintf(buf, sizeof buf, "_sub_%s%s", n, from ? "_from" : "");
+    return buf;
+}
+
 /* Kotlin and Swift will not coerce an integer literal into a Double, and the
    Kotlin backend additionally suffixes integer literals with L for Long. In a
    float slot both of those are wrong, so the literal is emitted as a float
@@ -953,6 +1042,20 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, ")");
             break;
         case AST_CALL_EXPR:
+            {
+                /* substring/char_at/contains/replace/split/join, in either
+                   spelling; see str_builtin() above. */
+                StrBuiltin sbi;
+                if (str_builtin(node, &sbi)) {
+                    sb_append(sb, "%s(", str_builtin_fn(&sbi, 0, 1));
+                    for (int i = 0; i < sbi.argc; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_python(sb, sbi.args[i]);
+                    }
+                    sb_append(sb, "%s)", str_builtin_default(&sbi));
+                    break;
+                }
+            }
             if (node->left && node->left->type == AST_MEMBER_ACCESS) {
                 const char *m = node->left->value;
                 if (m && strcmp(m, "push") == 0) {
@@ -963,12 +1066,6 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
                 } else if (m && strcmp(m, "pop") == 0) {
                     generate_expr_python(sb, node->left->left);
                     sb_append(sb, ".pop()");
-                } else if (m && strcmp(m, "join") == 0) {
-                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]);
-                    else sb_append(sb, "\"\"");
-                    sb_append(sb, ".join(");
-                    generate_expr_python(sb, node->left->left);
-                    sb_append(sb, ")");
                 } else if (m && strcmp(m, "upper") == 0) {
                     generate_expr_python(sb, node->left->left);
                     sb_append(sb, ".upper()");
@@ -978,36 +1075,6 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
                 } else if (m && strcmp(m, "trim") == 0) {
                     generate_expr_python(sb, node->left->left);
                     sb_append(sb, ".strip()");
-                } else if (m && strcmp(m, "substring") == 0) {
-                    generate_expr_python(sb, node->left->left);
-                    sb_append(sb, "[");
-                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]); else sb_append(sb, "0");
-                    sb_append(sb, ":");
-                    if (node->child_count > 1) generate_expr_python(sb, node->children[1]);
-                    sb_append(sb, "]");
-                } else if (m && strcmp(m, "split") == 0) {
-                    generate_expr_python(sb, node->left->left);
-                    sb_append(sb, ".split(");
-                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]);
-                    sb_append(sb, ")");
-                } else if (m && strcmp(m, "contains") == 0) {
-                    sb_append(sb, "(");
-                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]); else sb_append(sb, "\"\"");
-                    sb_append(sb, " in ");
-                    generate_expr_python(sb, node->left->left);
-                    sb_append(sb, ")");
-                } else if (m && strcmp(m, "replace") == 0) {
-                    generate_expr_python(sb, node->left->left);
-                    sb_append(sb, ".replace(");
-                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]); else sb_append(sb, "\"\"");
-                    sb_append(sb, ", ");
-                    if (node->child_count > 1) generate_expr_python(sb, node->children[1]); else sb_append(sb, "\"\"");
-                    sb_append(sb, ")");
-                } else if (m && strcmp(m, "char_at") == 0) {
-                    generate_expr_python(sb, node->left->left);
-                    sb_append(sb, "[");
-                    if (node->child_count > 0) generate_expr_python(sb, node->children[0]); else sb_append(sb, "0");
-                    sb_append(sb, "]");
                 } else {
                     generate_expr_python(sb, node->left);
                     sb_append(sb, "(");
@@ -1420,8 +1487,14 @@ char* codegen_python(ASTNode *ast, const char *source) {
     /* SUB writes booleans as true/false. Python's str() writes True/False, so
        the same program printed different text depending on the backend.
        These helpers keep Python's output identical to the interpreter's. */
+    /* The runtime holds its own references to the builtins it needs. A SUB
+       program is free to call a variable `list` or `str`, and a top-level
+       one becomes a module global that shadows the builtin for every helper
+       below -- `println(list.join(" - "))` died inside isinstance(). */
+    sb_append(sb, "\n_sub_t_bool, _sub_t_float, _sub_t_list = bool, float, list\n");
+    sb_append(sb, "_sub_to_str, _sub_to_int = str, int\n");
     sb_append(sb, "\n\ndef _sub_str(v):\n");
-    sb_append(sb, "    if isinstance(v, bool):\n");
+    sb_append(sb, "    if isinstance(v, _sub_t_bool):\n");
     sb_append(sb, "        return \"true\" if v else \"false\"\n");
     sb_append(sb, "    if v is None:\n");
     sb_append(sb, "        return \"null\"\n");
@@ -1429,13 +1502,13 @@ char* codegen_python(ASTNode *ast, const char *source) {
        digits, trailing zeros dropped. Python's str() prints all seventeen,
        so 1.0 / 3.0 came out 0.3333333333333333 where every other backend
        said 0.333333. */
-    sb_append(sb, "    if isinstance(v, float):\n");
+    sb_append(sb, "    if isinstance(v, _sub_t_float):\n");
     sb_append(sb, "        return \"%%g\" %% v\n");
     /* SUB prints an array as [a, b, c] with no quotes around strings;
        Python's str() of a list quotes them. */
-    sb_append(sb, "    if isinstance(v, list):\n");
+    sb_append(sb, "    if isinstance(v, _sub_t_list):\n");
     sb_append(sb, "        return '[' + ', '.join(_sub_str(x) for x in v) + ']'\n");
-    sb_append(sb, "    return str(v)\n");
+    sb_append(sb, "    return _sub_to_str(v)\n");
     /* SUB divides and takes the remainder the way C, Java, Go and the
        interpreter do: truncated toward zero, so -7 / 2 is -3 and -7 % 3 is
        -1. Python's // and % floor instead, giving -4 and 2. */
@@ -1492,6 +1565,42 @@ char* codegen_python(ASTNode *ast, const char *source) {
     sb_append(sb, "    # from zero, as C's round() does.\n");
     sb_append(sb, "    return int(math.floor(x + 0.5)) if x >= 0 "
                   "else int(math.ceil(x - 0.5))\n\n");
+    sb_append(sb, "def _sub_substring(s, start, end=None):\n");
+    sb_append(sb, "    n = len(s)\n");
+    sb_append(sb, "    if end is None: end = n\n");
+    sb_append(sb, "    start = 0 if start < 0 else (n if start > n else start)\n");
+    sb_append(sb, "    end = 0 if end < 0 else (n if end > n else end)\n");
+    sb_append(sb, "    if start > end: start = end\n");
+    sb_append(sb, "    return s[start:end]\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "def _sub_char_at(s, idx):\n");
+    sb_append(sb, "    n = len(s)\n");
+    sb_append(sb, "    if idx < 0: idx += n\n");
+    sb_append(sb, "    if idx < 0 or idx >= n:\n");
+    sb_append(sb, "        import sys\n");
+    sb_append(sb, "        sys.stdout.flush()\n");
+    sb_append(sb, "        print(\"RuntimeError: char_at(%%d) out of range [0, %%d)\" %% (idx, n), file=sys.stderr)\n");
+    sb_append(sb, "        sys.exit(70)\n");
+    sb_append(sb, "    return s[idx]\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "def _sub_contains(s, sub):\n");
+    sb_append(sb, "    return sub in s\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "def _sub_replace(s, old, new):\n");
+    sb_append(sb, "    # An empty pattern leaves the string alone; Python would insert `new`\n");
+    sb_append(sb, "    # between every character.\n");
+    sb_append(sb, "    if old == \"\": return s\n");
+    sb_append(sb, "    return s.replace(old, new)\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "def _sub_split(s, sep=\" \"):\n");
+    sb_append(sb, "    # An empty separator splits into characters, which str.split rejects,\n");
+    sb_append(sb, "    # and every field is kept -- including empty ones.\n");
+    sb_append(sb, "    if sep == \"\": return list(s)\n");
+    sb_append(sb, "    return s.split(sep)\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "def _sub_join(a, sep=\"\"):\n");
+    sb_append(sb, "    return sep.join(_sub_str(x) for x in a)\n");
+    sb_append(sb, "\n");
 
     char *embedded = extract_embedded_code(source, "python");
     if (embedded) {
@@ -1550,6 +1659,21 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, ")");
             break;
         case AST_CALL_EXPR:
+            {
+                /* substring/char_at/contains/replace/split/join, in either
+                   spelling; see str_builtin() above. */
+                StrBuiltin sbi;
+                if (str_builtin(node, &sbi)) {
+                    sb_append(sb, "%s(", str_builtin_fn(&sbi, 1, 1));
+                    for (int i = 0; i < sbi.argc; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_js(sb, sbi.args[i]);
+                    }
+                    sb_append(sb, "%s)", str_builtin_default(&sbi));
+                    break;
+                }
+            }
+
             {
                 const BuiltinSpelling *bs = builtin_spelling(LANG_JS, node->value);
                 if (bs && node->child_count == 1) {
@@ -1977,6 +2101,37 @@ char* codegen_javascript(ASTNode *ast, const char *source) {
     sb_append(sb, "    console.error('RuntimeError: ' + msg);\n");
     sb_append(sb, "    process.exit(70);\n");
     sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subSubstring(s, start, end) {\n");
+    sb_append(sb, "    const n = s.length;\n");
+    sb_append(sb, "    if (end === undefined) end = n;\n");
+    sb_append(sb, "    start = start < 0 ? 0 : (start > n ? n : start);\n");
+    sb_append(sb, "    end = end < 0 ? 0 : (end > n ? n : end);\n");
+    sb_append(sb, "    if (start > end) start = end;\n");
+    sb_append(sb, "    return s.slice(start, end);\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "function _subCharAt(s, idx) {\n");
+    sb_append(sb, "    const n = s.length;\n");
+    sb_append(sb, "    if (idx < 0) idx += n;\n");
+    sb_append(sb, "    if (idx < 0 || idx >= n) _subDie(\"char_at(\" + idx + \") out of range [0, \" + n + \")\");\n");
+    sb_append(sb, "    return s[idx];\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "function _subContains(s, sub) { return s.includes(sub); }\n");
+    sb_append(sb, "function _subReplace(s, o, n) {\n");
+    sb_append(sb, "    // An empty pattern leaves the string alone; replaceAll would insert\n");
+    sb_append(sb, "    // the replacement between every character.\n");
+    sb_append(sb, "    if (o === \"\") return s;\n");
+    sb_append(sb, "    return s.split(o).join(n);\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "function _subSplit(s, sep) {\n");
+    sb_append(sb, "    if (sep === undefined) sep = \" \";\n");
+    sb_append(sb, "    if (sep === \"\") return Array.from(s);\n");
+    sb_append(sb, "    return s.split(sep);\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "function _subJoin(a, sep) {\n");
+    sb_append(sb, "    if (sep === undefined) sep = \"\";\n");
+    sb_append(sb, "    return a.map(_subStr).join(sep);\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "\n");
     sb_append(sb, "function _subIdiv(a, b) {\n");
     sb_append(sb, "    if (b === 0) _subDie('division by zero');\n");
     sb_append(sb, "    return Math.trunc(a / b);\n");
@@ -2065,7 +2220,22 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
             generate_expr_java(sb, node->right);
             sb_append(sb, ")");
             break;
-        case AST_CALL_EXPR: {
+        case AST_CALL_EXPR:
+            {
+                /* substring/char_at/contains/replace/split/join, in either
+                   spelling; see str_builtin() above. */
+                StrBuiltin sbi;
+                if (str_builtin(node, &sbi)) {
+                    sb_append(sb, "%s(", str_builtin_fn(&sbi, 1, 1));
+                    for (int i = 0; i < sbi.argc; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_java(sb, sbi.args[i]);
+                    }
+                    sb_append(sb, "%s)", str_builtin_default(&sbi));
+                    break;
+                }
+            }
+ {
             const char *fn = node->value ? node->value : "func";
             {
                 /* Ahead of the table, whose len() spells String.length(). */
@@ -2339,7 +2509,7 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "\n");
             indent_code(sb, indent);
             g_java_fn_type = node->data_type;
-            sb_append(sb, "public static %s %s(", java_type(node->data_type),
+            sb_append(sb, "public static %s %s(", java_param_type(node),
                       node->value ? node->value : "func");
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
@@ -2604,6 +2774,56 @@ char* codegen_java(ASTNode *ast, const char *source) {
     sb_append(sb, "        System.err.println(\"RuntimeError: \" + msg);\n");
     sb_append(sb, "        System.exit(70);\n");
     sb_append(sb, "    }\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "    static String _subSubstring(String s, long start, long end) {\n");
+    sb_append(sb, "        long n = s.length();\n");
+    sb_append(sb, "        if (start < 0) start = 0;\n");
+    sb_append(sb, "        if (end < 0) end = 0;\n");
+    sb_append(sb, "        if (start > n) start = n;\n");
+    sb_append(sb, "        if (end > n) end = n;\n");
+    sb_append(sb, "        if (start > end) start = end;\n");
+    sb_append(sb, "        return s.substring((int) start, (int) end);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    static String _subSubstring(String s, long start) {\n");
+    sb_append(sb, "        return _subSubstring(s, start, s.length());\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    static String _subCharAt(String s, long idx) {\n");
+    sb_append(sb, "        long n = s.length();\n");
+    sb_append(sb, "        if (idx < 0) idx += n;\n");
+    sb_append(sb, "        if (idx < 0 || idx >= n)\n");
+    sb_append(sb, "            _subDie(\"char_at(\" + idx + \") out of range [0, \" + n + \")\");\n");
+    sb_append(sb, "        return String.valueOf(s.charAt((int) idx));\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    static boolean _subContains(String s, String sub) { return s.contains(sub); }\n");
+    sb_append(sb, "    static String _subReplace(String s, String o, String n) {\n");
+    sb_append(sb, "        if (o.isEmpty()) return s;\n");
+    sb_append(sb, "        return s.replace(o, n);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    static java.util.List<String> _subSplit(String s, String sep) {\n");
+    sb_append(sb, "        java.util.List<String> out = new java.util.ArrayList<>();\n");
+    sb_append(sb, "        if (sep.isEmpty()) {\n");
+    sb_append(sb, "            for (int i = 0; i < s.length(); i++) out.add(String.valueOf(s.charAt(i)));\n");
+    sb_append(sb, "            return out;\n");
+    sb_append(sb, "        }\n");
+    sb_append(sb, "        int p = 0;\n");
+    sb_append(sb, "        while (true) {\n");
+    sb_append(sb, "            int hit = s.indexOf(sep, p);\n");
+    sb_append(sb, "            if (hit < 0) { out.add(s.substring(p)); break; }\n");
+    sb_append(sb, "            out.add(s.substring(p, hit));\n");
+    sb_append(sb, "            p = hit + sep.length();\n");
+    sb_append(sb, "        }\n");
+    sb_append(sb, "        return out;\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    static java.util.List<String> _subSplit(String s) { return _subSplit(s, \" \"); }\n");
+    sb_append(sb, "    static String _subJoin(java.util.List<?> a, String sep) {\n");
+    sb_append(sb, "        StringBuilder b = new StringBuilder();\n");
+    sb_append(sb, "        for (int i = 0; i < a.size(); i++) {\n");
+    sb_append(sb, "            if (i > 0) b.append(sep);\n");
+    sb_append(sb, "            b.append(_subStr(a.get(i)));\n");
+    sb_append(sb, "        }\n");
+    sb_append(sb, "        return b.toString();\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    static String _subJoin(java.util.List<?> a) { return _subJoin(a, \"\"); }\n");
     sb_append(sb, "\n    static long _subIdiv(long a, long b) {\n");
     sb_append(sb, "        if (b == 0) _subDie(\"division by zero\");\n");
     sb_append(sb, "        return a / b;\n");
@@ -2801,6 +3021,21 @@ static void generate_expr_swift(StringBuilder *sb, ASTNode *node) {
             break;
         case AST_CALL_EXPR:
             {
+                /* substring/char_at/contains/replace/split/join, in either
+                   spelling; see str_builtin() above. */
+                StrBuiltin sbi;
+                if (str_builtin(node, &sbi)) {
+                    sb_append(sb, "%s(", str_builtin_fn(&sbi, 1, 1));
+                    for (int i = 0; i < sbi.argc; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_swift(sb, sbi.args[i]);
+                    }
+                    sb_append(sb, "%s)", str_builtin_default(&sbi));
+                    break;
+                }
+            }
+
+            {
                 /* Swift arrays are values, so mutating one needs inout. */
                 if (node->value && node->child_count >= 1 && node->children[0] &&
                     infer_expr_type(node->children[0]) == TYPE_ARRAY) {
@@ -2986,7 +3221,7 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
             }
             sb_append(sb, ")");
             if (node->data_type != TYPE_VOID && node->data_type != TYPE_UNKNOWN)
-                sb_append(sb, " -> %s", swift_type(node->data_type));
+                sb_append(sb, " -> %s", swift_param_type(node));
             sb_append(sb, " {\n");
             if (node->body) generate_node_swift(sb, node->body, indent + 1);
             sb_append(sb, "}\n"); break;
@@ -3153,6 +3388,43 @@ char* codegen_swift(ASTNode *ast, const char *source) {
     sb_append(sb, "    FileHandle.standardError.write("
                   "(\"RuntimeError: \" + msg + \"\\n\").data(using: .utf8)!)\n");
     sb_append(sb, "    exit(70)\n}\n\n");
+    sb_append(sb, "func _subSubstring(_ s: String, _ start: Int, _ end: Int? = nil) -> String {\n");
+    sb_append(sb, "    let n = s.count\n");
+    sb_append(sb, "    var a = start\n");
+    sb_append(sb, "    var b = end ?? n\n");
+    sb_append(sb, "    if a < 0 { a = 0 }\n");
+    sb_append(sb, "    if b < 0 { b = 0 }\n");
+    sb_append(sb, "    if a > n { a = n }\n");
+    sb_append(sb, "    if b > n { b = n }\n");
+    sb_append(sb, "    if a > b { a = b }\n");
+    sb_append(sb, "    let i = s.index(s.startIndex, offsetBy: a)\n");
+    sb_append(sb, "    let j = s.index(s.startIndex, offsetBy: b)\n");
+    sb_append(sb, "    return String(s[i..<j])\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "func _subCharAt(_ s: String, _ idx: Int) -> String {\n");
+    sb_append(sb, "    let n = s.count\n");
+    sb_append(sb, "    var i = idx\n");
+    sb_append(sb, "    if i < 0 { i += n }\n");
+    sb_append(sb, "    if i < 0 || i >= n { _subDie(\"char_at(\\(i)) out of range [0, \\(n))\") }\n");
+    sb_append(sb, "    return String(s[s.index(s.startIndex, offsetBy: i)])\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "func _subContains(_ s: String, _ sub: String) -> Bool {\n");
+    sb_append(sb, "    if sub.isEmpty { return true }\n");
+    sb_append(sb, "    return s.range(of: sub) != nil\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "func _subReplace(_ s: String, _ o: String, _ n: String) -> String {\n");
+    sb_append(sb, "    // An empty pattern leaves the string alone.\n");
+    sb_append(sb, "    if o.isEmpty { return s }\n");
+    sb_append(sb, "    return s.replacingOccurrences(of: o, with: n)\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "func _subSplit(_ s: String, _ sep: String) -> [String] {\n");
+    sb_append(sb, "    if sep.isEmpty { return s.map { String($0) } }\n");
+    sb_append(sb, "    return s.components(separatedBy: sep)\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "func _subJoin(_ a: [Any], _ sep: String) -> String {\n");
+    sb_append(sb, "    return a.map { _subStr($0) }.joined(separator: sep)\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "\n");
     sb_append(sb, "func _subIdiv(_ a: Int, _ b: Int) -> Int {\n");
     sb_append(sb, "    if b == 0 { _subDie(\"division by zero\") }\n");
     sb_append(sb, "    return a / b\n}\n\n");
@@ -3246,6 +3518,21 @@ static void generate_expr_kotlin(StringBuilder *sb, ASTNode *node) {
             generate_expr_kotlin(sb, node->right ? node->right : node->left);
             break;
         case AST_CALL_EXPR:
+            {
+                /* substring/char_at/contains/replace/split/join, in either
+                   spelling; see str_builtin() above. */
+                StrBuiltin sbi;
+                if (str_builtin(node, &sbi)) {
+                    sb_append(sb, "%s(", str_builtin_fn(&sbi, 1, 1));
+                    for (int i = 0; i < sbi.argc; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_kotlin(sb, sbi.args[i]);
+                    }
+                    sb_append(sb, "%s)", str_builtin_default(&sbi));
+                    break;
+                }
+            }
+
             {
                 /* Ahead of the table, whose len() spells String.length. */
                 if (node->value && node->child_count >= 1 && node->children[0] &&
@@ -3429,7 +3716,7 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
             }
             sb_append(sb, ")");
             if (node->data_type != TYPE_VOID && node->data_type != TYPE_UNKNOWN)
-                sb_append(sb, ": %s", kotlin_type(node->data_type));
+                sb_append(sb, ": %s", kotlin_param_type(node));
             sb_append(sb, " {\n");
             if (node->body) generate_node_kotlin(sb, node->body, indent + 1);
             sb_append(sb, "}\n"); break;
@@ -3605,6 +3892,34 @@ char* codegen_kotlin(ASTNode *ast, const char *source) {
     sb_append(sb, "    System.err.println(\"RuntimeError: \" + msg)\n");
     sb_append(sb, "    kotlin.system.exitProcess(70)\n");
     sb_append(sb, "}\n\n");
+    sb_append(sb, "fun _subSubstring(s: String, start: Long, end: Long? = null): String {\n");
+    sb_append(sb, "    val n = s.length.toLong()\n");
+    sb_append(sb, "    var a = start\n");
+    sb_append(sb, "    var b = end ?: n\n");
+    sb_append(sb, "    if (a < 0) a = 0\n");
+    sb_append(sb, "    if (b < 0) b = 0\n");
+    sb_append(sb, "    if (a > n) a = n\n");
+    sb_append(sb, "    if (b > n) b = n\n");
+    sb_append(sb, "    if (a > b) a = b\n");
+    sb_append(sb, "    return s.substring(a.toInt(), b.toInt())\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "fun _subCharAt(s: String, idx: Long): String {\n");
+    sb_append(sb, "    val n = s.length.toLong()\n");
+    sb_append(sb, "    var i = idx\n");
+    sb_append(sb, "    if (i < 0) i += n\n");
+    sb_append(sb, "    if (i < 0 || i >= n) _subDie(\"char_at($i) out of range [0, $n)\")\n");
+    sb_append(sb, "    return s[i.toInt()].toString()\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "fun _subContains(s: String, sub: String): Boolean = s.contains(sub)\n");
+    sb_append(sb, "// An empty pattern leaves the string alone.\n");
+    sb_append(sb, "fun _subReplace(s: String, o: String, n: String): String =\n");
+    sb_append(sb, "    if (o.isEmpty()) s else s.replace(o, n)\n");
+    sb_append(sb, "fun _subSplit(s: String, sep: String): MutableList<String> =\n");
+    sb_append(sb, "    if (sep.isEmpty()) s.map { it.toString() }.toMutableList()\n");
+    sb_append(sb, "    else s.split(sep).toMutableList()\n");
+    sb_append(sb, "fun _subJoin(a: List<Any?>, sep: String): String =\n");
+    sb_append(sb, "    a.joinToString(sep) { _subStr(it) }\n");
+    sb_append(sb, "\n");
     sb_append(sb, "fun _subIdiv(a: Long, b: Long): Long {\n");
     sb_append(sb, "    if (b == 0L) _subDie(\"division by zero\")\n");
     sb_append(sb, "    return a / b\n}\n\n");
@@ -3961,7 +4276,22 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, ")");
             break;
 
-        case AST_CALL_EXPR: {
+        case AST_CALL_EXPR:
+            {
+                /* substring/char_at/contains/replace/split/join, in either
+                   spelling; see str_builtin() above. */
+                StrBuiltin sbi;
+                if (str_builtin(node, &sbi)) {
+                    sb_append(sb, "%s(", str_builtin_fn(&sbi, 0, 1));
+                    for (int i = 0; i < sbi.argc; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_ruby(sb, sbi.args[i]);
+                    }
+                    sb_append(sb, "%s)", str_builtin_default(&sbi));
+                    break;
+                }
+            }
+ {
             const char *func_name = node->value ? node->value : "func";
             {
                 const BuiltinSpelling *bs = builtin_spelling(LANG_RUBY, node->value);
@@ -4375,6 +4705,45 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
        Dividing by zero is a runtime error with status 70 in every backend. */
     sb_append(sb, "\ndef _sub_die(msg)\n");
     sb_append(sb, "  STDERR.puts \"RuntimeError: #{msg}\"\n  exit 70\nend\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "def _sub_substring(s, start, fin = nil)\n");
+    sb_append(sb, "  n = s.length\n");
+    sb_append(sb, "  fin = n if fin.nil?\n");
+    sb_append(sb, "  start = start < 0 ? 0 : (start > n ? n : start)\n");
+    sb_append(sb, "  fin = fin < 0 ? 0 : (fin > n ? n : fin)\n");
+    sb_append(sb, "  start = fin if start > fin\n");
+    sb_append(sb, "  s[start, fin - start]\n");
+    sb_append(sb, "end\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "def _sub_char_at(s, idx)\n");
+    sb_append(sb, "  n = s.length\n");
+    sb_append(sb, "  idx += n if idx < 0\n");
+    sb_append(sb, "  _sub_die(\"char_at(#{idx}) out of range [0, #{n})\") if idx < 0 || idx >= n\n");
+    sb_append(sb, "  s[idx]\n");
+    sb_append(sb, "end\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "def _sub_contains(s, sub)\n");
+    sb_append(sb, "  s.include?(sub)\n");
+    sb_append(sb, "end\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "def _sub_replace(s, o, n)\n");
+    sb_append(sb, "  # An empty pattern leaves the string alone. The block form of gsub keeps\n");
+    sb_append(sb, "  # a replacement containing \\\\1 or & literal, which SUB has no notion of.\n");
+    sb_append(sb, "  return s if o == \"\"\n");
+    sb_append(sb, "  s.gsub(o) { n }\n");
+    sb_append(sb, "end\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "def _sub_split(s, sep = \" \")\n");
+    sb_append(sb, "  return s.chars if sep == \"\"\n");
+    sb_append(sb, "  # -1 keeps trailing empty fields, which split drops by default; and Ruby\n");
+    sb_append(sb, "  # splits the empty string into nothing where SUB yields one empty field.\n");
+    sb_append(sb, "  return [\"\"] if s == \"\"\n");
+    sb_append(sb, "  s.split(sep, -1)\n");
+    sb_append(sb, "end\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "def _sub_join(a, sep = \"\")\n");
+    sb_append(sb, "  a.map { |x| _sub_str(x) }.join(sep)\n");
+    sb_append(sb, "end\n");
     sb_append(sb, "\ndef _sub_idiv(a, b)\n");
     sb_append(sb, "  _sub_die('division by zero') if b == 0\n");
     sb_append(sb, "  q = a.abs / b.abs\n");
@@ -4484,6 +4853,24 @@ static bool ast_uses_go_pkg(ASTNode *node, const char *pkg) {
     return false;
 }
 
+/* Whether the program calls one of the character-level string builtins.
+   The Go helpers for them are written in terms of `strings`, and Go rejects
+   an import nothing uses, so the import and the helpers stand or fall
+   together. */
+static bool ast_uses_str_builtin(ASTNode *node) {
+    if (!node) return false;
+    StrBuiltin sbi;
+    if (str_builtin(node, &sbi)) return true;
+    if (ast_uses_str_builtin(node->left))      return true;
+    if (ast_uses_str_builtin(node->right))     return true;
+    if (ast_uses_str_builtin(node->condition)) return true;
+    if (ast_uses_str_builtin(node->body))      return true;
+    if (ast_uses_str_builtin(node->next))      return true;
+    for (int i = 0; i < node->child_count; i++)
+        if (node->children && ast_uses_str_builtin(node->children[i])) return true;
+    return false;
+}
+
 static bool ast_needs_fmt(ASTNode *node) {
     if (!node) return false;
     if (node->type == AST_CALL_EXPR && node->value &&
@@ -4590,7 +4977,22 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, " }()");
             break;
 
-        case AST_CALL_EXPR: {
+        case AST_CALL_EXPR:
+            {
+                /* substring/char_at/contains/replace/split/join, in either
+                   spelling; see str_builtin() above. */
+                StrBuiltin sbi;
+                if (str_builtin(node, &sbi)) {
+                    sb_append(sb, "%s(", str_builtin_fn(&sbi, 0, 0));
+                    for (int i = 0; i < sbi.argc; i++) {
+                        if (i > 0) sb_append(sb, ", ");
+                        generate_expr_go(sb, sbi.args[i]);
+                    }
+                    sb_append(sb, "%s)", str_builtin_default(&sbi));
+                    break;
+                }
+            }
+ {
             const char *func_name = node->value ? node->value : "fn";
             {
                 /* Ahead of the table: len() and str() of an array need the
@@ -4770,7 +5172,7 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
             }
             sb_append(sb, ")");
             if (node->data_type != TYPE_VOID && node->data_type != TYPE_UNKNOWN)
-                sb_append(sb, " %s", go_type(node->data_type));
+                sb_append(sb, " %s", go_param_type(node));
             sb_append(sb, " {\n");
             if (node->body) {
                 generate_node_go(sb, node->body, indent + 1);
@@ -5073,7 +5475,8 @@ char* codegen_go(ASTNode *ast, const char *source) {
     bool needs_fmt      = ast_needs_fmt(ast) || needs_divmod;
     bool needs_os       = true;   /* _sub_die always uses os.Exit */
     bool needs_math     = ast_uses_go_pkg(ast, "math") || needs_divmod;
-    bool needs_strings  = ast_uses_go_pkg(ast, "strings");
+    bool needs_str_fns  = ast_uses_str_builtin(ast);
+    bool needs_strings  = ast_uses_go_pkg(ast, "strings") || needs_str_fns;
     bool needs_strconv  = true;   /* _sub_fmt always uses it */
     needs_fmt = true;             /* _sub_str always uses fmt.Sprint */
     int  import_count   = (needs_fmt ? 1 : 0) + (needs_math ? 1 : 0) +
@@ -5131,6 +5534,61 @@ char* codegen_go(ASTNode *ast, const char *source) {
     sb_append(sb, "func _sub_die(msg string) {\n");
     sb_append(sb, "\tfmt.Fprintln(os.Stderr, \"RuntimeError: \"+msg)\n");
     sb_append(sb, "\tos.Exit(70)\n}\n\n");
+    if (needs_str_fns) {
+        sb_append(sb, "func _sub_substring(s string, start int64, end int64) string {\n");
+        sb_append(sb, "	n := int64(len(s))\n");
+        sb_append(sb, "	if start < 0 { start = 0 }\n");
+        sb_append(sb, "	if end < 0 { end = 0 }\n");
+        sb_append(sb, "	if start > n { start = n }\n");
+        sb_append(sb, "	if end > n { end = n }\n");
+        sb_append(sb, "	if start > end { start = end }\n");
+        sb_append(sb, "	return s[start:end]\n");
+        sb_append(sb, "}\n");
+        sb_append(sb, "\n");
+        sb_append(sb, "// Go has neither overloads nor default arguments, so the form that runs to\n");
+        sb_append(sb, "// the end of the string is its own function.\n");
+        sb_append(sb, "func _sub_substring_from(s string, start int64) string {\n");
+        sb_append(sb, "	return _sub_substring(s, start, int64(len(s)))\n");
+        sb_append(sb, "}\n");
+        sb_append(sb, "\n");
+        sb_append(sb, "func _sub_char_at(s string, idx int64) string {\n");
+        sb_append(sb, "	n := int64(len(s))\n");
+        sb_append(sb, "	if idx < 0 { idx += n }\n");
+        sb_append(sb, "	if idx < 0 || idx >= n {\n");
+        sb_append(sb, "		_sub_die(fmt.Sprintf(\"char_at(%%d) out of range [0, %%d)\", idx, n))\n");
+        sb_append(sb, "	}\n");
+        sb_append(sb, "	return string(s[idx])\n");
+        sb_append(sb, "}\n");
+        sb_append(sb, "\n");
+        sb_append(sb, "func _sub_contains(s string, sub string) bool { return strings.Contains(s, sub) }\n");
+        sb_append(sb, "\n");
+        sb_append(sb, "func _sub_replace(s string, o string, n string) string {\n");
+        sb_append(sb, "	// An empty pattern leaves the string alone; ReplaceAll would insert the\n");
+        sb_append(sb, "	// replacement between every character.\n");
+        sb_append(sb, "	if o == \"\" { return s }\n");
+        sb_append(sb, "	return strings.ReplaceAll(s, o, n)\n");
+        sb_append(sb, "}\n");
+        sb_append(sb, "\n");
+        sb_append(sb, "func _sub_split(s string, sep string) *[]string {\n");
+        sb_append(sb, "	var out []string\n");
+        sb_append(sb, "	if sep == \"\" {\n");
+        sb_append(sb, "		for i := 0; i < len(s); i++ { out = append(out, string(s[i])) }\n");
+        sb_append(sb, "		return &out\n");
+        sb_append(sb, "	}\n");
+        sb_append(sb, "	out = strings.Split(s, sep)\n");
+        sb_append(sb, "	return &out\n");
+        sb_append(sb, "}\n");
+        sb_append(sb, "\n");
+        sb_append(sb, "func _sub_join[T any](a *[]T, sep string) string {\n");
+        sb_append(sb, "	var b strings.Builder\n");
+        sb_append(sb, "	for i, v := range *a {\n");
+        sb_append(sb, "		if i > 0 { b.WriteString(sep) }\n");
+        sb_append(sb, "		b.WriteString(_sub_str(v))\n");
+        sb_append(sb, "	}\n");
+        sb_append(sb, "	return b.String()\n");
+        sb_append(sb, "}\n");
+        sb_append(sb, "\n");
+    }
 
     if (needs_divmod) {
         /* Go panics on integer division by zero; SUB reports a runtime error

@@ -1778,6 +1778,59 @@ static ASTNode* parse_statement(ParserState *state) {
     return expr;
 }
 
+/* SUB writes the string builtins two ways -- substring(s, 0, 3) and
+   s.substring(0, 3) -- and they mean the same call. Rewriting the method
+   spelling into the function one here, once, is what keeps the interpreter
+   and the ten backends from each needing two dispatch paths: the method form
+   was documented in the README and worked in about half of them.
+
+   Only these names are rewritten. A user class is free to define a method of
+   any other name, and `obj.field` untouched by a call is left alone. */
+static int is_builtin_method(const char *name) {
+    static const char *names[] = {
+        "substring", "char_at", "contains", "replace", "split", "join", NULL
+    };
+    if (!name) return 0;
+    for (int i = 0; names[i]; i++)
+        if (strcmp(names[i], name) == 0) return 1;
+    return 0;
+}
+
+static void normalize_builtin_methods(ASTNode *node) {
+    if (!node) return;
+
+    if (node->type == AST_CALL_EXPR && !node->value &&
+        node->left && node->left->type == AST_MEMBER_ACCESS &&
+        is_builtin_method(node->left->value) && node->left->left) {
+        ASTNode *access   = node->left;
+        ASTNode *receiver = access->left;
+
+        ASTNode **args = malloc(sizeof(ASTNode*) * (size_t)(node->child_count + 1));
+        if (args) {
+            args[0] = receiver;
+            for (int i = 0; i < node->child_count; i++) args[i + 1] = node->children[i];
+            free(node->children);
+            node->children    = args;
+            node->child_count = node->child_count + 1;
+            node->value       = access->value;   /* taken over, not copied */
+            node->left        = NULL;
+            /* The member access node itself is all that is discarded; its
+               name and its receiver both live on in the call. */
+            access->value = NULL;
+            access->left  = NULL;
+            parser_free_ast(access);
+        }
+    }
+
+    normalize_builtin_methods(node->left);
+    normalize_builtin_methods(node->right);
+    normalize_builtin_methods(node->condition);
+    normalize_builtin_methods(node->body);
+    for (int i = 0; i < node->child_count; i++)
+        normalize_builtin_methods(node->children[i]);
+    normalize_builtin_methods(node->next);
+}
+
 /* Main parser function */
 ASTNode* parser_parse(Token *tokens, int token_count) {
     if (!tokens || token_count <= 0) {
@@ -1836,6 +1889,7 @@ ASTNode* parser_parse(Token *tokens, int token_count) {
     }
 
     root->body = first_stmt;
+    normalize_builtin_methods(root);
 
     if (state.had_error) {
         fprintf(stderr, "Parser completed with errors\n");
