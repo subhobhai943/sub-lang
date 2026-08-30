@@ -197,7 +197,7 @@ OS and version (`./subi --version`). A backend disagreeing with the
 interpreter is always a bug — say which backend, and the suite will usually
 reproduce it in one case.
 
-For anything with a security dimension, see [SECURITY.md](../SECURITY.md)
+For anything with a security dimension, see [SECURITY.md](SECURITY.md)
 instead.
 
 ---

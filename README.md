@@ -769,7 +769,7 @@ python3 tests/conformance.py        # every target whose toolchain is installed
 
 To report a vulnerability, please use
 [private vulnerability reporting](https://github.com/subhobhai943/sub-lang/security/advisories/new)
-rather than a public issue. [`SECURITY.md`](SECURITY.md) sets out what is in
+rather than a public issue. [`docs/SECURITY.md`](docs/SECURITY.md) sets out what is in
 scope, what is not — running a `.sb` program is running code, and there is no
 sandbox — and what the language can reach at all.
 
