@@ -1429,6 +1429,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "#include <string.h>\n");
     sb_append(sb, "#include <stdbool.h>\n");
     sb_append(sb, "#include <stddef.h>\n");
+    sb_append(sb, "#include <stdint.h>\n");   /* intptr_t: see gen_elem_in */
     sb_append(sb, "#include <math.h>\n");
     sb_append(sb, "#include <ctype.h>\n");
     sb_append(sb, "#include <stdarg.h>\n");
@@ -1674,11 +1675,11 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "   at least one element. An empty separator splits into characters. */\n");
     sb_append(sb, "static inline SubArray* sub_str_split(const char *s, const char *sep) {\n");
     sb_append(sb, "    SubArray *arr = sub_array_create();\n");
-    sb_append(sb, "    if (!s) { sub_array_push(arr, (long)sub_strdup(\"\")); return arr; }\n");
+    sb_append(sb, "    if (!s) { sub_array_push(arr, (long long)(intptr_t)sub_strdup(\"\")); return arr; }\n");
     sb_append(sb, "    if (!sep || !*sep) {\n");
     sb_append(sb, "        for (long i = 0; s[i]; i++) {\n");
     sb_append(sb, "            char ch[2]; ch[0] = s[i]; ch[1] = 0;\n");
-    sb_append(sb, "            sub_array_push(arr, (long)sub_strdup(ch));\n");
+    sb_append(sb, "            sub_array_push(arr, (long long)(intptr_t)sub_strdup(ch));\n");
     sb_append(sb, "        }\n");
     sb_append(sb, "        return arr;\n");
     sb_append(sb, "    }\n");
@@ -1690,7 +1691,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "        char *part = (char*)malloc(n + 1);\n");
     sb_append(sb, "        memcpy(part, p, n);\n");
     sb_append(sb, "        part[n] = 0;\n");
-    sb_append(sb, "        sub_array_push(arr, (long)part);\n");
+    sb_append(sb, "        sub_array_push(arr, (long long)(intptr_t)part);\n");
     sb_append(sb, "        if (!next) break;\n");
     sb_append(sb, "        p = next + sep_len;\n");
     sb_append(sb, "    }\n");
