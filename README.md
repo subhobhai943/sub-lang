@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" alt="SUB Language Logo" width="480" />
+  <img src="docs/logo.png" alt="SUB lang" width="260" />
 </p>
 
 <h1 align="center">SUB Programming Language</h1>
