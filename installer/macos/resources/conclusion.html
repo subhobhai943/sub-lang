@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8">
+<style>
+  body { font: 13px -apple-system, "Helvetica Neue", sans-serif;
+         color: #1d2129; margin: 0; }
+  h1   { font-size: 15px; margin: 0 0 10px; }
+  p    { margin: 0 0 10px; line-height: 1.45; }
+  pre  { font: 12px ui-monospace, Menlo, monospace; background: #f1f3f5;
+         padding: 8px 10px; border-radius: 5px; margin: 0 0 10px; }
+  a    { color: #0b7fd4; }
+</style>
+</head>
+<body>
+  <h1>Installed</h1>
+
+  <p>Open a new terminal and try it:</p>
+
+<pre>echo 'println("hello")' &gt; hello.sb
+subi hello.sb
+subc hello.sb -o hello &amp;&amp; ./hello
+sub  hello.sb python</pre>
+
+  <p><code>man subi</code> has the rest. To remove the toolchain
+     again:</p>
+
+<pre>sudo rm -rf /usr/local/bin/sub /usr/local/bin/subc \
+/usr/local/bin/subi /usr/local/lib/sub \
+/usr/local/share/doc/sub-lang \
+/usr/local/share/man/man1/sub*.1</pre>
+
+  <p><a href="https://github.com/subhobhai943/sub-lang">github.com/subhobhai943/sub-lang</a></p>
+</body>
+</html>

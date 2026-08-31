@@ -15,12 +15,14 @@
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" />
   </a>
-  <img src="https://img.shields.io/badge/version-1.0.8-brightgreen" alt="Version 1.0.8" />
+  <img src="https://img.shields.io/badge/version-1.0.9-brightgreen" alt="Version 1.0.9" />
   <img src="https://img.shields.io/badge/transpiles%20to-13%20languages-orange" alt="Transpiles to 13 languages" />
 </p>
 
 ---
 
+> **v1.0.9** — Installers for every supported platform: a branded Windows `.msi` with a licence page, `.deb` and `.rpm` packages for Linux, and a macOS `.pkg`. All of them put the tools on your `PATH`, install the standard library where `import` finds it, ship `man` pages, and give `.sb` files an icon.
+>
 > **v1.0.8** — Native compiler that emits x86-64 machine code itself (no C compiler required), direct AST interpreter (`subi`), multi-target transpiler (`sub`), classes, UI component declarations, and embed blocks.
 
 ---
@@ -30,6 +32,8 @@
 - [What is SUB?](#what-is-sub)
 - [Key Highlights](#key-highlights)
 - [Quick Start](#quick-start)
+  - [Install a release](#install-a-release)
+  - [Build from Source](#build-from-source)
 - [The Three Tools](#the-three-tools)
 - [Language Syntax Guide](#language-syntax-guide)
   - [Variables & Types](#variables--types)
@@ -76,6 +80,34 @@
 ---
 
 ## Quick Start
+
+### Install a release
+
+Every release ships a package for each supported platform, from the
+[releases page](https://github.com/subhobhai943/sub-lang/releases). They all
+install the same thing: `sub`, `subc` and `subi` on your `PATH`, the standard
+library where `import` finds it, and `man sub`, `man subc`, `man subi`.
+
+| Platform | Package | Install |
+|---|---|---|
+| Debian, Ubuntu, Mint | `sub-lang_*_amd64.deb` / `_arm64.deb` | `sudo dpkg -i sub-lang_*.deb` |
+| Fedora, RHEL, CentOS, openSUSE | `sub-lang-*.x86_64.rpm` / `.aarch64.rpm` | `sudo dnf install ./sub-lang-*.rpm` |
+| Windows | `sub-lang-*-windows-x86_64.msi` | double-click it |
+| macOS (Apple Silicon) | `sub-lang-*-macos-arm64.pkg` | double-click it |
+| Any of the above | `sub-*.tar.gz` | unpack it anywhere |
+
+The Windows and macOS installers ask you to accept the licence and let you
+choose what gets installed. On Windows the `.msi` also associates `.sb`
+files with the interpreter; on Linux the packages register the same
+association with your desktop, so a `.sb` file gets the SUB icon in a file
+manager.
+
+To check it worked:
+
+```bash
+subi --version
+echo 'println("hello")' > hello.sb && subi hello.sb
+```
 
 ### Build from Source
 
@@ -181,7 +213,7 @@ Executes SUB source code on the fly:
 All three tools accept `--help` and `--version`:
 
 ```bash
-./sub --version     # sub 1.0.8
+./sub --version     # sub 1.0.9
 ./subc --help
 ./subi --help
 ```

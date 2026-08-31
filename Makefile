@@ -49,7 +49,8 @@ else
     INTERP_TARGET = subi.exe
 endif
 
-.PHONY: all clean compiler native_compiler interpreter install uninstall help
+.PHONY: all clean compiler native_compiler interpreter install install-tools \
+        install-doc install-desktop uninstall help
 
 # Default target - build all three
 all: compiler native_compiler interpreter
@@ -100,20 +101,84 @@ clean:
 # lib/sub/stdlib, which is the second of the two places the module resolver
 # looks for it relative to the executable -- so `import "math"` works from
 # anywhere after this.
+#
+# This is also what the .deb and the .rpm are built from
+# (installer/linux/build-deb.sh, installer/linux/sub-lang.spec, both with
+# PREFIX=/usr). They used to lay out their own file trees by hand, which is
+# how the .deb came to install into /usr/local -- a place Debian policy
+# reserves for the administrator and forbids to packages. One recipe means
+# a path can no longer be right in one package and wrong in another.
 PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+LIBDIR ?= $(PREFIX)/lib/sub
+DATADIR ?= $(PREFIX)/share
+MANDIR ?= $(DATADIR)/man/man1
+DOCDIR ?= $(DATADIR)/doc/sub-lang
+ICONDIR ?= $(DATADIR)/icons/hicolor
 
-install: all
-	@install -d "$(DESTDIR)$(PREFIX)/bin"
-	@install -m 755 sub subc subi "$(DESTDIR)$(PREFIX)/bin/"
-	@install -d "$(DESTDIR)$(PREFIX)/lib/sub/stdlib"
-	@install -m 644 stdlib/*.sb "$(DESTDIR)$(PREFIX)/lib/sub/stdlib/"
+# The sizes installer/assets/make-assets.py emits.
+ICON_SIZES = 16 22 24 32 48 64 128 256 512
+
+# The freedesktop files -- the desktop entry, the MIME type and the icon
+# theme -- mean nothing on macOS, and installing them there would leave
+# /usr/local/share/icons/hicolor on a machine that has no such thing. So
+# `install` is composed rather than monolithic, and the .pkg gets the same
+# recipe as the .deb minus the part that does not apply.
+ifeq ($(UNAME_S),Linux)
+INSTALL_PARTS = install-tools install-doc install-desktop
+else
+INSTALL_PARTS = install-tools install-doc
+endif
+
+install: all $(INSTALL_PARTS)
 	@echo "Installed to $(DESTDIR)$(PREFIX)"
 
+install-tools:
+	@install -d "$(DESTDIR)$(BINDIR)"
+	@install -m 755 sub subc subi "$(DESTDIR)$(BINDIR)/"
+	@install -d "$(DESTDIR)$(LIBDIR)/stdlib"
+	@install -m 644 stdlib/*.sb "$(DESTDIR)$(LIBDIR)/stdlib/"
+
+install-doc:
+	@install -d "$(DESTDIR)$(MANDIR)"
+	@install -m 644 installer/man/sub.1 installer/man/subc.1 installer/man/subi.1 \
+	         "$(DESTDIR)$(MANDIR)/"
+	@install -d "$(DESTDIR)$(DOCDIR)"
+	@install -m 644 README.md LICENSE "$(DESTDIR)$(DOCDIR)/"
+
+# What gives a .sb file an icon in a file manager and an application to
+# open it with. The same artwork goes in under two names: sub-lang for the
+# application, and text-x-sub because that is the icon name a file manager
+# derives from the MIME type when it draws a .sb file.
+install-desktop:
+	@install -d "$(DESTDIR)$(DATADIR)/applications"
+	@install -m 644 installer/linux/sub-lang.desktop "$(DESTDIR)$(DATADIR)/applications/"
+	@install -d "$(DESTDIR)$(DATADIR)/mime/packages"
+	@install -m 644 installer/linux/sub-lang-mime.xml "$(DESTDIR)$(DATADIR)/mime/packages/"
+	@for s in $(ICON_SIZES); do \
+	  install -d "$(DESTDIR)$(ICONDIR)/$${s}x$${s}/apps" \
+	             "$(DESTDIR)$(ICONDIR)/$${s}x$${s}/mimetypes"; \
+	  install -m 644 "installer/linux/icons/sub-lang-$${s}.png" \
+	                 "$(DESTDIR)$(ICONDIR)/$${s}x$${s}/apps/sub-lang.png"; \
+	  install -m 644 "installer/linux/icons/sub-lang-$${s}.png" \
+	                 "$(DESTDIR)$(ICONDIR)/$${s}x$${s}/mimetypes/text-x-sub.png"; \
+	done
+
 uninstall:
-	@rm -f "$(DESTDIR)$(PREFIX)/bin/sub" \
-	       "$(DESTDIR)$(PREFIX)/bin/subc" \
-	       "$(DESTDIR)$(PREFIX)/bin/subi"
-	@rm -rf "$(DESTDIR)$(PREFIX)/lib/sub"
+	@rm -f "$(DESTDIR)$(BINDIR)/sub" \
+	       "$(DESTDIR)$(BINDIR)/subc" \
+	       "$(DESTDIR)$(BINDIR)/subi"
+	@rm -rf "$(DESTDIR)$(LIBDIR)"
+	@rm -f "$(DESTDIR)$(MANDIR)/sub.1" \
+	       "$(DESTDIR)$(MANDIR)/subc.1" \
+	       "$(DESTDIR)$(MANDIR)/subi.1"
+	@rm -rf "$(DESTDIR)$(DOCDIR)"
+	@rm -f "$(DESTDIR)$(DATADIR)/applications/sub-lang.desktop"
+	@rm -f "$(DESTDIR)$(DATADIR)/mime/packages/sub-lang-mime.xml"
+	@for s in $(ICON_SIZES); do \
+	  rm -f "$(DESTDIR)$(ICONDIR)/$${s}x$${s}/apps/sub-lang.png" \
+	        "$(DESTDIR)$(ICONDIR)/$${s}x$${s}/mimetypes/text-x-sub.png"; \
+	done
 	@echo "Removed from $(DESTDIR)$(PREFIX)"
 
 # Help
@@ -126,6 +191,9 @@ help:
 	@echo "  native_compiler  - Build the native compiler (subc)"
 	@echo "  interpreter      - Build the interpreter (subi)"
 	@echo "  install          - Install to PREFIX (default /usr/local)"
+	@echo "  install-tools    - Install only the three programs and the stdlib"
+	@echo "  install-doc      - Install only the manual pages and the licence"
+	@echo "  install-desktop  - Install only the icons, .desktop and MIME files"
 	@echo "  uninstall        - Remove an installation"
 	@echo "  clean            - Remove build artifacts"
 	@echo "  help             - Show this help message"

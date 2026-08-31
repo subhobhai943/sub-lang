@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Registers .sb as a text type so file managers show SUB sources with the
+  project icon and offer the interpreter to open them, rather than treating
+  them as unknown data. The icon name follows the mimetype convention: a
+  type/subtype of text/x-sub is drawn from an icon called text-x-sub, so
+  the package installs the same artwork under both names.
+-->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="text/x-sub">
+    <comment>SUB source code</comment>
+    <sub-class-of type="text/plain"/>
+    <icon name="text-x-sub"/>
+    <generic-icon name="text-x-script"/>
+    <glob pattern="*.sb"/>
+    <magic priority="30">
+      <match type="string" value="import &quot;" offset="0"/>
+    </magic>
+  </mime-type>
+</mime-info>

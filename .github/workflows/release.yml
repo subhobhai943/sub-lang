@@ -149,75 +149,19 @@ jobs:
           retention-days: 5
 
   # ─────────────────────────────────────────────
-  # 2. Build Linux packages (.deb)
+  # 2. Build Linux packages (.deb and .rpm)
   # ─────────────────────────────────────────────
+  # Shared with CI, which builds, lints, installs and removes both packages
+  # on every push. This job used to assemble the .deb inline, which meant
+  # the only way to find out whether a packaging change worked was to tag a
+  # release and read the complaints.
   build-linux-packages:
-    name: linux packages (${{ matrix.arch }})
+    name: linux packages
     needs: [verify, build-unix]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            arch: x86_64
-            deb_arch: amd64
-          - os: ubuntu-24.04-arm
-            arch: arm64
-            deb_arch: arm64
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Install packaging tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc make
-
-      - name: Build binaries
-        run: |
-          make clean
-          make all
-
-      # ── .deb (Debian / Ubuntu) ───────────────
-      - name: Build .deb package
-        run: |
-          PKG="sub-lang_${{ needs.verify.outputs.numeric }}_${{ matrix.deb_arch }}"
-          mkdir -p "${PKG}/DEBIAN"
-          mkdir -p "${PKG}/usr/local/bin"
-          mkdir -p "${PKG}/usr/share/doc/sub-lang"
-
-          cp sub subc subi "${PKG}/usr/local/bin/"
-          # /usr/local/bin/sub looks for ../lib/sub/stdlib.
-          mkdir -p "${PKG}/usr/local/lib/sub"
-          cp -r stdlib "${PKG}/usr/local/lib/sub/"
-          cp LICENSE README.md "${PKG}/usr/share/doc/sub-lang/"
-
-          printf '%s\n' \
-            "Package: sub-lang" \
-            "Version: ${{ needs.verify.outputs.numeric }}" \
-            "Section: devel" \
-            "Priority: optional" \
-            "Architecture: ${{ matrix.deb_arch }}" \
-            "Maintainer: SUB Language Project <noreply@github.com>" \
-            "Description: SUB Programming Language Toolchain" \
-            " A modern programming language with transpiler (sub)," \
-            " native compiler (subc), and interpreter (subi)." \
-            > "${PKG}/DEBIAN/control"
-
-          cat "${PKG}/DEBIAN/control"
-          dpkg-deb --build "${PKG}"
-          echo "Built: ${PKG}.deb"
-
-
-      - name: Upload .deb artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: deb-${{ matrix.arch }}
-          path: "*.deb"
-          retention-days: 5
-
+    uses: ./.github/workflows/packages.yml
+    with:
+      version: ${{ needs.verify.outputs.numeric }}
+      upload: true
 
   # ─────────────────────────────────────────────
   # 3. Build Windows MSI installer
@@ -234,10 +178,53 @@ jobs:
       upload: true
 
   # ─────────────────────────────────────────────
+  # 3b. Build the macOS .pkg installer
+  # ─────────────────────────────────────────────
+  # A double-clickable installer with a licence page, rather than a tarball
+  # the user has to unpack into the right place by hand.
+  build-macos-pkg:
+    name: build (macos-arm64 .pkg)
+    needs: verify
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build the tools
+        run: |
+          make clean
+          make all
+
+      - name: Build the .pkg
+        run: installer/macos/build-pkg.sh "${{ needs.verify.outputs.numeric }}" dist
+
+      - name: The package installs and the tools work
+        # `installer -pkg` on the live system, because a package that builds
+        # is not the same as a package that installs. Then run a program
+        # that imports from the standard library from somewhere other than
+        # the source tree, which is what catches a stdlib in the wrong place.
+        run: |
+          sudo installer -pkg dist/*.pkg -target /
+          cd /tmp
+          command -v subi
+          subi --version
+          printf 'import "strings"\nprintln(capitalize("installed"))\n' > check.sb
+          test "$(subi check.sb)" = "Installed"
+          subc check.sb -o check_bin && test "$(./check_bin)" = "Installed"
+          test -f /usr/local/share/man/man1/subi.1
+
+      - name: Upload the .pkg
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-pkg
+          path: dist/*.pkg
+          retention-days: 5
+
+  # ─────────────────────────────────────────────
   # 4. Create GitHub Release
   # ─────────────────────────────────────────────
   create-release:
-    needs: [verify, build-unix, build-linux-packages, build-windows-msi]
+    needs: [verify, build-unix, build-linux-packages, build-windows-msi,
+            build-macos-pkg]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -256,7 +243,8 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p ./release-assets
-          find ./artifacts -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.msi' \) \
+          find ./artifacts -type f \( -name '*.tar.gz' -o -name '*.deb' \
+            -o -name '*.rpm' -o -name '*.msi' -o -name '*.pkg' \) \
             -exec cp {} ./release-assets/ \;
           echo "Release assets:"
           ls -lh ./release-assets/
@@ -265,7 +253,13 @@ jobs:
             test -f "./release-assets/$want" || { echo "::error::missing $want"; exit 1; }
           done
           ls ./release-assets/*.msi >/dev/null || { echo "::error::no Windows MSI"; exit 1; }
-          ls ./release-assets/*.deb >/dev/null || { echo "::error::no .deb packages"; exit 1; }
+          ls ./release-assets/*.pkg >/dev/null || { echo "::error::no macOS .pkg"; exit 1; }
+          # Two of each: x86_64 and arm64. A count, not a glob, because one
+          # architecture failing to build is exactly the case a glob passes.
+          for kind in deb rpm; do
+            n=$(ls ./release-assets/*.$kind 2>/dev/null | grep -vc '\.src\.rpm$' || true)
+            test "$n" -ge 2 || { echo "::error::expected 2 .$kind packages, found $n"; exit 1; }
+          done
 
       - name: Generate checksums
         working-directory: ./release-assets
@@ -312,11 +306,27 @@ jobs:
             echo "| Linux | .tar.gz | arm64  | \`sub-linux-arm64.tar.gz\` |";
             echo "| Linux | .deb (Debian/Ubuntu) | x86_64 | \`sub-lang_*_amd64.deb\` |";
             echo "| Linux | .deb (Debian/Ubuntu) | arm64  | \`sub-lang_*_arm64.deb\` |";
-
+            echo "| Linux | .rpm (Fedora/RHEL/openSUSE) | x86_64 | \`sub-lang-*.x86_64.rpm\` |";
+            echo "| Linux | .rpm (Fedora/RHEL/openSUSE) | arm64  | \`sub-lang-*.aarch64.rpm\` |";
+            echo "| Linux | .src.rpm (rebuild it yourself) | any | \`sub-lang-*.src.rpm\` |";
+            echo "| macOS | .pkg installer | arm64 (Apple Silicon) | \`sub-lang-*-macos-arm64.pkg\` |";
             echo "| macOS | .tar.gz | arm64 (Apple Silicon) | \`sub-macos-arm64.tar.gz\` |";
             echo "| Windows | .msi installer | x86_64 | \`sub-lang-*-windows-x86_64.msi\` |";
             echo "";
-            echo "> **Windows users**: Run the \`.msi\` installer — it installs all three tools and adds them to your system PATH automatically.";
+            echo "### Installing";
+            echo "";
+            echo "\`\`\`bash";
+            echo "# Debian, Ubuntu, Mint";
+            echo "sudo dpkg -i sub-lang_*_amd64.deb";
+            echo "";
+            echo "# Fedora, RHEL, CentOS Stream, openSUSE";
+            echo "sudo rpm -i sub-lang-*.x86_64.rpm      # or: sudo dnf install ./sub-lang-*.rpm";
+            echo "";
+            echo "# macOS - double-click the .pkg, or:";
+            echo "sudo installer -pkg sub-lang-*-macos-arm64.pkg -target /";
+            echo "\`\`\`";
+            echo "";
+            echo "The Linux packages and the macOS \`.pkg\` put the three tools on your \`PATH\`, install the standard library where \`import\` finds it, and add \`man sub\`, \`man subc\` and \`man subi\`. On Windows the \`.msi\` does the same and associates \`.sb\` files with the interpreter.";
             echo "";
             echo "### Verify checksums";
             echo "\`\`\`bash";

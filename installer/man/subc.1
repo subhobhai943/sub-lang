@@ -1,0 +1,69 @@
+.TH SUBC 1 "2026-08-31" "SUB Language" "SUB Language Manual"
+.SH NAME
+subc \- compile a SUB program to a native executable
+.SH SYNOPSIS
+.B subc
+.I input.sb
+.RI [ options ]
+.SH DESCRIPTION
+.B subc
+compiles a SUB source file to a native executable. On x86-64 Linux it
+encodes the machine code and writes the ELF itself, so no C compiler,
+assembler or linker is involved and the result is a static binary.
+.PP
+Programs that use a construct the machine-code backend does not implement
+yet are built through a C compiler instead, and
+.B subc
+names the construct that forced the fallback.
+.SH OPTIONS
+.TP
+.BI \-o " file"
+Write the executable to
+.IR file .
+The default is the source name without its extension.
+.TP
+.B \-\-native
+Emit machine code directly. Fail rather than fall back to a C compiler.
+.TP
+.B \-\-via\-c
+Generate C and build it with
+.BR $CC ,
+defaulting to
+.BR gcc .
+.TP
+.BR \-O0 ", " \-O1 ", " \-O2 ", " \-O3
+Passed through to the C compiler. Only meaningful with
+.BR \-\-via\-c .
+.TP
+.BR \-v ", " \-\-verbose
+Report which backend ran and why.
+.SH ENVIRONMENT
+.TP
+.B CC
+The C compiler used by
+.BR \-\-via\-c .
+.TP
+.B SUB_PATH
+Searched by
+.B import
+before the bundled standard library.
+.SH EXIT STATUS
+.TP
+.B 0
+An executable was produced.
+.TP
+.B 1
+Compilation failed, or
+.B \-\-native
+was given for a program the machine-code backend cannot build.
+.SH EXAMPLES
+.PP
+.nf
+subc hello.sb
+subc hello.sb --native -o hello
+.fi
+.SH SEE ALSO
+.BR sub (1),
+.BR subi (1)
+.SH BUGS
+Report at https://github.com/subhobhai943/sub-lang/issues

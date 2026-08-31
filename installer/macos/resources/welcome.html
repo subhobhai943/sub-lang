@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8">
+<style>
+  body { font: 13px -apple-system, "Helvetica Neue", sans-serif;
+         color: #1d2129; margin: 0; }
+  h1   { font-size: 15px; margin: 0 0 10px; }
+  p    { margin: 0 0 10px; line-height: 1.45; }
+  code { font: 12px ui-monospace, Menlo, monospace;
+         background: #f1f3f5; padding: 1px 4px; border-radius: 3px; }
+  ul   { margin: 0 0 10px; padding-left: 18px; }
+  li   { margin-bottom: 4px; line-height: 1.45; }
+</style>
+</head>
+<body>
+  <h1>SUB Language</h1>
+
+  <p>This installs the SUB toolchain into <code>/usr/local</code>:</p>
+
+  <ul>
+    <li><code>subi</code> &mdash; the interpreter and REPL. It is the
+        language specification: what it prints, and the status it exits
+        with, is what every other backend is tested against.</li>
+    <li><code>subc</code> &mdash; the native compiler.</li>
+    <li><code>sub</code> &mdash; the transpiler, to thirteen other
+        languages.</li>
+  </ul>
+
+  <p>The standard library goes to
+     <code>/usr/local/lib/sub/stdlib</code>, where <code>import</code>
+     finds it, and the manual pages to
+     <code>/usr/local/share/man</code>.</p>
+
+  <p><code>/usr/local/bin</code> is on the default <code>PATH</code>, so
+     the three tools are available in a new terminal as soon as this
+     finishes.</p>
+</body>
+</html>

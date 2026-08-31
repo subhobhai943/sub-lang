@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=SUB Interpreter
+GenericName=SUB Language Interpreter
+Comment=Run a SUB program, or start the SUB REPL
+Exec=subi %f
+TryExec=subi
+Icon=sub-lang
+Terminal=true
+Categories=Development;Building;
+Keywords=SUB;sb;interpreter;REPL;programming;
+MimeType=text/x-sub;
+StartupNotify=false

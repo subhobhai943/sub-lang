@@ -83,6 +83,14 @@ test_hello.c
 /*.go
 !tests/*.py
 !examples/*.py
+
+# installer/ is hand-written packaging source, not transpiler output. The
+# blanket extension rules above are aimed at the files `sub` drops beside a
+# .sb, and they were quietly swallowing the asset generator and the macOS
+# installer's welcome and summary pages -- `git add` reports nothing when it
+# skips an ignored file, so they simply were not in the repository.
+!installer/**/*.py
+!installer/**/*.html
 !examples/*.js
 !examples/*.sb
 

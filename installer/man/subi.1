@@ -1,0 +1,55 @@
+.TH SUBI 1 "2026-08-31" "SUB Language" "SUB Language Manual"
+.SH NAME
+subi \- run a SUB program, or start the SUB REPL
+.SH SYNOPSIS
+.B subi
+.RI [ script.sb ]
+.SH DESCRIPTION
+.B subi
+interprets a SUB source file. With no argument it starts an interactive
+read-eval-print loop.
+.PP
+.B subi
+is the specification for the language: what it prints and the status it
+exits with is what every compiled and transpiled backend is tested against.
+When a backend disagrees with it, the backend is wrong.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Print usage and exit.
+.TP
+.BR \-v ", " \-\-version
+Print the version and exit.
+.SH ENVIRONMENT
+.TP
+.B SUB_PATH
+A colon-separated list of directories searched by
+.B import
+before the bundled standard library.
+.SH FILES
+.TP
+.I /usr/lib/sub/stdlib
+The standard library:
+.IR math ", " arrays ", " strings ", " io .
+.SH EXIT STATUS
+.TP
+.B 0
+The program ran to completion.
+.TP
+.B 1
+The source did not compile.
+.TP
+.B 70
+The program stopped on a runtime error \- division by zero, an index out of
+range, an argument out of range. Every backend agrees on this status.
+.SH EXAMPLES
+.PP
+.nf
+subi hello.sb
+subi
+.fi
+.SH SEE ALSO
+.BR sub (1),
+.BR subc (1)
+.SH BUGS
+Report at https://github.com/subhobhai943/sub-lang/issues

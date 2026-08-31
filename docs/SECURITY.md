@@ -7,8 +7,8 @@ is supported; there are no backported patches for older ones.
 
 | Version | Supported |
 |---|---|
-| 1.0.8 | yes |
-| < 1.0.8 | no — upgrade |
+| 1.0.9 | yes |
+| < 1.0.9 | no — upgrade |
 
 Check yours with `subi --version`.
 

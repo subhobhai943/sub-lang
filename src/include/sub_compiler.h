@@ -19,7 +19,7 @@
    v1.0.x, so every published binary reported a version that had never been
    released; the release workflow now refuses to build when the two
    disagree. */
-#define SUB_VERSION "1.0.8"
+#define SUB_VERSION "1.0.9"
 
 #define _GNU_SOURCE
 #include <stdio.h>

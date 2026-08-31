@@ -65,6 +65,37 @@ jobs:
           Get-ChildItem installer\windows
           Get-ChildItem installer\windows\stdlib
 
+      - name: The installer artwork is present and the right size
+        shell: pwsh
+        run: |
+          # WixUI lays its controls out against bitmaps of exactly these
+          # pixel sizes. A file of any other size still builds and still
+          # installs -- it is just stretched, which is the kind of thing
+          # nobody notices until a user sends a screenshot.
+          $ErrorActionPreference = "Stop"
+          $expect = @{ "banner.bmp" = @(493, 58); "dialog.bmp" = @(493, 312) }
+          foreach ($name in $expect.Keys) {
+            $path = "installer\windows\$name"
+            if (-not (Test-Path $path)) {
+              throw "$path is missing; regenerate it with installer/assets/make-assets.py"
+            }
+            # BITMAPINFOHEADER: width at byte 18, height at byte 22, both
+            # 32-bit little-endian.
+            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $path))
+            $w = [BitConverter]::ToInt32($bytes, 18)
+            $h = [BitConverter]::ToInt32($bytes, 22)
+            Write-Host ("{0}  {1}x{2}" -f $name, $w, $h)
+            if ($w -ne $expect[$name][0] -or $h -ne $expect[$name][1]) {
+              throw ("$name is ${w}x${h}, but WixUI draws it at " +
+                     "$($expect[$name][0])x$($expect[$name][1])")
+            }
+          }
+          foreach ($f in @("sub-lang.ico", "License.rtf")) {
+            if (-not (Test-Path "installer\windows\$f")) {
+              throw "installer\windows\$f is missing"
+            }
+          }
+
       - name: Install WiX Toolset v4
         shell: pwsh
         run: |
@@ -168,6 +199,15 @@ jobs:
           $envRows = Get-MsiRows "SELECT Name FROM Environment"
           Write-Host "Environment: $($envRows -join ', ')"
           if (-not ($envRows -match "PATH")) { throw "PATH entry is missing" }
+
+          # The icon the .sb association points at. It has to be an
+          # installed file, not merely an Icon table entry, because Explorer
+          # reads it off disk long after setup has finished -- and pointing
+          # the association at subi.exe, which MinGW links with no resource
+          # section, is what gave every .sb file the blank document icon.
+          if (-not ($files -match "sub-lang.ico")) {
+            throw "sub-lang.ico is not installed, so .sb files get the blank document icon"
+          }
 
           Write-Host "MSI contents check passed."
 

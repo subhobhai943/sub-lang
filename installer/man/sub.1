@@ -1,0 +1,72 @@
+.TH SUB 1 "2026-08-31" "SUB Language" "SUB Language Manual"
+.SH NAME
+sub \- transpile a SUB program to another language
+.SH SYNOPSIS
+.B sub
+.I input.sb
+.RI [ target ]
+.SH DESCRIPTION
+.B sub
+reads a SUB source file and writes the equivalent program in another
+language. It does not build or run anything; the output is source, and
+what you do with it is your business.
+.PP
+The interpreter,
+.BR subi (1),
+is the specification. Every target is held to producing the same output and
+the same exit status as it does.
+.SH TARGETS
+If
+.I target
+is omitted, C is generated.
+.SS Languages
+.BR python " / " py ,
+.BR javascript " / " js ,
+.BR typescript " / " ts ,
+.BR java ,
+.BR c ,
+.BR cpp " / " c++ ,
+.BR rust " / " rs ,
+.BR go " / " golang ,
+.BR swift ,
+.BR kotlin " / " kt ,
+.BR ruby " / " rb ,
+.BR assembly " / " asm ,
+.BR css .
+.SS Platforms
+.BR android " (Java), " ios " (Swift), " web " (HTML/JS), " windows ", " macos ", " linux " (C)."
+.SH OPTIONS
+.TP
+.BR \-\-help
+Print the target list and exit.
+.TP
+.BR \-\-version
+Print the version and exit.
+.SH ENVIRONMENT
+.TP
+.B SUB_PATH
+A colon-separated list of directories searched by
+.B import
+before the bundled standard library.
+.SH FILES
+.TP
+.I /usr/lib/sub/stdlib
+The standard library, found relative to the executable.
+.SH EXIT STATUS
+.TP
+.B 0
+The program was translated.
+.TP
+.B 1
+The source did not compile.
+.SH EXAMPLES
+.PP
+.nf
+sub hello.sb python
+sub hello.sb rust
+.fi
+.SH SEE ALSO
+.BR subc (1),
+.BR subi (1)
+.SH BUGS
+Report at https://github.com/subhobhai943/sub-lang/issues

@@ -1,5 +1,84 @@
 # Release Notes
 
+## v1.0.9
+
+Installers. Every supported platform now has a package that installs the
+toolchain properly instead of an archive to unpack by hand, and each one is
+built, inspected and installed by CI on every push rather than for the first
+time when a tag is pushed.
+
+### Windows
+
+The `.msi` carries the project's own artwork: the dragon on the welcome and
+finish pages, the logo in the banner across every other page. The licence
+page, the directory chooser and the feature tree were already there.
+
+`.sb` files get an icon. The association pointed at `subi.exe` for its icon,
+and MinGW links the executables with no resource section, so there was no
+icon inside to find and Explorer drew the blank generic document. The
+installer now ships `sub-lang.ico` and points the association at that.
+
+### Linux
+
+Two packages instead of one:
+
+- **`.deb`** for Debian, Ubuntu and derivatives, on x86-64 and arm64.
+- **`.rpm`** for Fedora, RHEL, CentOS Stream and openSUSE, on x86-64 and
+  aarch64, with the matching `.src.rpm` for anyone who would rather rebuild
+  it themselves.
+
+Both install `sub`, `subc` and `subi`, the standard library, `man` pages for
+all three tools, and a desktop entry and MIME type so a `.sb` file shows the
+SUB icon in a file manager and offers the interpreter to open it.
+
+**The `.deb` was installing into `/usr/local`**, which Debian policy reserves
+for the local administrator and forbids to packages. It installs into `/usr`
+now. It was also shipping unstripped binaries and its changelog under the
+wrong name -- both things `lintian` reports immediately, and nothing had ever
+run `lintian` on it.
+
+### macOS
+
+A `.pkg` installer, with the welcome page, licence agreement and summary that
+`productbuild` gives you, over the project's artwork. It installs into
+`/usr/local`, which is on the default `PATH`. It declares itself Apple
+Silicon only, so an Intel Mac refuses it with an explanation rather than
+installing three programs that cannot run.
+
+### One recipe for the file layout
+
+`make install` is now what every Unix package is built from -- the `.deb`,
+the `.rpm` and the `.pkg` all stage through it -- rather than each one laying
+out its own tree. That is what let the `.deb` end up in a different place
+from everything else without anyone noticing. It also installs the manual
+pages, the icons, the desktop entry and the MIME type, and it leaves the
+freedesktop files out on macOS, where they mean nothing.
+
+New targets: `make install-tools`, `install-doc` and `install-desktop` for
+the three parts separately, and `PREFIX`, `BINDIR`, `LIBDIR`, `DATADIR`,
+`MANDIR`, `DOCDIR` and `ICONDIR` to place them.
+
+### Packaging is tested now
+
+A reusable workflow builds the `.deb` and the `.rpm` on both architectures on
+every push. It runs `lintian` at error *and* warning level, then installs the
+`.deb` for real, runs a program that imports from the standard library from
+outside the source tree, transpiles and compiles it, checks the manual pages
+and icons arrived, removes the package and checks nothing was left behind.
+The macOS job installs the `.pkg` with `installer -pkg` and does the same.
+
+Everything the installers draw is generated from the logo in the README by
+`installer/assets/make-assets.py`, so the artwork cannot drift, and the MSI
+job now fails if a bitmap is the wrong size for the dialog WixUI draws it in.
+
+### Also
+
+- The MIT licence text shipped in every release said **`AUTHORDRS`**. Fixed
+  in `LICENSE` and in the copy the Windows installer shows.
+- `sub`, `subc` and `subi` are clean under AddressSanitizer and
+  UndefinedBehaviorSanitizer across the whole conformance suite and every
+  example.
+
 ## v1.0.8
 
 The stable release of the v1.0.8 line. Most of the work since the betas is

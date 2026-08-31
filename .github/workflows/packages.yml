@@ -1,0 +1,142 @@
+name: Linux packages
+
+# The .deb and the .rpm, built the same way CI builds the MSI: a reusable
+# workflow that runs on every push with `upload: false`, and again from the
+# release workflow with the real version.
+#
+# Before this, the .deb was assembled inline in release.yml and never built
+# except when a tag was pushed -- so a mistake in it was found by whoever
+# downloaded the release. It was also never installed, only built, which is
+# how it shipped for several versions writing into /usr/local, a location
+# Debian policy forbids to packages.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Numeric version, e.g. 1.0.9'
+        required: false
+        type: string
+        default: '0.0.0'
+      upload:
+        description: 'Keep the packages as artifacts'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  packages:
+    name: deb + rpm (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+            deb_arch: amd64
+            rpm_arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            deb_arch: arm64
+            rpm_arch: aarch64
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install packaging tools
+        # rpm brings rpmbuild; lintian is what catches the packaging
+        # mistakes that still install fine but are wrong.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc make rpm lintian desktop-file-utils
+
+      - name: The desktop entry and the MIME type are valid
+        run: |
+          desktop-file-validate installer/linux/sub-lang.desktop
+          python3 -c "import xml.dom.minidom; xml.dom.minidom.parse('installer/linux/sub-lang-mime.xml')"
+
+      - name: Build .deb
+        run: |
+          make clean
+          installer/linux/build-deb.sh "${{ inputs.version }}" "${{ matrix.deb_arch }}" dist
+
+      - name: Lint the .deb
+        # Errors and warnings both fail: the two this first caught were a
+        # changelog under the wrong name and three unstripped binaries,
+        # neither of which shows up by installing the package.
+        run: lintian --fail-on error,warning dist/*.deb
+
+      - name: Install the .deb and use it
+        # Building a package proves nothing about installing one. This
+        # installs it for real, then runs a program that imports from the
+        # standard library from a directory that is not the source tree --
+        # which is the thing that breaks when the stdlib lands somewhere the
+        # module resolver does not look.
+        run: |
+          sudo dpkg -i dist/*.deb
+          cd /tmp
+          command -v subi
+          subi --version
+          printf 'import "strings"\nprintln(capitalize("installed"))\n' > check.sb
+          test "$(subi check.sb)" = "Installed"
+          test "$(sub check.sb python >/dev/null && python3 check.py)" = "Installed"
+          subc check.sb -o check_bin && test "$(./check_bin)" = "Installed"
+          man -w subi
+          test -f /usr/share/applications/sub-lang.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/sub-lang.png
+          test -f /usr/share/icons/hicolor/256x256/mimetypes/text-x-sub.png
+
+      - name: Remove the .deb again
+        # An uninstall that leaves files behind is a bug too, and the only
+        # way to find it is to try.
+        run: |
+          sudo dpkg -r sub-lang
+          test ! -e /usr/bin/subi
+          test ! -e /usr/lib/sub
+          test ! -e /usr/share/applications/sub-lang.desktop
+
+      - name: Build .rpm
+        run: |
+          make clean
+          installer/linux/build-rpm.sh "${{ inputs.version }}" dist
+
+      - name: Check what is inside the .rpm
+        run: |
+          RPM=$(ls dist/sub-lang-*.${{ matrix.rpm_arch }}.rpm)
+          rpm -qip "$RPM"
+          rpm -qlp "$RPM"
+          for want in /usr/bin/sub /usr/bin/subc /usr/bin/subi \
+                      /usr/lib/sub/stdlib/math.sb \
+                      /usr/lib/sub/stdlib/strings.sb \
+                      /usr/share/man/man1/subi.1.gz \
+                      /usr/share/applications/sub-lang.desktop \
+                      /usr/share/mime/packages/sub-lang-mime.xml; do
+            rpm -qlp "$RPM" | grep -qx "$want" || {
+              echo "::error::$want is missing from the RPM"; exit 1; }
+          done
+          # The two packages have to agree on where things go, or the same
+          # program works on Debian and not on Fedora.
+          rpm -qlp "$RPM" | grep -q '/usr/share/icons/hicolor/256x256/apps/sub-lang.png' \
+            || { echo "::error::the RPM has no application icon"; exit 1; }
+
+      - name: Unpack the .rpm and use it
+        # No rpm-based runner is available, so this cannot install the
+        # package properly. Unpacking it and running what comes out still
+        # catches a wrong path or a binary that will not start.
+        run: |
+          RPM=$(ls dist/sub-lang-*.${{ matrix.rpm_arch }}.rpm)
+          mkdir -p /tmp/rpmroot && cd /tmp/rpmroot
+          rpm2cpio "$RPM" | cpio -idm --quiet
+          printf 'import "strings"\nprintln(capitalize("unpacked"))\n' > check.sb
+          test "$(./usr/bin/subi check.sb)" = "Unpacked"
+
+      - name: Upload packages
+        if: ${{ inputs.upload }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages-${{ matrix.arch }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+          retention-days: 5

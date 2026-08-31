@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The macOS installer. productbuild turns this into the familiar Installer
+  window: a welcome page, the licence with an Agree/Disagree sheet, and a
+  summary, all over the project's own artwork rather than the blank grey
+  panel a bare component package gets.
+
+  build-pkg.sh substitutes @VERSION@ before running productbuild.
+-->
+<installer-gui-script minSpecVersion="2">
+    <title>SUB Language</title>
+    <organization>com.sublang</organization>
+
+    <welcome    file="welcome.html"    mime-type="text/html"/>
+    <license    file="LICENSE.txt"     mime-type="text/plain"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+
+    <!-- Bottom-left, unscaled, transparent: it sits behind the pane on the
+         system background instead of punching a white rectangle into it.
+         Declared twice because Installer picks the dark variant by name,
+         and with only the light one a dark-mode installer shows nothing. -->
+    <background          file="background.png" mime-type="image/png"
+                         alignment="bottomleft" scaling="none"/>
+    <background-darkAqua file="background.png" mime-type="image/png"
+                         alignment="bottomleft" scaling="none"/>
+
+    <!-- The tools are built for Apple Silicon, which is also the only
+         macOS binary the project publishes. Saying so means an Intel Mac
+         refuses the package with an explanation instead of installing
+         three programs that cannot run. -->
+    <options customize="never" require-scripts="false" hostArchitectures="arm64"/>
+    <domains enable_localSystem="true"/>
+
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.sublang.toolchain"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.sublang.toolchain" visible="false">
+        <pkg-ref id="com.sublang.toolchain"/>
+    </choice>
+    <pkg-ref id="com.sublang.toolchain" version="@VERSION@">sub-lang-toolchain.pkg</pkg-ref>
+</installer-gui-script>

@@ -90,6 +90,8 @@ src/native/      the x86-64 machine-code backend and its ELF writer
 src/compilers/   the sub / subc / subi front ends
 stdlib/          the standard library, written in SUB
 tests/conformance/   the differential suite
+installer/       the packages: WiX for Windows, .deb and .rpm for Linux,
+                 .pkg for macOS, and the script that generates their artwork
 .vscode-extension/   the editor grammar and snippets
 ```
 
@@ -147,6 +149,39 @@ appends to a `StringBuilder`. The shortest path:
    extension, the tool it needs, and how to build and run it.
 4. Get all of `tests/conformance/` passing. Expect this to be the bulk of the
    work — the existing suite is dense with the cases that break backends.
+
+---
+
+## Packaging
+
+Five packages come out of a release: a Windows `.msi`, a `.deb` and an
+`.rpm` for Linux on two architectures each, a macOS `.pkg`, and plain
+tarballs. Each is built by a script you can run yourself rather than by
+steps buried in a workflow:
+
+```bash
+installer/linux/build-deb.sh 1.0.9 amd64 dist    # needs dpkg-deb
+installer/linux/build-rpm.sh 1.0.9 dist          # needs rpmbuild
+installer/macos/build-pkg.sh 1.0.9 dist          # macOS only
+```
+
+Two things to know before changing any of them:
+
+- **`make install` defines the file layout, not the packages.** All three
+  scripts stage through it with a `DESTDIR` and a `PREFIX`, and add only
+  what is specific to their format. Do not add a path to one package's
+  script; add it to `make install` and every package gets it. The `.deb`
+  spent several releases installing into `/usr/local`, which Debian policy
+  forbids, precisely because it laid out its own tree.
+- **The artwork is generated.** `installer/assets/make-assets.py` produces
+  the Windows bitmaps and icon, the Linux icon theme and the macOS
+  background from the two logos in `docs/`. Change a logo, re-run it, commit
+  what it writes. Do not hand-edit the outputs.
+
+CI builds and checks all of this on every push, not just on a tag: it runs
+`lintian` on the `.deb` at error and warning level, installs it, uses it
+from outside the source tree, removes it and checks nothing is left behind.
+If you are adding a file to a package, add the assertion that it arrived.
 
 ---
 
