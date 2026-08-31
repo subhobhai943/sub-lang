@@ -49,7 +49,7 @@ jobs:
         # mistakes that still install fine but are wrong.
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc make rpm lintian desktop-file-utils
+          sudo apt-get install -y gcc make rpm cpio lintian desktop-file-utils
 
       - name: The desktop entry and the MIME type are valid
         run: |
@@ -82,7 +82,9 @@ jobs:
           test "$(subi check.sb)" = "Installed"
           test "$(sub check.sb python >/dev/null && python3 check.py)" = "Installed"
           subc check.sb -o check_bin && test "$(./check_bin)" = "Installed"
-          man -w subi
+          # The path, not `man subi`: man-db is not guaranteed on a runner,
+          # and what is being checked is that the page was installed.
+          test -f /usr/share/man/man1/subi.1.gz
           test -f /usr/share/applications/sub-lang.desktop
           test -f /usr/share/icons/hicolor/256x256/apps/sub-lang.png
           test -f /usr/share/icons/hicolor/256x256/mimetypes/text-x-sub.png
@@ -125,7 +127,7 @@ jobs:
         # package properly. Unpacking it and running what comes out still
         # catches a wrong path or a binary that will not start.
         run: |
-          RPM=$(ls dist/sub-lang-*.${{ matrix.rpm_arch }}.rpm)
+          RPM=$(realpath dist/sub-lang-*.${{ matrix.rpm_arch }}.rpm)
           mkdir -p /tmp/rpmroot && cd /tmp/rpmroot
           rpm2cpio "$RPM" | cpio -idm --quiet
           printf 'import "strings"\nprintln(capitalize("unpacked"))\n' > check.sb

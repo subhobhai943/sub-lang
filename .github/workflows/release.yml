@@ -324,6 +324,9 @@ jobs:
             echo "";
             echo "# macOS - double-click the .pkg, or:";
             echo "sudo installer -pkg sub-lang-*-macos-arm64.pkg -target /";
+            echo "";
+            echo "# Or install on any Linux/macOS with one command:";
+            echo "curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh";
             echo "\`\`\`";
             echo "";
             echo "The Linux packages and the macOS \`.pkg\` put the three tools on your \`PATH\`, install the standard library where \`import\` finds it, and add \`man sub\`, \`man subc\` and \`man subi\`. On Windows the \`.msi\` does the same and associates \`.sb\` files with the interpreter.";

@@ -1,0 +1,23 @@
+# Contributor: Maintainer <maintainer@example.com>
+# Maintainer: Maintainer <maintainer@example.com>
+pkgname=sub-lang
+pkgver=1.0.9
+pkgrel=0
+pkgdesc="SUB programming language toolchain"
+url="https://github.com/subhobhai943/sub-lang"
+arch="all"
+license="MIT"
+depends="musl"
+makedepends="gcc make"
+source="$pkgname-$pkgver.tar.gz::https://github.com/subhobhai943/sub-lang/archive/refs/tags/v$pkgver.tar.gz"
+builddir="$srcdir/$pkgname-$pkgver"
+
+build() {
+	make all
+}
+
+package() {
+	make install DESTDIR="$pkgdir" PREFIX=/usr
+}
+
+sha512sums=""

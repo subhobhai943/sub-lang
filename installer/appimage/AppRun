@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# This script is executed when the AppImage is run.
+# The AppImage runtime sets the $APPDIR environment variable.
+
+if [ -z "${APPDIR+x}" ]; then
+    APPDIR="$(dirname "$(realpath "$0")")"
+fi
+
+# Add the bundled binaries to PATH
+export PATH="$APPDIR/usr/bin:$PATH"
+
+# Set the standard library path for the binaries
+export SUB_STDLIB_PATH="$APPDIR/usr/lib/sub-lang/stdlib"
+
+# If the AppImage is executed via a symlink (e.g., named subc or subi),
+# act as that specific tool.
+TOOL_NAME=$(basename "$0")
+
+if [ "$TOOL_NAME" = "subc" ] || [ "$TOOL_NAME" = "subi" ] || [ "$TOOL_NAME" = "sub" ]; then
+    exec "$TOOL_NAME" "$@"
+fi
+
+# If arguments are provided, check if the first argument is a tool name
+if [ $# -gt 0 ]; then
+    case "$1" in
+        sub|subc|subi)
+            TOOL="$1"
+            shift
+            exec "$TOOL" "$@"
+            ;;
+    esac
+fi
+
+# Default to running the interpreter if no specific tool is requested
+exec subi "$@"

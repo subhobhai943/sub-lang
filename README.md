@@ -21,7 +21,7 @@
 
 ---
 
-> **v1.0.9** — Installers for every supported platform: a branded Windows `.msi` with a licence page, `.deb` and `.rpm` packages for Linux, and a macOS `.pkg`. All of them put the tools on your `PATH`, install the standard library where `import` finds it, ship `man` pages, and give `.sb` files an icon.
+> **v1.0.9** — Installers for every supported platform: a branded Windows `.msi` with a licence page, `.deb` and `.rpm` packages for Linux, macOS `.pkg`, Arch PKGBUILD, Alpine APKBUILD, AppImage, and a universal `curl | sh` installer. All of them put the tools on your `PATH`, install the standard library where `import` finds it, ship `man` pages, and give `.sb` files an icon.
 >
 > **v1.0.8** — Native compiler that emits x86-64 machine code itself (no C compiler required), direct AST interpreter (`subi`), multi-target transpiler (`sub`), classes, UI component declarations, and embed blocks.
 
@@ -92,9 +92,18 @@ library where `import` finds it, and `man sub`, `man subc`, `man subi`.
 |---|---|---|
 | Debian, Ubuntu, Mint | `sub-lang_*_amd64.deb` / `_arm64.deb` | `sudo dpkg -i sub-lang_*.deb` |
 | Fedora, RHEL, CentOS, openSUSE | `sub-lang-*.x86_64.rpm` / `.aarch64.rpm` | `sudo dnf install ./sub-lang-*.rpm` |
+| Arch Linux, Manjaro | PKGBUILD | `makepkg -si` (from `installer/arch/`) |
+| Alpine Linux | APKBUILD | `abuild -r` (from `installer/alpine/`) |
 | Windows | `sub-lang-*-windows-x86_64.msi` | double-click it |
 | macOS (Apple Silicon) | `sub-lang-*-macos-arm64.pkg` | double-click it |
+| Any Linux | AppImage | download and `chmod +x` it |
 | Any of the above | `sub-*.tar.gz` | unpack it anywhere |
+
+Or install with one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh
+```
 
 The Windows and macOS installers ask you to accept the licence and let you
 choose what gets installed. On Windows the `.msi` also associates `.sb`

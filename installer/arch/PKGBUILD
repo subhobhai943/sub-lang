@@ -1,0 +1,23 @@
+# Maintainer: 
+pkgname=sub-lang
+pkgver=1.0.9
+pkgrel=1
+pkgdesc="SUB programming language toolchain — interpreter, native compiler, and multi-target transpiler"
+arch=('x86_64')
+url="https://github.com/subhobhai943/sub-lang"
+license=('MIT')
+depends=('glibc')
+makedepends=('gcc' 'make')
+optdepends=('gcc: for subc --via-c')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/subhobhai943/sub-lang/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  make all
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  make install DESTDIR="$pkgdir" PREFIX=/usr
+}

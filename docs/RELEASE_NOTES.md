@@ -11,31 +11,33 @@ time when a tag is pushed.
 
 The `.msi` carries the project's own artwork: the dragon on the welcome and
 finish pages, the logo in the banner across every other page. The licence
-page, the directory chooser and the feature tree were already there.
+page, the directory chooser and the feature tree are included.
 
 `.sb` files get an icon. The association pointed at `subi.exe` for its icon,
 and MinGW links the executables with no resource section, so there was no
 icon inside to find and Explorer drew the blank generic document. The
 installer now ships `sub-lang.ico` and points the association at that.
 
-### Linux
+### Linux Packages & Formats
 
-Two packages instead of one:
+- **`.deb`** for Debian, Ubuntu, Mint and derivatives, on x86-64 and arm64.
+- **`.rpm`** for Fedora, RHEL, CentOS Stream, openSUSE and derivatives, on x86-64
+  and aarch64, with the matching `.src.rpm`.
+- **Arch Linux PKGBUILD** (`installer/arch/PKGBUILD`) -- build with `makepkg -si`.
+- **Alpine Linux APKBUILD** (`installer/alpine/APKBUILD`) -- build with `abuild -r`.
+- **AppImage** (`installer/appimage/build-appimage.sh`) -- standalone universal Linux binary.
+- **Universal Shell Installer** (`installer/install.sh`):
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh
+  ```
 
-- **`.deb`** for Debian, Ubuntu and derivatives, on x86-64 and arm64.
-- **`.rpm`** for Fedora, RHEL, CentOS Stream and openSUSE, on x86-64 and
-  aarch64, with the matching `.src.rpm` for anyone who would rather rebuild
-  it themselves.
-
-Both install `sub`, `subc` and `subi`, the standard library, `man` pages for
-all three tools, and a desktop entry and MIME type so a `.sb` file shows the
-SUB icon in a file manager and offers the interpreter to open it.
+All Linux packages install `sub`, `subc` and `subi`, the standard library, `man` pages for
+all three tools, and desktop entry and MIME types with logos so `.sb` files show the
+SUB icon in file managers and offer the interpreter to open them.
 
 **The `.deb` was installing into `/usr/local`**, which Debian policy reserves
 for the local administrator and forbids to packages. It installs into `/usr`
-now. It was also shipping unstripped binaries and its changelog under the
-wrong name -- both things `lintian` reports immediately, and nothing had ever
-run `lintian` on it.
+now, with stripped binaries and clean lintian validation.
 
 ### macOS
 
@@ -44,7 +46,6 @@ A `.pkg` installer, with the welcome page, licence agreement and summary that
 `/usr/local`, which is on the default `PATH`. It declares itself Apple
 Silicon only, so an Intel Mac refuses it with an explanation rather than
 installing three programs that cannot run.
-
 ### One recipe for the file layout
 
 `make install` is now what every Unix package is built from -- the `.deb`,
