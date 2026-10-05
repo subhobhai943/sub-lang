@@ -1,9 +1,10 @@
 #!/bin/sh
 #
 # SUB-LANG Universal Installer
-# 
+#
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh
+#   curl -fsSL .../install.sh | sh -s -- --yes --prefix=$HOME/.local
 #
 
 set -e
@@ -15,7 +16,6 @@ GITHUB_REPO="subhobhai943/sub-lang"
 # Utility Functions
 # -----------------------------------------------------------------------------
 
-# Setup colors if supported by terminal
 if [ -t 1 ] && command -v tput >/dev/null 2>&1; then
     RED=$(tput setaf 1)
     GREEN=$(tput setaf 2)
@@ -50,9 +50,9 @@ print_banner() {
     cat << 'EOF'
   ____  _   _ ____    _                       
  / ___|| | | | __ )  | |    __ _ _ __   __ _ 
- \___ \| | | |  _ \  | |   / _` | '_ \ / _` |
+ ___ | | | |  _   | |   / _` | '_  / _` |
   ___) | |_| | |_) | | |__| (_| | | | | (_| |
- |____/ \___/|____/  |_____\__,_|_| |_|\__, |
+ |____/ ___/|____/  |_______,_|_| |_|__, |
                                         |___/ 
 EOF
     echo "${RESET}"
@@ -94,6 +94,11 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# Expand a leading ~ in --prefix
+case "$PREFIX" in
+    "~"*) PREFIX="$HOME${PREFIX#"~"}" ;;
+esac
+
 # -----------------------------------------------------------------------------
 # Platform Detection
 # -----------------------------------------------------------------------------
@@ -115,7 +120,6 @@ esac
 
 info "Detected platform: $OS-$ARCH"
 
-# Determine prefix
 if [ -z "$PREFIX" ]; then
     if [ "$(id -u)" = "0" ]; then
         PREFIX="/usr/local"
@@ -137,7 +141,7 @@ if [ "$YES_FLAG" -eq 0 ]; then
     echo "Copyright (c) $(date +%Y) SUB Language Project"
     echo ""
     echo "Permission is hereby granted, free of charge, to any person obtaining a copy"
-    echo "of this software and associated documentation files (the \"Software\"), to deal"
+    echo "of this software and associated documentation files (the "Software"), to deal"
     echo "in the Software without restriction, including without limitation the rights"
     echo "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell"
     echo "copies of the Software, and to permit persons to whom the Software is"
@@ -147,9 +151,15 @@ if [ "$YES_FLAG" -eq 0 ]; then
     echo "copies or substantial portions of the Software."
     echo ""
     printf "Do you accept the license terms? [y/N] "
-    read -r response
+    # Read from the terminal: stdin is the script itself when piped from curl
+    if [ -r /dev/tty ]; then
+        read -r response < /dev/tty || response=""
+    else
+        echo ""
+        error "No terminal available for the license prompt. Re-run with --yes."
+    fi
     case "$response" in
-        [yY][eE][sS]|[yY]) 
+        [yY][eE][sS]|[yY])
             ;;
         *)
             error "Installation aborted by user."
@@ -164,25 +174,37 @@ fi
 info "Fetching latest release information..."
 if command -v curl >/dev/null 2>&1; then
     FETCH="curl -fsSL"
+    DL() { curl -fSL "$1" -o "$2"; }
 elif command -v wget >/dev/null 2>&1; then
     FETCH="wget -qO-"
+    DL() { wget -q "$1" -O "$2"; }
 else
     error "Neither curl nor wget was found. Please install one to continue."
 fi
 
-# Try to get the latest tag from GitHub API
-LATEST_TAG=$($FETCH "https://api.github.com/repos/$GITHUB_REPO/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-if [ -z "$LATEST_TAG" ]; then
-    warn "Failed to fetch latest tag from GitHub API. Defaulting to v1.0.9"
-    LATEST_TAG="v1.0.9"
+LATEST_TAG=$($FETCH "https://api.github.com/repos/$GITHUB_REPO/releases/latest" 2>/dev/null \
+    | grep '"tag_name"' | head -n 1 \
+    | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\u0001/' || true)
+
+if [ -z "$LATEST_TAG" ] && command -v curl >/dev/null 2>&1; then
+    # Fallback: follow the /releases/latest redirect (no API rate limit)
+    LATEST_TAG=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+        "https://github.com/$GITHUB_REPO/releases/latest" 2>/dev/null \
+        | sed 's|.*/tag/||' || true)
+    case "$LATEST_TAG" in
+        */*|"") LATEST_TAG="" ;;
+    esac
 fi
+
+[ -n "$LATEST_TAG" ] || error "Could not determine the latest release. Check https://github.com/$GITHUB_REPO/releases"
 
 info "Target version: $LATEST_TAG"
 
 # Release assets are named sub-{os}-{arch}.tar.gz
 FILENAME="sub-${OS}-${ARCH}.tar.gz"
-DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/${LATEST_TAG}/${FILENAME}"
-CHECKSUM_URL="https://github.com/$GITHUB_REPO/releases/download/${LATEST_TAG}/checksums-sha256.txt"
+BASE_URL="https://github.com/$GITHUB_REPO/releases/download/${LATEST_TAG}"
+DOWNLOAD_URL="$BASE_URL/$FILENAME"
+CHECKSUM_URL="$BASE_URL/checksums-sha256.txt"
 
 # -----------------------------------------------------------------------------
 # Download and Verify
@@ -192,25 +214,31 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 info "Downloading $DOWNLOAD_URL ..."
-if command -v curl >/dev/null 2>&1; then
-    curl -fSL "$DOWNLOAD_URL" -o "$TMP_DIR/$FILENAME" || error "Failed to download $FILENAME"
-    curl -fsSL "$CHECKSUM_URL" -o "$TMP_DIR/sha256sums.txt" || warn "No checksum file found at release. Skipping verification."
-else
-    wget -q "$DOWNLOAD_URL" -O "$TMP_DIR/$FILENAME" || error "Failed to download $FILENAME"
-    wget -q "$CHECKSUM_URL" -O "$TMP_DIR/sha256sums.txt" || warn "No checksum file found at release. Skipping verification."
-fi
+DL "$DOWNLOAD_URL" "$TMP_DIR/$FILENAME" \
+    || error "Failed to download $FILENAME (does release $LATEST_TAG contain this asset?)"
 
-if [ -f "$TMP_DIR/sha256sums.txt" ]; then
+if DL "$CHECKSUM_URL" "$TMP_DIR/sha256sums.txt" 2>/dev/null; then
     info "Verifying checksum..."
-    cd "$TMP_DIR"
+    EXPECTED=$(grep -F "$FILENAME" "$TMP_DIR/sha256sums.txt" | head -n 1 | awk '{print $1}')
+    ACTUAL=""
     if command -v sha256sum >/dev/null 2>&1; then
-        grep "$FILENAME" sha256sums.txt | sha256sum -c - || error "Checksum verification failed!"
+        ACTUAL=$(sha256sum "$TMP_DIR/$FILENAME" | awk '{print $1}')
     elif command -v shasum >/dev/null 2>&1; then
-        grep "$FILENAME" sha256sums.txt | shasum -a 256 -c - || error "Checksum verification failed!"
+        ACTUAL=$(shasum -a 256 "$TMP_DIR/$FILENAME" | awk '{print $1}')
     else
         warn "sha256sum or shasum not found. Skipping checksum verification."
     fi
-    cd - >/dev/null
+
+    if [ -z "$EXPECTED" ]; then
+        warn "No checksum entry for $FILENAME. Skipping verification."
+    elif [ -n "$ACTUAL" ]; then
+        if [ "$EXPECTED" != "$ACTUAL" ]; then
+            error "Checksum verification failed!"
+        fi
+        info "Checksum OK."
+    fi
+else
+    warn "No checksum file found at release. Skipping verification."
 fi
 
 # -----------------------------------------------------------------------------
@@ -220,6 +248,7 @@ fi
 info "Extracting and installing to $PREFIX..."
 
 SUDO=""
+mkdir -p "$PREFIX" 2>/dev/null || true
 if [ ! -w "$PREFIX" ] && [ "$(id -u)" != "0" ]; then
     if command -v sudo >/dev/null 2>&1; then
         info "Elevated permissions required to write to $PREFIX, using sudo."
@@ -235,23 +264,28 @@ mkdir -p "$EXTRACT_DIR"
 
 tar -xzf "$TMP_DIR/$FILENAME" -C "$EXTRACT_DIR" || error "Failed to extract archive"
 
-# The tarball has a top-level directory like sub-linux-x86_64/ with
-# binaries directly inside, plus a stdlib/ subdirectory.
-INNER=$(find "$EXTRACT_DIR" -maxdepth 1 -mindepth 1 -type d | head -n 1)
-if [ -z "$INNER" ]; then
-    INNER="$EXTRACT_DIR"
+# Binaries may be at the archive root or inside a single top-level directory
+INNER="$EXTRACT_DIR"
+if [ ! -f "$INNER/sub" ] && [ ! -f "$INNER/subc" ] && [ ! -f "$INNER/subi" ]; then
+    SUBDIR=$(find "$EXTRACT_DIR" -maxdepth 1 -mindepth 1 -type d | head -n 1)
+    if [ -n "$SUBDIR" ]; then
+        INNER="$SUBDIR"
+    fi
 fi
 
+INSTALLED=0
 for tool in sub subc subi; do
     if [ -f "$INNER/$tool" ]; then
         $SUDO install -m 755 "$INNER/$tool" "$PREFIX/bin/$tool"
+        INSTALLED=$((INSTALLED + 1))
     fi
 done
+[ "$INSTALLED" -gt 0 ] || error "No binaries (sub, subc, subi) found in the archive."
 
-# Install the standard library where `import` finds it:
-# ../lib/sub/stdlib relative to the binary.
+# Standard library lives at ../lib/sub/stdlib relative to the binary
 if [ -d "$INNER/stdlib" ]; then
-    $SUDO cp "$INNER"/stdlib/*.sb "$PREFIX/lib/sub/stdlib/" 2>/dev/null || true
+    $SUDO cp -R "$INNER/stdlib/." "$PREFIX/lib/sub/stdlib/" \
+        || warn "Failed to copy the standard library."
 fi
 
 # -----------------------------------------------------------------------------
@@ -259,7 +293,7 @@ fi
 # -----------------------------------------------------------------------------
 
 info "Running smoke test..."
-if command -v "$PREFIX/bin/subi" >/dev/null 2>&1; then
+if [ -x "$PREFIX/bin/subi" ]; then
     if "$PREFIX/bin/subi" --version >/dev/null 2>&1; then
         info "Smoke test passed successfully."
     else
@@ -277,26 +311,32 @@ info "Installation complete!"
 echo ""
 echo "${GREEN}${BOLD}SUB-LANG has been successfully installed!${RESET}"
 echo ""
-echo "Make sure that ${BOLD}$PREFIX/bin${RESET} is in your PATH."
 
-case $SHELL in
-    */zsh) SHELL_RC="$HOME/.zshrc" ;;
+case "${SHELL:-}" in
+    */zsh)  SHELL_RC="$HOME/.zshrc" ;;
     */bash) SHELL_RC="$HOME/.bashrc" ;;
     */fish) SHELL_RC="$HOME/.config/fish/config.fish" ;;
-    *) SHELL_RC="your shell configuration file" ;;
+    *)      SHELL_RC="your shell configuration file" ;;
 esac
 
-# Check if PATH already contains PREFIX/bin
-if ! echo "$PATH" | grep -q "$PREFIX/bin"; then
-    echo "You can add it to your PATH by running:"
-    if echo "$SHELL" | grep -q "fish"; then
-        echo "  echo 'set -gx PATH \"$PREFIX/bin\" \$PATH' >> $SHELL_RC"
-    else
-        echo "  echo 'export PATH=\"$PREFIX/bin:\$PATH\"' >> $SHELL_RC"
-    fi
-    echo "Then restart your shell or run:"
-    echo "  source $SHELL_RC"
-fi
+case ":$PATH:" in
+    *":$PREFIX/bin:"*)
+        ;;
+    *)
+        echo "Make sure that ${BOLD}$PREFIX/bin${RESET} is in your PATH."
+        echo "You can add it by running:"
+        case "${SHELL:-}" in
+            */fish)
+                echo "  echo 'set -gx PATH "$PREFIX/bin" $PATH' >> $SHELL_RC"
+                ;;
+            *)
+                echo "  echo 'export PATH="$PREFIX/bin:$PATH"' >> $SHELL_RC"
+                ;;
+        esac
+        echo "Then restart your shell or run:"
+        echo "  source $SHELL_RC"
+        ;;
+esac
 
 echo ""
 echo "Happy coding with SUB-LANG!"
