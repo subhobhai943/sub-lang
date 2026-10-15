@@ -8,12 +8,12 @@
       irm https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.ps1 | iex
 
     With options:
-      & ([scriptblock]::Create((irm https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.ps1))) -Yes -Prefix "C:sub-lang"
+      & ([scriptblock]::Create((irm https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.ps1))) -Yes -Prefix "C:\sub-lang"
 
 .PARAMETER Yes
     Skip interactive prompts (license acceptance).
 .PARAMETER Prefix
-    Install location (default: %LOCALAPPDATA%sub-lang).
+    Install location (default: %LOCALAPPDATA%\sub-lang).
 .PARAMETER NoPath
     Do not modify the user PATH.
 .PARAMETER Version
@@ -62,7 +62,7 @@ function Show-Help {
     Write-Host "Options:"
     Write-Host "  -Help            Show this help message"
     Write-Host "  -Version         Show installer version"
-    Write-Host "  -Prefix PATH     Install to custom path (default: %LOCALAPPDATA%sub-lang)"
+    Write-Host "  -Prefix PATH     Install to custom path (default: %LOCALAPPDATA%\sub-lang)"
     Write-Host "  -Yes             Skip interactive prompts (license acceptance)"
     Write-Host "  -NoPath          Do not add the bin directory to your user PATH"
 }
@@ -167,7 +167,21 @@ function Install-SubLang {
                 Write-Warn "Not found: $name"
             }
         }
-        if (-not $archive) { Fail "Failed to download a Windows build from release $tag. Tried: $($candidates -join ', ')" }
+        if (-not $archive) {
+            Write-Info "Portable archive not found. Trying MSI asset..."
+            try {
+                $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$GithubRepo/releases/tags/$tag" `
+                                         -Headers @{ "User-Agent" = "sub-lang-installer" }
+                $msi = $rel.assets | Where-Object { $_.name -match "windows-$Arch\.msi$" } | Select-Object -First 1
+                if ($msi -and $msi.browser_download_url) {
+                    $fileName = $msi.name
+                    $archive = Join-Path $tmp $fileName
+                    Write-Info "Downloading $($msi.browser_download_url) ..."
+                    Get-WebFile $msi.browser_download_url $archive
+                }
+            } catch {}
+        }
+        if (-not $archive) { Fail "Failed to download a Windows build from release $tag. Tried: $($candidates -join ', ') and MSI discovery." }
 
         # Checksum
         $sumFile = Join-Path $tmp "sha256sums.txt"
@@ -176,7 +190,7 @@ function Install-SubLang {
             Write-Info "Verifying checksum..."
             $line = Get-Content $sumFile | Where-Object { $_ -like "*$fileName*" } | Select-Object -First 1
             if ($line) {
-                $expected = ($line -split "s+")[0].ToLower()
+                $expected = ($line -split "\s+")[0].ToLower()
                 $actual   = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLower()
                 if ($expected -ne $actual) { Fail "Checksum verification failed!" }
                 Write-Info "Checksum OK."
@@ -188,6 +202,18 @@ function Install-SubLang {
         } catch {
             if ($_.Exception.Message -like "error:*") { throw }
             Write-Warn "No checksum file found at release. Skipping verification."
+        }
+
+        if ($fileName.EndsWith(".msi")) {
+            Write-Info "Launching MSI installer..."
+            if ($Prefix) { Write-Warn "-Prefix is not used when installing from MSI." }
+            if ($NoPath) { Write-Warn "-NoPath is not supported by MSI; PATH behavior is controlled by MSI options." }
+            $args = @("/i", "`"$archive`"")
+            if ($Yes) { $args += @("/qn", "/norestart") }
+            $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList $args -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { Fail "MSI installation failed with exit code $($proc.ExitCode)." }
+            Write-Info "MSI installation completed."
+            return
         }
 
         # Extract
@@ -213,7 +239,7 @@ function Install-SubLang {
         }
 
         $binDir    = Join-Path $Prefix "bin"
-        $stdlibDir = Join-Path $Prefix "libsubstdlib"
+        $stdlibDir = Join-Path (Join-Path (Join-Path $Prefix "lib") "sub") "stdlib"
         New-Item -ItemType Directory -Force -Path $binDir, $stdlibDir | Out-Null
 
         $installed = 0
@@ -255,7 +281,7 @@ function Install-SubLang {
         $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
         $entries  = @()
         if ($userPath) { $entries = $userPath -split ";" | Where-Object { $_ } }
-        $onPath   = $entries | Where-Object { $_.TrimEnd("") -ieq $binDir.TrimEnd("") }
+        $onPath   = $entries | Where-Object { $_.TrimEnd('\','/') -ieq $binDir.TrimEnd('\','/') }
 
         if ($onPath) {
             Write-Info "$binDir is already in your PATH."

@@ -184,7 +184,7 @@ fi
 
 LATEST_TAG=$($FETCH "https://api.github.com/repos/$GITHUB_REPO/releases/latest" 2>/dev/null \
     | grep '"tag_name"' | head -n 1 \
-    | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\u0001/' || true)
+    | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)
 
 if [ -z "$LATEST_TAG" ] && command -v curl >/dev/null 2>&1; then
     # Fallback: follow the /releases/latest redirect (no API rate limit)

@@ -84,7 +84,7 @@ TARGETS = {
                        run=["{exe}"]),
     "java":       dict(ext="java",  need="java",
                        build=[], run=["java", "{src}"]),
-    "swift":      dict(ext="swift", need="swiftc",
+    "swift":      dict(ext="swift", need="swiftc", timeout=120,
                        build=[["swiftc", "-o", "{exe}", "{src}"]],
                        run=["{exe}"]),
     "kotlin":     dict(ext="kt",    need="kotlinc", timeout=300,
