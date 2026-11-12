@@ -1600,7 +1600,11 @@ char* codegen_python(ASTNode *ast, const char *source) {
        for it. */
     sb_append(sb, "    if isinstance(c, dict):\n");
     sb_append(sb, "        if i in c: return c[i]\n");
-    sb_append(sb, "        _sub_die('object property %s read before assignment' %% i)\n");
+    /* This line is emitted verbatim into the generated Python: the %s is
+       part of the OUTPUT text, so it must be escaped here. Left bare, it
+       made printf read a vararg that was never passed - a crash in the
+       transpiler on macOS (exit -11) and UB everywhere. */
+    sb_append(sb, "        _sub_die('object property %%s read before assignment' %% i)\n");
     sb_append(sb, "    n = len(c)\n");
     sb_append(sb, "    if i < 0: i += n\n");
     sb_append(sb, "    if i < 0 or i >= n:\n");
@@ -1611,7 +1615,7 @@ char* codegen_python(ASTNode *ast, const char *source) {
     sb_append(sb, "\n\ndef _sub_get(o, k):\n");
     sb_append(sb, "    if isinstance(o, dict):\n");
     sb_append(sb, "        if k in o: return o[k]\n");
-    sb_append(sb, "        _sub_die('object property %s read before assignment' %% k)\n");
+    sb_append(sb, "        _sub_die('object property %%s read before assignment' %% k)\n");
     sb_append(sb, "    return getattr(o, k)\n");
     sb_append(sb, "\n\ndef _sub_set(o, k, v):\n");
     sb_append(sb, "    if isinstance(o, dict): o[k] = v\n");
