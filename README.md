@@ -19,6 +19,10 @@
   <img src="https://img.shields.io/badge/transpiles%20to-13%20languages-orange" alt="Transpiles to 13 languages" />
 </p>
 
+<p align="center">
+  🌐 <a href="https://subhobhai943.github.io/sub-lang/"><strong>Website</strong></a> · <a href="https://github.com/subhobhai943/sub-lang#readme">Documentation</a>
+</p>
+
 ---
 
 > **v1.0.9** — Installers for every supported platform: a branded Windows `.msi` with a licence page, `.deb` and `.rpm` packages for Linux, macOS `.pkg`, Arch PKGBUILD, Alpine APKBUILD, AppImage, and a universal `curl | sh` installer. All of them put the tools on your `PATH`, install the standard library where `import` finds it, ship `man` pages, and give `.sb` files an icon.
