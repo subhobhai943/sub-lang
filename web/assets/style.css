@@ -418,3 +418,30 @@ a:hover { text-decoration: underline; }
   #matrixRain { display: none; }
   .term-cursor { animation: none; }
 }
+
+/* ── Download cards ── */
+.dl-version { font-size: 0.6em; font-weight: 500; color: var(--accent); vertical-align: middle; margin-left: 6px; font-family: var(--mono); }
+.dl-grid {
+  display: grid; gap: 16px; margin-top: 26px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+.dl-card {
+  background: var(--panel); border: 1px solid var(--border-soft);
+  border-radius: var(--radius); padding: 20px 20px 22px;
+  display: flex; flex-direction: column; gap: 12px; align-items: flex-start;
+  transition: border-color .15s, box-shadow .15s;
+}
+.dl-card h3 { margin: 0; font-size: 1.05rem; }
+.dl-card p { margin: 0; color: var(--text-dim); font-size: 0.85rem; }
+.dl-card .dl-btn { width: 100%; text-align: center; }
+.dl-card.dl-hit { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border), 0 8px 26px rgba(79,156,249,0.12); }
+.dl-card.dl-hit::before {
+  content: "Detected"; align-self: flex-end;
+  font-size: 0.66rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--accent); background: var(--accent-dim);
+  border: 1px solid var(--accent-border); border-radius: 999px; padding: 2px 9px; margin-bottom: -4px;
+}
+.dl-alt { color: var(--accent); font-size: 0.82rem; text-decoration: none; }
+.dl-alt:hover { text-decoration: underline; }
+.dl-alt-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.dl-foot { margin-top: 22px; color: var(--text-dim); font-size: 0.86rem; }

@@ -32,6 +32,7 @@
     </a>
     <nav class="site-nav" id="siteNav">
       <a href="#features">Features</a>
+      <a href="#download">Download</a>
       <a href="#examples">Examples</a>
       <a href="#targets">Targets</a>
       <a href="#start">Get started</a>
@@ -108,6 +109,40 @@
           <p>Windows <code>.msi</code>, Linux <code>.deb</code>/<code>.rpm</code>, macOS <code>.pkg</code>, FreeBSD pkg, Arch, Alpine, AppImage — and a universal <code>curl | sh</code>.</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- Downloads -->
+  <section class="section section-alt" id="download">
+    <div class="container">
+      <h2>Download <span class="dl-version" id="dlVersion"></span></h2>
+      <p class="section-lead">Direct links to the latest release. <span id="dlDetect">Your platform has been highlighted.</span></p>
+      <div class="dl-grid">
+        <div class="dl-card" data-os="windows">
+          <h3>Windows</h3>
+          <p>x86_64 · MSI installer</p>
+          <a class="btn btn-primary dl-btn" href="https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-lang-v1.0.10-windows-x86_64.msi">Download .msi</a>
+        </div>
+        <div class="dl-card" data-os="macos">
+          <h3>macOS</h3>
+          <p>Apple Silicon · .pkg installer</p>
+          <a class="btn btn-primary dl-btn" href="https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-lang-1.0.10-macos-arm64.pkg">Download .pkg</a>
+          <a class="dl-alt" href="https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-macos-arm64.tar.gz">tar.gz</a>
+        </div>
+        <div class="dl-card" data-os="linux">
+          <h3>Linux</h3>
+          <p>Debian/Ubuntu · .deb</p>
+          <a class="btn btn-primary dl-btn" href="https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-lang_1.0.10_amd64.deb">Download .deb</a>
+          <span class="dl-alt-row"><a class="dl-alt" href="https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-lang_1.0.10_arm64.deb">deb arm64</a> <a class="dl-alt" href="https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-lang-1.0.10-1.x86_64.rpm">.rpm</a> <a class="dl-alt" href="https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-lang-1.0.10-1.aarch64.rpm">rpm arm64</a> <a class="dl-alt" href="https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-linux-x86_64.tar.gz">tar.gz</a></span>
+        </div>
+        <div class="dl-card" data-os="freebsd">
+          <h3>FreeBSD</h3>
+          <p>pkg(8) package · amd64</p>
+          <a class="btn btn-primary dl-btn" href="https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-lang-1.0.10-amd64.pkg">Download .pkg</a>
+          <a class="dl-alt" href="https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-freebsd-x86_64.tar.gz">tar.gz</a>
+        </div>
+      </div>
+      <p class="dl-foot"><a href="https://github.com/subhobhai943/sub-lang/releases/latest">All assets &amp; release notes</a> · <a href="https://github.com/subhobhai943/sub-lang/releases/latest/download/checksums-sha256.txt">SHA-256 checksums</a></p>
     </div>
   </section>
 
@@ -275,6 +310,7 @@ $ sub hello.sb rust</code></pre>
 
 <script src="assets/highlight.js"></script>
 <script src="assets/matrix.js"></script>
+<script src="assets/dl.js"></script>
 <script src="assets/main.js"></script>
 </body>
 </html>
