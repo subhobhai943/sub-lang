@@ -40,6 +40,12 @@ ifeq ($(UNAME_S),Darwin)
 else ifeq ($(UNAME_S),Linux)
     # Linux
     CFLAGS += -DLINUX
+else ifeq ($(UNAME_S),FreeBSD)
+    # FreeBSD (DragonFly reports the same way and builds identically)
+    CFLAGS += -DFREEBSD
+    # The interpreter runs on a big-stack pthread; base clang's static
+    # link needs the flag to pull libpthread in.
+    LDFLAGS += -pthread
 else
     # Windows (MinGW/Cygwin/MSYS2)
     CFLAGS += -DWINDOWS
