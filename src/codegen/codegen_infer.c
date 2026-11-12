@@ -153,6 +153,50 @@ static struct {
     int count;
 } g_elems;
 
+/* Object property types, keyed by variable name and property name. An
+   object literal {"name": "x", "version": 2} and a class's field
+   declarations both say what each property holds; the use site says only
+   obj.name. The C backend needs the static type to read the 64-bit slot
+   correctly, and without this it guessed and printed 2 as a string. */
+typedef struct {
+    const char *var_name;
+    const char *prop_name;
+    DataType    type;
+} PropEntry;
+static struct {
+    PropEntry items[MAX_TRACKED_VARS];
+    int count;
+} g_props;
+
+void prop_record(const char *var_name, const char *prop_name, DataType t) {
+    if (!var_name || !prop_name || t == TYPE_UNKNOWN || t == TYPE_VOID) return;
+    for (int i = 0; i < g_props.count; i++)
+        if (strcmp(g_props.items[i].var_name, var_name) == 0 &&
+            strcmp(g_props.items[i].prop_name, prop_name) == 0) {
+            if (g_props.items[i].type != t)
+                g_props.items[i].type = TYPE_GENERIC; /* conflicting: read as string */
+            return;
+        }
+    if (g_props.count >= MAX_TRACKED_VARS) return;
+    g_props.items[g_props.count].var_name  = var_name;
+    g_props.items[g_props.count].prop_name = prop_name;
+    g_props.items[g_props.count].type      = t;
+    g_props.count++;
+}
+
+DataType obj_prop_type(const char *var_name, const char *prop_name) {
+    if (!var_name || !prop_name) return TYPE_UNKNOWN;
+    for (int i = 0; i < g_props.count; i++)
+        if (strcmp(g_props.items[i].var_name, var_name) == 0 &&
+            strcmp(g_props.items[i].prop_name, prop_name) == 0)
+            return g_props.items[i].type;
+    return TYPE_UNKNOWN;
+}
+
+void prop_reset(void) {
+    g_props.count = 0;
+}
+
 static void elem_record(const char *name, DataType t) {
     if (!name || t == TYPE_UNKNOWN) return;
     for (int i = 0; i < g_elems.count; i++)
@@ -376,8 +420,43 @@ DataType infer_expr_type(ASTNode *expr) {
 
         case AST_ARRAY_ACCESS:
             /* a[i] has the array's element type. Without this the C backend
-               picked its printf format from the node's stale annotation. */
+               picked its printf format from the node's stale annotation.
+               obj["k"] on an object is that property's value; without a
+               declared type per property it is typed as a string, which is
+               what the C backend reads out of the slot. */
+            if (infer_expr_type(expr->left) == TYPE_OBJECT) {
+                /* A property read: the variable name plus the key is the
+
+                   registry key. A key that is not a literal string, or a
+                   property never recorded, is typed as a string, which is
+                   how the C backend reads an untagged slot. */
+                if (expr->left->type == AST_IDENTIFIER &&
+                    expr->right && expr->right->type == AST_LITERAL &&
+                    expr->right->data_type == TYPE_STRING) {
+                    DataType pt = obj_prop_type(expr->left->value, expr->right->value);
+                    if (!type_is_unresolved(pt)) { result = pt; break; }
+                }
+                result = TYPE_STRING;
+                break;
+            }
             result = infer_elem_type(expr->left);
+            break;
+
+        case AST_MEMBER_ACCESS:
+            /* obj.field mirrors obj["field"]: without per-property types it
+               reads as a string. (.length is handled where it is emitted.) */
+            if (expr->value && strcmp(expr->value, "length") == 0)
+                result = TYPE_INT;
+            else if (expr->value && strcmp(expr->value, "new") == 0)
+                result = TYPE_OBJECT;
+            else if (expr->left && expr->left->type == AST_IDENTIFIER) {
+                DataType pt = obj_prop_type(expr->left->value, expr->value);
+                if (!type_is_unresolved(pt)) result = pt;
+                else if (infer_expr_type(expr->left) == TYPE_OBJECT) result = TYPE_STRING;
+                else result = expr->data_type;
+            }
+            else
+                result = expr->data_type;
             break;
 
         case AST_IDENTIFIER:
@@ -799,6 +878,52 @@ static void propagate_var_types_to_identifiers(ASTNode *node) {
         }
     }
 
+    /* Record object property types where they are declared:
+         let obj = {"k": expr}       -> obj.k : type(expr)
+         obj.k = expr               -> obj.k : type(expr)
+         obj["k"] = expr           -> obj.k : type(expr)
+         class C { let k = expr }   -> C instances' k : type(expr)
+       The use sites (obj.k, obj["k"]) look these up through
+       obj_prop_type() so the statically typed backends can read the
+       tagged slot as the right type. */
+    if (node->type == AST_VAR_DECL && node->right &&
+        node->right->type == AST_OBJECT_LITERAL && node->value) {
+        for (int i = 0; i < node->right->child_count; i++) {
+            ASTNode *pair = node->right->children[i];
+            if (pair && pair->type == AST_VAR_DECL && pair->value && pair->right)
+                prop_record(node->value, pair->value, infer_expr_type(pair->right));
+        }
+    }
+    if (node->type == AST_CLASS_DECL && node->value) {
+        ASTNode *b = node->body;
+        if (b && b->child_count == 0) b = NULL; /* not the pair-array form */
+        ASTNode *first = node->body ? node->body->body : NULL;
+        if (!first && node->body && node->body->child_count > 0 &&
+            node->body->children[0] &&
+            (node->body->children[0]->type == AST_VAR_DECL ||
+             node->body->children[0]->type == AST_CONST_DECL))
+            first = node->body->children[0];
+        for (ASTNode *f = first; f; f = f->next) {
+            if ((f->type == AST_VAR_DECL || f->type == AST_CONST_DECL) &&
+                f->value && f->right)
+                prop_record(node->value, f->value, infer_expr_type(f->right));
+        }
+    }
+    if (node->type == AST_ASSIGN_STMT && node->left && node->right) {
+        if (node->left->type == AST_MEMBER_ACCESS &&
+            node->left->left && node->left->left->type == AST_IDENTIFIER &&
+            node->left->left->value && node->left->value)
+            prop_record(node->left->left->value, node->left->value,
+                        infer_expr_type(node->right));
+        if (node->left->type == AST_ARRAY_ACCESS &&
+            node->left->left && node->left->left->type == AST_IDENTIFIER &&
+            node->left->left->value &&
+            node->left->right && node->left->right->type == AST_LITERAL &&
+            node->left->right->data_type == TYPE_STRING && node->left->right->value)
+            prop_record(node->left->left->value, node->left->right->value,
+                        infer_expr_type(node->right));
+    }
+
     ASTNode *saved = g_current_fn;
     if (node->type == AST_FUNCTION_DECL) g_current_fn = node;
 
@@ -989,6 +1114,7 @@ static void propagate_param_types_to_identifiers(ASTNode *fn, ASTNode *node) {
 
 void infer_function_signatures(ASTNode *program) {
     g_elems.count = 0;
+    g_props.count = 0;
     if (!program) return;
 
     g_fns.count = 0;

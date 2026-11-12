@@ -43,6 +43,18 @@ DataType infer_expr_type(ASTNode *expr);
    toolchain assumes for an unresolved numeric type. */
 DataType infer_elem_type(ASTNode *expr);
 
+/* Object property typing: `obj.prop` / `obj["prop"]` have no static type
+   on their own, but the declaration site (an object literal, a class
+   field default, or an assignment) does know. prop_record/obj_prop_type
+   carry that knowledge to the use sites for the statically typed
+   backends that store object values as tagged 64-bit slots. */
+void prop_record(const char *var_name, const char *prop_name, DataType t);
+DataType obj_prop_type(const char *var_name, const char *prop_name);
+
+/* Clear the object-property table; call once per program generation so a
+   previous program's properties do not leak into this one's. */
+void prop_reset(void);
+
 /* Tell the inference helpers which function's body is being generated, so
    that a bare identifier can be resolved against that function's parameters.
    Without this every parameter looks untyped at codegen time: `len(a)` on an

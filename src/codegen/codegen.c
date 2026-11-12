@@ -339,6 +339,8 @@ static int elem_kind_code(DataType elem) {
     }
 }
 
+static ASTNode* class_lookup(const char *name);
+
 /* Generate expression code */
 static void generate_expression(StringBuilder *sb, ASTNode *node) {
     if (!node) return;
@@ -497,11 +499,51 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
             break;
 
         case AST_OBJECT_LITERAL:
-            sb_append(sb, "(void*)0");
+            /* Build the object at runtime, one set per pair, so the C
+               program means what the interpreter means: the old emission
+               was literally (void*)0, and obj["k"] then went through
+               sub_array_get on NULL and segfaulted. Pairs arrive from the
+               parser as AST_VAR_DECL (value=key, right=expr). */
+            sb_append(sb, "({ SubObject *_o = sub_object_new(); ");
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *pair = node->children[i];
+                if (!pair || !pair->value) continue;
+                DataType vt = pair->right ? infer_expr_type(pair->right) : TYPE_INT;
+                sb_append(sb, "sub_obj_set(_o, \"%s\", %d, ",
+                          pair->value,
+                          vt == TYPE_STRING ? 1 : vt == TYPE_FLOAT ? 2 : 0);
+                if (pair->right) gen_elem_in(sb, pair->right, vt);
+                else sb_append(sb, "0");
+                sb_append(sb, "); ");
+            }
+            sb_append(sb, "_o; })");
             break;
 
         case AST_ARRAY_ACCESS:
-            if (1) {
+            if (infer_expr_type(node->left) == TYPE_OBJECT) {
+                /* obj["key"] reads an object slot. Values are 64-bit slots;
+                   read as the inferred type when known, else as a string
+                   the way the interpreter's object_get does. */
+                DataType vt = infer_expr_type(node);
+                if (vt == TYPE_UNKNOWN || vt == TYPE_STRING)
+                    sb_append(sb, "(char*)(intptr_t)(sub_obj_get((SubObject*)(");
+                else if (vt == TYPE_FLOAT)
+                    sb_append(sb, "sub_dbl(sub_obj_get((SubObject*)(");
+                else
+                    sb_append(sb, "(sub_obj_get((SubObject*)(");
+                generate_expression(sb, node->left);
+                sb_append(sb, "), (const char*)(");
+                if (node->right && node->right->type == AST_LITERAL &&
+                    node->right->data_type == TYPE_STRING && node->right->value) {
+                    char *esc = escape_c_string_literal(node->right->value);
+                    sb_append(sb, "\"%s\"", esc);
+                    free(esc);
+                } else {
+                    generate_expression(sb, node->right);
+                }
+                sb_append(sb, ")))");
+                if (vt == TYPE_FLOAT) sb_append(sb, ")");
+            } else if (1) {
                 DataType elem = infer_elem_type(node->left);
                 gen_elem_out_open(sb, elem);
                 sb_append(sb, "sub_array_get((SubArray*)(");
@@ -532,13 +574,34 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, "))");
                 }
             } else if (node->value && strcmp(node->value, "new") == 0) {
-                sb_append(sb, "sub_object_new()");
+                /* ClassName.new: a fresh object with the class's declared
+                   field defaults already set, matching the interpreter.
+                   The class table (below) was built from AST_CLASS_DECL. */
+                ASTNode *cls = class_lookup(node->left ? node->left->value : NULL);
+                sb_append(sb, "({ SubObject *_o = sub_object_new(); ");
+                for (ASTNode *f = cls ? block_first(cls) : NULL; f; f = f->next) {
+                    if (f->type != AST_VAR_DECL && f->type != AST_CONST_DECL) continue;
+                    if (!f->value) continue;
+                    DataType vt = f->right ? infer_expr_type(f->right) : TYPE_INT;
+                    sb_append(sb, "sub_obj_set(_o, \"%s\", %d, ",
+                              f->value, vt == TYPE_STRING ? 1 : vt == TYPE_FLOAT ? 2 : 0);
+                    if (f->right) gen_elem_in(sb, f->right, vt);
+                    else sb_append(sb, "0");
+                    sb_append(sb, "); ");
+                }
+                sb_append(sb, "_o; })");
             } else if (node->left) {
-                sb_append(sb, "(((SubObject*)(");
+                /* obj.field: read the object slot, typed like obj["field"]. */
+                DataType vt = infer_expr_type(node);
+                if (vt == TYPE_UNKNOWN || vt == TYPE_STRING)
+                    sb_append(sb, "(char*)(intptr_t)(sub_obj_get((SubObject*)(");
+                else if (vt == TYPE_FLOAT)
+                    sb_append(sb, "sub_dbl(sub_obj_get((SubObject*)(");
+                else
+                    sb_append(sb, "(sub_obj_get((SubObject*)(");
                 generate_expression(sb, node->left);
-                sb_append(sb, ")) ? ((SubObject*)(");
-                generate_expression(sb, node->left);
-                sb_append(sb, "))->%s : 0)", node->value ? node->value : "x");
+                sb_append(sb, "), \"%s\"))", node->value ? node->value : "");
+                if (vt == TYPE_FLOAT) sb_append(sb, ")");
             } else {
                 sb_append(sb, "%s", node->value ? node->value : "0");
             }
@@ -1237,6 +1300,25 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_ASSIGN_STMT:
             indent_code(sb, indent);
             if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                if (infer_expr_type(node->left->left) == TYPE_OBJECT) {
+                    /* obj["key"] = v */
+                    DataType vt = node->right ? infer_expr_type(node->right) : TYPE_INT;
+                    sb_append(sb, "sub_obj_set((SubObject*)(");
+                    generate_expression(sb, node->left->left);
+                    sb_append(sb, "), (const char*)(");
+                    if (node->left->right && node->left->right->type == AST_LITERAL &&
+                        node->left->right->data_type == TYPE_STRING && node->left->right->value) {
+                        char *esc = escape_c_string_literal(node->left->right->value);
+                        sb_append(sb, "\"%s\"", esc);
+                        free(esc);
+                    } else {
+                        generate_expression(sb, node->left->right);
+                    }
+                    sb_append(sb, "), %d, ",
+                              vt == TYPE_STRING ? 1 : vt == TYPE_FLOAT ? 2 : 0);
+                    gen_elem_in(sb, node->right, vt == TYPE_UNKNOWN ? TYPE_INT : vt);
+                    sb_append(sb, ");\n");
+                } else {
                 sb_append(sb, "sub_array_set((SubArray*)(");
                 generate_expression(sb, node->left->left);
                 sb_append(sb, "), (long)(");
@@ -1244,13 +1326,18 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
                 sb_append(sb, "), ");
                 gen_elem_in(sb, node->right, infer_elem_type(node->left->left));
                 sb_append(sb, ");\n");
-            } else if (node->left && node->left->type == AST_MEMBER_ACCESS) {
-                sb_append(sb, "if ((SubObject*)(");
+                }
+            } else if (node->left && node->left->type == AST_MEMBER_ACCESS &&
+                       node->left->value) {
+                /* obj.field = v: write the object slot, kinded by the
+                   assigned value's type. */
+                DataType vt = node->right ? infer_expr_type(node->right) : TYPE_INT;
+                sb_append(sb, "sub_obj_set((SubObject*)(");
                 generate_expression(sb, node->left->left);
-                sb_append(sb, ")) ((SubObject*)(");
-                generate_expression(sb, node->left->left);
-                sb_append(sb, "))->%s = (long)(", node->left->value ? node->left->value : "x");
-                generate_expression(sb, node->right);
+                sb_append(sb, "), \"%s\", %d, ",
+                          node->left->value,
+                          vt == TYPE_STRING ? 1 : vt == TYPE_FLOAT ? 2 : 0);
+                gen_elem_in(sb, node->right, vt == TYPE_UNKNOWN ? TYPE_INT : vt);
                 sb_append(sb, ");\n");
             } else {
                 generate_expression(sb, node->left);
@@ -1410,7 +1497,39 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
 }
 
 /* Generate C code from AST */
+/* Class registry: every AST_CLASS_DECL in the program, so `Point.new`
+   can find the class's declared field defaults no matter where the class
+   was declared relative to the use. Rebuilt per program; the registry owns
+   nothing, it just points into the program AST. */
+#define MAX_CLASSES 64
+static ASTNode *g_classes[MAX_CLASSES];
+static int g_class_count;
+
+static void classes_collect(ASTNode *node) {
+    if (!node) return;
+    if (node->type == AST_CLASS_DECL) {
+        if (g_class_count < MAX_CLASSES) g_classes[g_class_count++] = node;
+    }
+    /* classes are top-level, but walk everything cheaply anyway */
+    classes_collect(node->body);
+    classes_collect(node->left);
+    classes_collect(node->right);
+    for (int i = 0; i < node->child_count; i++)
+        classes_collect(node->children[i]);
+}
+
+static ASTNode* class_lookup(const char *name) {
+    if (!name) return NULL;
+    for (int i = 0; i < g_class_count; i++)
+        if (g_classes[i]->value && strcmp(g_classes[i]->value, name) == 0)
+            return g_classes[i];
+    return NULL;
+}
+
 static char* generate_c_code(ASTNode *ast) {
+    g_class_count = 0;
+    classes_collect(ast);
+
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
     
@@ -1455,14 +1574,74 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "#endif /* SUB_STRSAFE */\n\n");
     
     sb_append(sb, "/* Generic Object Structure */\n");
+    /* A real key/value object rather than a fixed bag of named fields: the
+       old struct had x/y/z/width/height/name/title and nothing else, so
+       obj[\"anything\"] either read a field that did not exist or, worse,
+       went through sub_array_get on a NULL pointer and segfaulted.
+       Values are 64-bit slots like array elements: kind 0 int/bool,
+       1 string (pointer), 2 float (bit pattern). */
+    sb_append(sb, "typedef struct SubObjKV {\n");
+    sb_append(sb, "    char *key;\n");
+    sb_append(sb, "    long long val;\n");
+    sb_append(sb, "    int kind; /* 0 int/bool, 1 string, 2 float */\n");
+    sb_append(sb, "} SubObjKV;\n");
     sb_append(sb, "typedef struct SubObject {\n");
-    sb_append(sb, "    long x, y, z, width, height, id;\n");
-    sb_append(sb, "    char *name;\n");
-    sb_append(sb, "    char *title;\n");
+    sb_append(sb, "    long count;\n");
+    sb_append(sb, "    long capacity;\n");
+    sb_append(sb, "    SubObjKV *slots;\n");
     sb_append(sb, "} SubObject;\n\n");
     sb_append(sb, "static inline SubObject* sub_object_new(void) {\n");
     sb_append(sb, "    SubObject *obj = (SubObject*)calloc(1, sizeof(SubObject));\n");
     sb_append(sb, "    return obj;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "static inline long sub_obj_find(SubObject *o, const char *key) {\n");
+    sb_append(sb, "    if (!o || !key) return -1;\n");
+    sb_append(sb, "    for (long i = 0; i < o->count; i++)\n");
+    sb_append(sb, "        if (strcmp(o->slots[i].key, key) == 0) return i;\n");
+    sb_append(sb, "    return -1;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "static inline void sub_obj_set(SubObject *o, const char *key, int kind, long long val) {\n");
+    sb_append(sb, "    if (!o || !key) return;\n");
+    sb_append(sb, "    long i = sub_obj_find(o, key);\n");
+    sb_append(sb, "    if (i < 0) {\n");
+    sb_append(sb, "        if (o->count >= o->capacity) {\n");
+    sb_append(sb, "            o->capacity = o->capacity ? o->capacity * 2 : 8;\n");
+    sb_append(sb, "            o->slots = (SubObjKV*)realloc(o->slots, sizeof(SubObjKV) * (size_t)o->capacity);\n");
+    sb_append(sb, "        }\n");
+    sb_append(sb, "        i = o->count++;\n");
+    sb_append(sb, "        o->slots[i].key = sub_strdup(key);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    o->slots[i].kind = kind;\n");
+    sb_append(sb, "    o->slots[i].val = val;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "static inline long long sub_obj_get(SubObject *o, const char *key) {\n");
+    sb_append(sb, "    long i = sub_obj_find(o, key);\n");
+    sb_append(sb, "    if (i < 0) sub_die(\"object property read before assignment\");\n");
+    sb_append(sb, "    return o->slots[i].val;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "static inline const char* sub_obj_kind_str(SubObjKV *kv, char *scratch, size_t n) {\n");
+    sb_append(sb, "    if (kv->kind == 1) { const char *s = (const char*)(intptr_t)kv->val; return s ? s : \"null\"; }\n");
+    sb_append(sb, "    if (kv->kind == 2) { double d; memcpy(&d, &kv->val, sizeof(double)); snprintf(scratch, n, \"%%g\", d); return scratch; }\n");
+    sb_append(sb, "    if (kv->kind == 0 && (kv->val == 0 || kv->val == 1)) { return kv->val ? \"true\" : \"false\"; }\n");
+    sb_append(sb, "    snprintf(scratch, n, \"%%lld\", kv->val); return scratch;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "static inline char* sub_obj_str(SubObject *o) {\n");
+    sb_append(sb, "    if (!o || o->count == 0) return sub_strdup(\"{}\");\n");
+    sb_append(sb, "    size_t cap = 64, len = 1;\n");
+    sb_append(sb, "    char *out = (char*)malloc(cap);\n");
+    sb_append(sb, "    if (!out) return sub_strdup(\"{}\");\n");
+    sb_append(sb, "    strcpy(out, \"{\");\n");
+    sb_append(sb, "    char scratch[64];\n");
+    sb_append(sb, "    for (long i = 0; i < o->count; i++) {\n");
+    sb_append(sb, "        const char *piece = sub_obj_kind_str(&o->slots[i], scratch, sizeof scratch);\n");
+    sb_append(sb, "        size_t need = strlen(o->slots[i].key) + strlen(piece) + 8;\n");
+    sb_append(sb, "        while (len + need > cap) { cap *= 2; out = (char*)realloc(out, cap); }\n");
+    sb_append(sb, "        if (i) { strcpy(out + len, \", \"); len += 2; }\n");
+    sb_append(sb, "        len += (size_t)snprintf(out + len, cap - len, \"%%s: %%s\", o->slots[i].key, piece);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    while (len + 2 > cap) { cap *= 2; out = (char*)realloc(out, cap); }\n");
+    sb_append(sb, "    strcpy(out + len, \"}\");\n");
+    sb_append(sb, "    return out;\n");
     sb_append(sb, "}\n\n");
     
     sb_append(sb, "/* Dynamic Array Structure */\n");
