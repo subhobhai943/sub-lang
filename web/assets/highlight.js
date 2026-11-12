@@ -7,8 +7,7 @@
   var KEYWORDS = [
     "var", "const", "let", "function", "fn", "def", "return", "if", "elif",
     "else", "for", "while", "do", "end", "break", "continue", "try", "catch",
-    "finally", "throw", "embed", "endembed", "cpp", "python", "javascript",
-    "rust", "import", "ui", "class", "extends", "implements", "new", "this",
+    "finally", "throw", "import", "ui", "class", "extends", "implements", "new", "this",
     "super", "static", "private", "public", "protected", "async", "await",
     "yield", "int", "float", "string", "bool", "auto", "void", "true",
     "false", "null", "nil"
@@ -37,7 +36,7 @@
     var i = 0, n = src.length;
     while (i < n) {
       var c = src[i];
-      // comments: # and //  (also #embed / #endembed directives)
+      // comments: # and //
       if (c === "#" || (c === "/" && src[i + 1] === "/")) {
         var comStart = i;
         while (i < n && src[i] !== "\n") i++;

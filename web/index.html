@@ -3,13 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SUB Language — Simple Universal Builder</title>
-<meta name="description" content="SUB (Simple Universal Builder) is a modern multi-paradigm language: native x86-64 compilation, an interpreter, and transpilation to 13 languages.">
-<meta name="keywords" content="SUB language, programming language, compiler, transpiler, x86-64, native, interpreter, subi, subc">
+<title>SUB — Simple Universal Builder</title>
+<meta name="description" content="SUB (Simple Universal Builder) is a small language toolchain: a native x86-64 compiler, a direct AST interpreter, and a 13-target transpiler.">
 <meta name="author" content="Subhadip Sarkar">
-<meta name="theme-color" content="#0b0d12">
+<meta name="theme-color" content="#0a0e12">
 <link rel="canonical" href="https://subhobhai943.github.io/sub-lang/">
-<!-- Open Graph -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="SUB Language">
 <meta property="og:title" content="SUB — Simple Universal Builder">
@@ -23,157 +21,123 @@
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/sub-lang-logo-mark.png">
 <link rel="stylesheet" href="assets/style.css">
-<script type="application/ld+json">
-{"@context":"https://schema.org","@type":"SoftwareApplication","name":"SUB Language","applicationCategory":"DeveloperTool","operatingSystem":"Linux, macOS, Windows","softwareVersion":"1.0.9","url":"https://subhobhai943.github.io/sub-lang/","image":"https://subhobhai943.github.io/sub-lang/assets/sub-lang-logo.png","author":{"@type":"Person","name":"Subhadip Sarkar","url":"https://github.com/subhobhai943"}}
-</script>
 </head>
 <body>
 
-<!-- ===== NAV ===== -->
-<nav class="nav">
-  <div class="nav-inner">
+<header class="site-header">
+  <div class="container header-inner">
     <a class="brand" href="#top">
-      <img src="assets/sub-lang-logo-mark.png" alt="" width="28" height="28">
+      <img src="assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
       <span>SUB</span>
     </a>
-    <ul class="nav-links" id="navLinks">
-      <li><a href="#features">Features</a></li>
-      <li><a href="#code">Code</a></li>
-      <li><a href="#targets">Targets</a></li>
-      <li><a href="#docs">Docs</a></li>
-      <li><a class="btn btn-sm btn-outline" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub&nbsp;↗</a></li>
-    </ul>
-    <button class="nav-burger" id="navBurger" aria-label="Menu">☰</button>
-  </div>
-</nav>
-
-<!-- ===== HERO ===== -->
-<header class="hero" id="top">
-  <div class="orb orb-a" aria-hidden="true"></div>
-  <div class="orb orb-b" aria-hidden="true"></div>
-  <div class="hero-grid" aria-hidden="true"></div>
-  <div class="hero-inner">
-    <div class="hero-copy">
-      <span class="badge">v1.0.9 · MIT licensed</span>
-      <h1 class="hero-title">SUB</h1>
-      <p class="hero-tag">The <strong>Simple Universal Builder</strong> — a modern, unified multi-paradigm language that compiles to native <em>x86-64</em> machine code and transpiles to <em>13 languages</em>.</p>
-      <div class="hero-install">
-        <code id="installCmd">curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh</code>
-        <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh" aria-label="Copy install command">⧉</button>
-      </div>
-      <div class="hero-ctas">
-        <a class="btn btn-primary" href="https://github.com/subhobhai943/sub-lang/releases" target="_blank" rel="noopener">Download v1.0.9</a>
-        <a class="btn btn-ghost" href="#docs">Quick start ↓</a>
-      </div>
-      <div class="hero-meta">
-        <span>⚡ ~3.5&nbsp;KB static binaries</span>
-        <span>🧩 .deb · .rpm · .msi · .pkg · AppImage</span>
-      </div>
-    </div>
-    <div class="hero-term">
-      <div class="term-bar">
-        <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
-        <span class="term-title">subi — SUB 1.0.9 REPL</span>
-      </div>
-      <pre class="term-body"><code class="lang-sb" data-type="term" data-anim="type" data-src="#term-src"></code></pre>
-      <script type="text/plain" id="term-src">
-$ subi hello.sb
-┌──────────────────────────────┐
-│  SUB Language  ·  subi 1.0.9 │
-└──────────────────────────────┘
-Hello, World!
-$ subc hello.sb --native
-$ ./hello
-Hello, World!
-</script>
-    </div>
+    <nav class="site-nav" id="siteNav">
+      <a href="#features">Features</a>
+      <a href="#examples">Examples</a>
+      <a href="#targets">Targets</a>
+      <a href="#start">Get started</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
   </div>
 </header>
 
-<!-- ===== FEATURES ===== -->
-<section class="section" id="features">
-  <div class="section-inner">
-    <p class="kicker">Key highlights</p>
-    <h2>Three tools. One language.</h2>
-    <p class="lead">A compiler, not a wrapper. An interpreter, not a virtual machine. A transpiler, not a lock-in.</p>
-    <div class="grid grid-3">
-      <div class="card">
-        <div class="card-icon">⚙️</div>
-        <h3>Native compiler <code>subc</code></h3>
-        <p>Emits x86-64 machine code and writes the ELF executable itself — no assembler, no linker, no libc. Self-contained static binaries from ~3.5&nbsp;KB, compiled in ~1&nbsp;ms.</p>
+<main id="top">
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <h1>SUB — Simple Universal Builder</h1>
+      <p class="hero-sub">
+        A small language toolchain: one <code>.sb</code> source, compiled to native x86-64
+        machine code, interpreted live, or transpiled to 13 languages.
+      </p>
+      <div class="install-row">
+        <code id="installCmd">curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh</code>
+        <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh" aria-label="Copy install command">Copy</button>
       </div>
-      <div class="card">
-        <div class="card-icon">🔄</div>
-        <h3>13 transpilation targets</h3>
-        <p>Python, JavaScript, TypeScript, C, C++, Rust, Go, Java, Kotlin, Swift, Ruby, x86-64 Assembly, and CSS — generated from one AST by <code>sub</code>.</p>
-      </div>
-      <div class="card">
-        <div class="card-icon">⚡</div>
-        <h3>Interpreter <code>subi</code></h3>
-        <p>Direct AST interpretation with an interactive REPL. Run any <code>.sb</code> program instantly — the interpreter is the specification every backend agrees with.</p>
-      </div>
-      <div class="card">
-        <div class="card-icon">🧱</div>
-        <h3>Classes &amp; objects</h3>
-        <p>Clean OOP with <code>class</code>, fields, <code>.new</code> construction and member access — lowered idiomatically on every backend.</p>
-      </div>
-      <div class="card">
-        <div class="card-icon">🎯</div>
-        <h3>Pattern matching</h3>
-        <p><code>switch</code>/<code>case</code> over ints, strings and floats with multi-value clauses and no fall-through — a case runs its body and nothing else.</p>
-      </div>
-      <div class="card">
-        <div class="card-icon">📦</div>
-        <h3>Standard library</h3>
-        <p>Four modules — <code>math</code>, <code>arrays</code>, <code>strings</code>, <code>io</code> — written in SUB, verified through every backend, loaded with <code>import</code>.</p>
-      </div>
-      <div class="card">
-        <div class="card-icon">🖥️</div>
-        <h3>Declarative UI</h3>
-        <p>First-class <code>ui.*</code> syntax for windows, labels, buttons and inputs — one tree, many renderers.</p>
-      </div>
-      <div class="card">
-        <div class="card-icon">💾</div>
-        <h3>Installers everywhere</h3>
-        <p>Windows <code>.msi</code>, Linux <code>.deb</code>/<code>.rpm</code>, macOS <code>.pkg</code>, Arch, Alpine, AppImage — and a universal <code>curl&nbsp;|&nbsp;sh</code>.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://github.com/subhobhai943/sub-lang/releases" target="_blank" rel="noopener">Get the tools</a>
+        <a class="btn btn-quiet" href="https://github.com/subhobhai943/sub-lang#readme" target="_blank" rel="noopener">Read the docs</a>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ===== CODE EXAMPLES ===== -->
-<section class="section section-alt" id="code">
-  <div class="section-inner">
-    <p class="kicker">One canonical spelling</p>
-    <h2>SUB reads like it runs</h2>
-    <p class="lead"><code>let</code>, <code>fn</code>, <code>null</code> and brace-delimited blocks. Older spellings still compile — the compiler just tells you once.</p>
-    <div class="tabs" id="codeTabs">
-      <div class="tab-list" role="tablist">
-        <button class="tab active" data-tab="hello" role="tab">Hello</button>
-        <button class="tab" data-tab="switch" role="tab">Switch / case</button>
-        <button class="tab" data-tab="classes" role="tab">Classes</button>
-        <button class="tab" data-tab="stdlib" role="tab">Stdlib tour</button>
+  <!-- Features -->
+  <section class="section" id="features">
+    <div class="container">
+      <h2>Features</h2>
+      <p class="section-lead">Three tools in one toolchain. Real compilation, real interpretation, real transpilation — no wrappers.</p>
+      <div class="feature-grid">
+        <div class="feature">
+          <h3>Native compiler — <code>subc</code></h3>
+          <p>Emits x86-64 machine code and writes the ELF executable itself. No assembler, no linker, no libc — a compiled SUB program is a self-contained static binary a few kilobytes in size.</p>
+        </div>
+        <div class="feature">
+          <h3>Direct interpreter — <code>subi</code></h3>
+          <p>Runs <code>.sb</code> programs instantly, with an interactive REPL. The interpreter is the specification every backend agrees with, and CI diffs each backend against it.</p>
+        </div>
+        <div class="feature">
+          <h3>13-target transpiler — <code>sub</code></h3>
+          <p>One command generates idiomatic Python, JavaScript, TypeScript, C, C++, Rust, Go, Java, Kotlin, Swift, Ruby, x86-64 Assembly, and CSS from a single AST.</p>
+        </div>
+        <div class="feature">
+          <h3>Classes &amp; objects</h3>
+          <p>Clean OOP with <code>class</code>, fields, <code>.new</code> construction and member access — lowered idiomatically on every backend.</p>
+        </div>
+        <div class="feature">
+          <h3>Pattern matching</h3>
+          <p><code>switch</code>/<code>case</code> over ints, strings and floats with multi-value clauses and no fall-through — a case runs its body and nothing else.</p>
+        </div>
+        <div class="feature">
+          <h3>Standard library</h3>
+          <p>Four modules — <code>math</code>, <code>arrays</code>, <code>strings</code>, <code>io</code> — written in SUB, verified through every backend, loaded with <code>import</code>.</p>
+        </div>
+        <div class="feature">
+          <h3>Declarative UI tree</h3>
+          <p>First-class <code>ui.*</code> syntax for windows, labels, buttons and inputs — one tree, many renderers.</p>
+        </div>
+        <div class="feature">
+          <h3>Packages everywhere</h3>
+          <p>Windows <code>.msi</code>, Linux <code>.deb</code>/<code>.rpm</code>, macOS <code>.pkg</code>, Arch, Alpine, AppImage — and a universal <code>curl | sh</code>.</p>
+        </div>
       </div>
-      <div class="tab-panel active" data-panel="hello">
-        <div class="code-block">
-          <div class="code-head"><span>hello.sb</span><button class="copy-btn" aria-label="Copy code">⧉</button></div>
-<pre class="code-body"><code class="lang-sb">// Hello World in SUB — native compilation example
-let name = "World"
+    </div>
+  </section>
+
+  <!-- Code examples -->
+  <section class="section section-alt" id="examples">
+    <div class="container">
+      <h2>Code examples</h2>
+      <p class="section-lead">One canonical spelling: <code>let</code>, <code>fn</code>, <code>null</code>, brace-delimited blocks. Older spellings still compile, with a deprecation note.</p>
+      <div class="code-tabs" id="codeTabs">
+        <div class="tab-list" role="tablist" aria-label="Code examples">
+          <button class="tab active" data-tab="hello" role="tab" aria-selected="true">Hello</button>
+          <button class="tab" data-tab="switch" role="tab" aria-selected="false">Switch</button>
+          <button class="tab" data-tab="classes" role="tab" aria-selected="false">Classes</button>
+        </div>
+        <div class="tab-panel active" data-panel="hello">
+          <div class="code-block">
+            <div class="code-head"><span>hello.sb</span><button class="copy-btn" aria-label="Copy code">Copy</button></div>
+<pre class="code-body"><code class="lang-sb">let name = "World"
 let greeting = "Hello, " + name
 
-print(greeting)
+println(greeting)
 
 fn add(a, b) {
     return a + b
 }
 
 println(add(10, 20))</code></pre>
-          <div class="code-out">$ subc hello.sb &amp;&amp; ./hello<br>Hello, World<br>30</div>
+            <div class="code-out">$ subc hello.sb &amp;&amp; ./hello
+Hello, World
+30</div>
+          </div>
         </div>
-      </div>
-      <div class="tab-panel" data-panel="switch">
-        <div class="code-block">
-          <div class="code-head"><span>switch.sb</span><button class="copy-btn" aria-label="Copy code">⧉</button></div>
+        <div class="tab-panel" data-panel="switch">
+          <div class="code-block">
+            <div class="code-head"><span>switch.sb</span><button class="copy-btn" aria-label="Copy code">Copy</button></div>
 <pre class="code-body"><code class="lang-sb">let choice = 2
 
 switch choice {
@@ -184,12 +148,13 @@ switch choice {
     default:
         println("Other choice")
 }</code></pre>
-          <div class="code-out">$ subi switch.sb<br>Second choice</div>
+            <div class="code-out">$ subi switch.sb
+Second choice</div>
+          </div>
         </div>
-      </div>
-      <div class="tab-panel" data-panel="classes">
-        <div class="code-block">
-          <div class="code-head"><span>point.sb</span><button class="copy-btn" aria-label="Copy code">⧉</button></div>
+        <div class="tab-panel" data-panel="classes">
+          <div class="code-block">
+            <div class="code-head"><span>point.sb</span><button class="copy-btn" aria-label="Copy code">Copy</button></div>
 <pre class="code-body"><code class="lang-sb">class Point {
     let x = 0
     let y = 0
@@ -201,130 +166,105 @@ p.y = 20
 
 println(p.x)  # 10
 println(p.y)  # 20</code></pre>
-          <div class="code-out">$ subi point.sb<br>10<br>20</div>
-        </div>
-      </div>
-      <div class="tab-panel" data-panel="stdlib">
-        <div class="code-block">
-          <div class="code-head"><span>stdlib_tour.sb</span><button class="copy-btn" aria-label="Copy code">⧉</button></div>
-<pre class="code-body"><code class="lang-sb">import "math"
-import "arrays"
-import "strings"
-import "io"
-
-heading("primes")
-let primes = []
-for n in range(2, 30) {
-    if is_prime(n) {
-        push(primes, n)
-    }
-}
-println(primes)
-
-let scores = [72, 91, 68, 91, 55, 83]
-println(sorted_int(scores))
-println(pad_left(str(max_int(scores)), 5, " "))
-ok("done")</code></pre>
-          <div class="code-out">$ subi examples/stdlib_tour.sb<br>[2, 3, 5, 7, 11, 13, 17, 19, 23, 29]<br>[55, 68, 72, 83, 91, 91]<br>&nbsp;&nbsp;&nbsp;91<br>✓ done</div>
+            <div class="code-out">$ subi point.sb
+10
+20</div>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ===== TARGETS ===== -->
-<section class="section" id="targets">
-  <div class="section-inner">
-    <p class="kicker">Write once, run anywhere</p>
-    <h2>13 transpilation targets</h2>
-    <p class="lead">One command generates idiomatic code for the ecosystem you already have. Ten of the thirteen targets are executed and diffed against the interpreter in CI, on every push.</p>
-    <div class="chips">
-      <span class="chip chip-verified">Python</span>
-      <span class="chip chip-verified">JavaScript</span>
-      <span class="chip chip-verified">TypeScript</span>
-      <span class="chip chip-verified">C</span>
-      <span class="chip chip-verified">C++</span>
-      <span class="chip chip-verified">Rust</span>
-      <span class="chip chip-verified">Go</span>
-      <span class="chip chip-verified">Java</span>
-      <span class="chip chip-verified">Kotlin</span>
-      <span class="chip chip-verified">Swift</span>
-      <span class="chip chip-verified">Ruby</span>
-      <span class="chip">x86-64 Assembly</span>
-      <span class="chip">CSS</span>
-    </div>
-    <div class="code-inline">
-      <div class="code-block">
+  <!-- Targets -->
+  <section class="section" id="targets">
+    <div class="container">
+      <h2>Transpilation targets</h2>
+      <p class="section-lead">Ten of the thirteen targets are executed and diffed against the interpreter in CI, on every push.</p>
+      <ul class="target-grid">
+        <li><span>Python</span><em>verified in CI</em></li>
+        <li><span>JavaScript</span><em>verified in CI</em></li>
+        <li><span>TypeScript</span><em>verified in CI</em></li>
+        <li><span>C</span><em>verified in CI</em></li>
+        <li><span>C++</span><em>verified in CI</em></li>
+        <li><span>Rust</span><em>verified in CI</em></li>
+        <li><span>Go</span><em>verified in CI</em></li>
+        <li><span>Java</span><em>verified in CI</em></li>
+        <li><span>Kotlin</span><em>verified in CI</em></li>
+        <li><span>Swift</span><em>verified in CI</em></li>
+        <li><span>Ruby</span><em>verified in CI</em></li>
+        <li><span>x86-64 Assembly</span><em>generated</em></li>
+        <li><span>CSS</span><em>generated</em></li>
+      </ul>
+      <div class="code-block targets-cmd">
         <div class="code-head"><span>transpile</span></div>
-<pre class="code-body"><code class="lang-sh">$ sub examples/fibonacci.sb rust   # -> fibonacci.rs
-$ sub examples/fibonacci.sb go     # -> fibonacci.go
-$ sub examples/fibonacci.sb python # -> fibonacci.py</code></pre>
+<pre class="code-body"><code class="lang-sh">$ sub program.sb rust    # -> program.rs
+$ sub program.sb go      # -> program.go
+$ sub program.sb python  # -> program.py</code></pre>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ===== DOCS QUICK-START ===== -->
-<section class="section section-alt" id="docs">
-  <div class="section-inner">
-    <p class="kicker">Quick start</p>
-    <h2>Up and running in 30 seconds</h2>
-    <div class="grid grid-3">
-      <div class="card card-step">
-        <div class="step-n">1</div>
-        <h3>Install</h3>
-        <p>Grab a release for your platform — or use the universal installer:</p>
-        <div class="hero-install hero-install-sm">
-          <code>curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh</code>
-          <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh" aria-label="Copy install command">⧉</button>
-        </div>
-        <p>Or build from source: <code>make</code>.</p>
-      </div>
-      <div class="card card-step">
-        <div class="step-n">2</div>
-        <h3>Run it</h3>
-        <p>Interpret a script, or drop into the REPL:</p>
-<pre class="code-body code-body-sm"><code class="lang-sh">$ subi --version
-$ echo 'println("hello")' &gt; hello.sb
+  <!-- Quick start -->
+  <section class="section section-alt" id="start">
+    <div class="container">
+      <h2>Quick start</h2>
+      <p class="section-lead">Up and running in under a minute.</p>
+      <ol class="steps">
+        <li>
+          <h3>Install</h3>
+          <p>Grab a release for your platform, or use the universal installer:</p>
+          <div class="install-row install-sm">
+            <code>curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh</code>
+            <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh" aria-label="Copy install command">Copy</button>
+          </div>
+          <p class="steps-alt">Or build from source: <code>make</code>.</p>
+        </li>
+        <li>
+          <h3>Run it</h3>
+          <p>Interpret a script, or drop into the REPL:</p>
+          <div class="code-block">
+<pre class="code-body"><code class="lang-sh">$ echo 'println("hello")' > hello.sb
 $ subi hello.sb
 hello</code></pre>
-      </div>
-      <div class="card card-step">
-        <div class="step-n">3</div>
-        <h3>Go native</h3>
-        <p>Compile straight to machine code, or out to any target:</p>
-<pre class="code-body code-body-sm"><code class="lang-sh">$ subc calculator.sb -o calc
-$ ./calc
-$ sub calculator.sb rust</code></pre>
+          </div>
+        </li>
+        <li>
+          <h3>Go native</h3>
+          <p>Compile straight to machine code, or out to any target:</p>
+          <div class="code-block">
+<pre class="code-body"><code class="lang-sh">$ subc hello.sb -o hello
+$ ./hello
+$ sub hello.sb rust</code></pre>
+          </div>
+        </li>
+      </ol>
+      <div class="doc-links">
+        <a class="btn btn-quiet" href="https://github.com/subhobhai943/sub-lang#readme" target="_blank" rel="noopener">README</a>
+        <a class="btn btn-quiet" href="https://github.com/subhobhai943/sub-lang/blob/main/docs/LANGUAGE_SPEC.md" target="_blank" rel="noopener">Language spec</a>
+        <a class="btn btn-quiet" href="https://github.com/subhobhai943/sub-lang/blob/main/docs/INSTALLATION_GUIDE.md" target="_blank" rel="noopener">Install guide</a>
+        <a class="btn btn-quiet" href="https://github.com/subhobhai943/sub-lang/blob/main/stdlib/README.md" target="_blank" rel="noopener">Stdlib docs</a>
       </div>
     </div>
-    <div class="doc-links">
-      <a class="btn btn-outline" href="https://github.com/subhobhai943/sub-lang#readme" target="_blank" rel="noopener">README</a>
-      <a class="btn btn-outline" href="https://github.com/subhobhai943/sub-lang/blob/main/docs/LANGUAGE_SPEC.md" target="_blank" rel="noopener">Language spec</a>
-      <a class="btn btn-outline" href="https://github.com/subhobhai943/sub-lang/blob/main/docs/INSTALLATION_GUIDE.md" target="_blank" rel="noopener">Install guide</a>
-      <a class="btn btn-outline" href="https://github.com/subhobhai943/sub-lang/blob/main/stdlib/README.md" target="_blank" rel="noopener">Stdlib docs</a>
-    </div>
-  </div>
-</section>
+  </section>
 
-<!-- ===== FOOTER ===== -->
-<footer class="footer">
-  <div class="footer-inner">
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
     <div class="footer-brand">
-      <img src="assets/sub-lang-logo-mark.png" alt="" width="36" height="36">
+      <img src="assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
       <div>
         <strong>SUB Language</strong>
-        <span>Simple Universal Builder · v1.0.9</span>
+        <span>Simple Universal Builder · v1.0.9 · MIT License</span>
       </div>
     </div>
     <ul class="footer-links">
       <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
       <li><a href="https://github.com/subhobhai943/sub-lang/releases" target="_blank" rel="noopener">Releases</a></li>
-      <li><a href="https://github.com/subhobhai943/sub-lang/actions" target="_blank" rel="noopener">CI</a></li>
       <li><a href="https://github.com/subhobhai943/sub-lang/blob/main/docs/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a></li>
       <li><a href="https://github.com/subhobhai943/sub-lang/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">Security</a></li>
     </ul>
-    <p class="footer-note">MIT License © <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
   </div>
 </footer>
 
