@@ -660,23 +660,28 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     }
 
     /* --- Numeric operations --- */
+    /* Integers stay integers: routing int+int through a double silently
+       loses the low bits above 2^53, so 4611686018427387904 + 1 answered
+       ...904 through the interpreter while every other backend said ...905.
+       Floats still go through double, and a comparison may mix the two. */
+    int use_float = (L.type == VAL_FLOAT || R.type == VAL_FLOAT);
+    long long ia = L.iv, ib = R.iv;
     double a = (L.type == VAL_FLOAT) ? L.fv : (double)L.iv;
     double b = (R.type == VAL_FLOAT) ? R.fv : (double)R.iv;
-    int use_float = (L.type == VAL_FLOAT || R.type == VAL_FLOAT);
 
     /* Arithmetic */
-    if (strcmp(op, "+") == 0)  return use_float ? make_float(a + b)    : make_int((long long)(a + b));
-    if (strcmp(op, "-") == 0)  return use_float ? make_float(a - b)    : make_int((long long)(a - b));
-    if (strcmp(op, "*") == 0)  return use_float ? make_float(a * b)    : make_int((long long)(a * b));
+    if (strcmp(op, "+") == 0)  return use_float ? make_float(a + b)    : make_int(ia + ib);
+    if (strcmp(op, "-") == 0)  return use_float ? make_float(a - b)    : make_int(ia - ib);
+    if (strcmp(op, "*") == 0)  return use_float ? make_float(a * b)    : make_int(ia * ib);
 
     if (strcmp(op, "/") == 0) {
-        if (b == 0.0) { runtime_error("division by zero"); return NULL_VAL; }
-        return use_float ? make_float(a / b) : make_int((long long)(a / b));
+        if (use_float ? b == 0.0 : ib == 0) { runtime_error("division by zero"); return NULL_VAL; }
+        return use_float ? make_float(a / b) : make_int(ia / ib);
     }
 
     if (strcmp(op, "%") == 0) {
-        if (b == 0.0) { runtime_error("modulo by zero"); return NULL_VAL; }
-        return use_float ? make_float(fmod(a, b)) : make_int((long long)a % (long long)b);
+        if (use_float ? b == 0.0 : ib == 0) { runtime_error("modulo by zero"); return NULL_VAL; }
+        return use_float ? make_float(fmod(a, b)) : make_int(ia % ib);
     }
 
     if (strcmp(op, "**") == 0) {
@@ -697,7 +702,6 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     if (strcmp(op, ">=") == 0) return make_bool(a >= b);
 
     /* Bitwise (integers only) */
-    long long ia = (long long)a, ib = (long long)b;
     if (strcmp(op, "&")  == 0) return make_int(ia & ib);
     if (strcmp(op, "|")  == 0) return make_int(ia | ib);
     if (strcmp(op, "^")  == 0) return make_int(ia ^ ib);
@@ -1061,32 +1065,35 @@ SubVal eval(ASTNode *node, Env *env) {
             /* Compound: get current, compute, set */
             SubVal cur = env_get(env, name);
 
-            /* Convert to numbers */
-            double a, b;
+            /* Convert to numbers. Integer paths stay integer: going through
+               double here dropped the low bits of large values (see the note
+               in eval_binary). */
+            long long cia = cur.type == VAL_FLOAT ? (long long)cur.fv : cur.iv;
+            long long cib = rhs.type == VAL_FLOAT ? (long long)rhs.fv : rhs.iv;
             int use_float = (cur.type == VAL_FLOAT || rhs.type == VAL_FLOAT);
-            a = (cur.type == VAL_FLOAT) ? cur.fv : (double)cur.iv;
-            b = (rhs.type == VAL_FLOAT) ? rhs.fv : (double)rhs.iv;
+            double cda = (cur.type == VAL_FLOAT) ? cur.fv : (double)cur.iv;
+            double cdb = (rhs.type == VAL_FLOAT) ? rhs.fv : (double)rhs.iv;
 
             SubVal result;
-            if      (strcmp(op, "+=") == 0) result = use_float ? make_float(a + b) : make_int((long long)(a + b));
-            else if (strcmp(op, "-=") == 0) result = use_float ? make_float(a - b) : make_int((long long)(a - b));
-            else if (strcmp(op, "*=") == 0) result = use_float ? make_float(a * b) : make_int((long long)(a * b));
+            if      (strcmp(op, "+=") == 0) result = use_float ? make_float(cda + cdb) : make_int(cia + cib);
+            else if (strcmp(op, "-=") == 0) result = use_float ? make_float(cda - cdb) : make_int(cia - cib);
+            else if (strcmp(op, "*=") == 0) result = use_float ? make_float(cda * cdb) : make_int(cia * cib);
             else if (strcmp(op, "/=") == 0) {
-                if (b == 0.0) { runtime_error("division by zero"); return NULL_VAL; }
-                result = use_float ? make_float(a / b) : make_int((long long)(a / b));
+                if (use_float ? cdb == 0.0 : cib == 0) { runtime_error("division by zero"); return NULL_VAL; }
+                result = use_float ? make_float(cda / cdb) : make_int(cia / cib);
             }
             else if (strcmp(op, "%=") == 0) {
-                if (b == 0.0) { runtime_error("modulo by zero"); return NULL_VAL; }
-                result = use_float ? make_float(fmod(a, b)) : make_int((long long)a % (long long)b);
+                if (use_float ? cdb == 0.0 : cib == 0) { runtime_error("modulo by zero"); return NULL_VAL; }
+                result = use_float ? make_float(fmod(cda, cdb)) : make_int(cia % cib);
             }
             else if (strcmp(op, "**=") == 0) {
-                result = use_float ? make_float(pow(a, b)) : make_int((long long)pow(a, b));
+                result = use_float ? make_float(pow(cda, cdb)) : make_int((long long)pow(cda, cdb));
             }
-            else if (strcmp(op, "&=") == 0)  result = make_int((long long)a & (long long)b);
-            else if (strcmp(op, "|=") == 0)  result = make_int((long long)a | (long long)b);
-            else if (strcmp(op, "^=") == 0)  result = make_int((long long)a ^ (long long)b);
-            else if (strcmp(op, "<<=") == 0) result = make_int((long long)a << (long long)b);
-            else if (strcmp(op, ">>=") == 0) result = make_int((long long)a >> (long long)b);
+            else if (strcmp(op, "&=") == 0)  result = make_int(cia & cib);
+            else if (strcmp(op, "|=") == 0)  result = make_int(cia | cib);
+            else if (strcmp(op, "^=") == 0)  result = make_int(cia ^ cib);
+            else if (strcmp(op, "<<=") == 0) result = make_int(cia << cib);
+            else if (strcmp(op, ">>=") == 0) result = make_int(cia >> cib);
             else {
                 runtime_error("unknown assignment operator '%s'", op);
                 return NULL_VAL;
@@ -1120,20 +1127,22 @@ SubVal eval(ASTNode *node, Env *env) {
                 return NULL_VAL;
             }
             SubVal *item = &arr_val.arr->items[idx];
-            double a = (item->type == VAL_FLOAT) ? item->fv : (double)item->iv;
-            double b = (rhs.type == VAL_FLOAT) ? rhs.fv : (double)rhs.iv;
+            long long iia = item->type == VAL_FLOAT ? (long long)item->fv : item->iv;
+            long long iib = rhs.type == VAL_FLOAT ? (long long)rhs.fv : rhs.iv;
+            double ida = (item->type == VAL_FLOAT) ? item->fv : (double)item->iv;
+            double idb = (rhs.type == VAL_FLOAT) ? rhs.fv : (double)rhs.iv;
             int uf = (item->type == VAL_FLOAT || rhs.type == VAL_FLOAT);
             SubVal result;
-            if      (strcmp(op, "+=") == 0) result = uf ? make_float(a + b) : make_int((long long)(a + b));
-            else if (strcmp(op, "-=") == 0) result = uf ? make_float(a - b) : make_int((long long)(a - b));
-            else if (strcmp(op, "*=") == 0) result = uf ? make_float(a * b) : make_int((long long)(a * b));
+            if      (strcmp(op, "+=") == 0) result = uf ? make_float(ida + idb) : make_int(iia + iib);
+            else if (strcmp(op, "-=") == 0) result = uf ? make_float(ida - idb) : make_int(iia - iib);
+            else if (strcmp(op, "*=") == 0) result = uf ? make_float(ida * idb) : make_int(iia * iib);
             else if (strcmp(op, "/=") == 0) {
-                if (b == 0.0) { runtime_error("division by zero"); return NULL_VAL; }
-                result = uf ? make_float(a / b) : make_int((long long)(a / b));
+                if (uf ? idb == 0.0 : iib == 0) { runtime_error("division by zero"); return NULL_VAL; }
+                result = uf ? make_float(ida / idb) : make_int(iia / iib);
             }
             else if (strcmp(op, "%=") == 0) {
-                if (b == 0.0) { runtime_error("modulo by zero"); return NULL_VAL; }
-                result = uf ? make_float(fmod(a, b)) : make_int((long long)a % (long long)b);
+                if (uf ? idb == 0.0 : iib == 0) { runtime_error("modulo by zero"); return NULL_VAL; }
+                result = uf ? make_float(fmod(ida, idb)) : make_int(iia % iib);
             }
             else result = rhs;
             val_free(*item);
