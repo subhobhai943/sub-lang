@@ -326,7 +326,7 @@ static const char *elem_c_type(DataType elem) {
     case TYPE_FLOAT:  return "double";
     case TYPE_STRING: return "char *";
     case TYPE_BOOL:   return "bool";
-    default:          return "long";
+    default:          return "long long";
     }
 }
 
@@ -386,11 +386,11 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, "({char _buf[4096]; snprintf(_buf, sizeof(_buf), \"");
                     /* Build format string */
                     if (node->left->data_type == TYPE_STRING) sb_append(sb, "%%s");
-                    else if (node->left->data_type == TYPE_INT) sb_append(sb, "%%ld");
+                    else if (node->left->data_type == TYPE_INT) sb_append(sb, "%%lld");
                     else if (node->left->data_type == TYPE_FLOAT) sb_append(sb, "%%g");
                     else sb_append(sb, "%%s");
                     if (node->right->data_type == TYPE_STRING) sb_append(sb, "%%s");
-                    else if (node->right->data_type == TYPE_INT) sb_append(sb, "%%ld");
+                    else if (node->right->data_type == TYPE_INT) sb_append(sb, "%%lld");
                     else if (node->right->data_type == TYPE_FLOAT) sb_append(sb, "%%g");
                     else sb_append(sb, "%%s");
                     sb_append(sb, "\", ");
@@ -488,8 +488,8 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
         case AST_ARRAY_LITERAL:
             {
                 DataType elem = infer_elem_type(node);
-                sb_append(sb, "sub_array_of(%d, %ld", elem_kind_code(elem),
-                          (long)node->child_count);
+                sb_append(sb, "sub_array_of(%d, %lld", elem_kind_code(elem),
+                          (long long)node->child_count);
                 for (int i = 0; i < node->child_count; i++) {
                     sb_append(sb, ", ");
                     gen_elem_in(sb, node->children[i], elem);
@@ -555,13 +555,13 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                 gen_elem_out_open(sb, elem);
                 sb_append(sb, "sub_array_get((SubArray*)(");
                 generate_expression(sb, node->left);
-                sb_append(sb, "), (long)(");
+                sb_append(sb, "), (long long)(");
                 generate_expression(sb, node->right);
                 sb_append(sb, ")))");
             } else {
                 sb_append(sb, "sub_array_get((SubArray*)(");
                 generate_expression(sb, node->left);
-                sb_append(sb, "), (long)(");
+                sb_append(sb, "), (long long)(");
                 generate_expression(sb, node->right);
                 sb_append(sb, "))");
             }
@@ -677,9 +677,9 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                 } else if (method && strcmp(method, "substring") == 0) {
                     sb_append(sb, "sub_str_substring((const char*)(");
                     generate_expression(sb, node->left->left);
-                    sb_append(sb, "), (long)(");
+                    sb_append(sb, "), (long long)(");
                     if (node->child_count > 0) generate_expression(sb, node->children[0]); else sb_append(sb, "0");
-                    sb_append(sb, "), (long)(");
+                    sb_append(sb, "), (long long)(");
                     if (node->child_count > 1) generate_expression(sb, node->children[1]); else sb_append(sb, "-1");
                     sb_append(sb, "))");
                 } else if (method && strcmp(method, "split") == 0) {
@@ -705,7 +705,7 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                 } else if (method && strcmp(method, "char_at") == 0) {
                     sb_append(sb, "sub_str_char_at((const char*)(");
                     generate_expression(sb, node->left->left);
-                    sb_append(sb, "), (long)(");
+                    sb_append(sb, "), (long long)(");
                     if (node->child_count > 0) generate_expression(sb, node->children[0]); else sb_append(sb, "0");
                     sb_append(sb, "))");
                 } else {
@@ -724,8 +724,8 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                         sb_append(sb, "printf(\"");
                         for (int i = 0; i < node->child_count; i++) {
                             ASTNode *arg = node->children[i];
-                            const char *fmt = "%ld";
-                            if (arg->data_type == TYPE_INT) fmt = "%ld";
+                            const char *fmt = "%lld";
+                            if (arg->data_type == TYPE_INT) fmt = "%lld";
                             else if (arg->data_type == TYPE_FLOAT) fmt = "%g";
                             else if (arg->data_type == TYPE_BOOL) fmt = "%d";
                             else if (arg->data_type == TYPE_STRING) fmt = "%s";
@@ -736,7 +736,7 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                                               strcmp(m, "substring") == 0 || strcmp(m, "replace") == 0 ||
                                               strcmp(m, "trim") == 0 || strcmp(m, "join") == 0 ||
                                               strcmp(m, "char_at") == 0)) fmt = "%s";
-                                    else if (m && strcmp(m, "contains") == 0) fmt = "%ld";
+                                    else if (m && strcmp(m, "contains") == 0) fmt = "%lld";
                                 } else if (arg->value) {
                                     const char *f = arg->value;
                                     if (f && (strcmp(f, "str") == 0 || strcmp(f, "to_string") == 0 ||
@@ -754,14 +754,14 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                             } else if (arg->type == AST_LITERAL && arg->value) {
                                 char *end;
                                 (void)strtol(arg->value, &end, 10);
-                                if (*end == '\0') fmt = "%ld";
+                                if (*end == '\0') fmt = "%lld";
                                 else {
                                     (void)strtod(arg->value, &end);
                                     if (*end == '\0') fmt = "%g";
                                     else fmt = "%s";
                                 }
                             } else if (arg->type == AST_BINARY_EXPR) {
-                                if (arg->data_type == TYPE_INT) fmt = "%ld";
+                                if (arg->data_type == TYPE_INT) fmt = "%lld";
                                 else if (arg->data_type == TYPE_FLOAT) fmt = "%g";
                                 else if (arg->data_type == TYPE_STRING) fmt = "%s";
                             }
@@ -778,7 +778,7 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                                 else if (it == TYPE_BOOL)   fmt = "%s";
                                 else if (it == TYPE_ARRAY)  fmt = "%s";
                                 else if (it == TYPE_OBJECT) fmt = "%s";
-                                else if (it == TYPE_INT)    fmt = "%ld";
+                                else if (it == TYPE_INT)    fmt = "%lld";
                             }
                             /* SUB spells booleans true/false, so C must print
                                the words rather than 1/0 - otherwise the same
@@ -802,7 +802,7 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                             int as_array    = !is_bool && (at == TYPE_ARRAY);
                             int as_object   = !is_bool && (at == TYPE_OBJECT);
                             if (is_bool)          sb_append(sb, "((");
-                            else if (cast_long)   sb_append(sb, "(long)(");
+                            else if (cast_long)   sb_append(sb, "(long long)(");
                             else if (cast_double) sb_append(sb, "(double)(");
                             else if (as_array)    sb_append(sb, "sub_array_str((SubArray*)(");
                             else if (as_object)   sb_append(sb, "sub_obj_str((SubObject*)(");
@@ -826,7 +826,7 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     }
                     else if (strcmp(fn, "int") == 0) {
                         if (node->child_count > 0 && node->children[0]->data_type == TYPE_STRING) sb_append(sb, "sub_int_from_str(");
-                        else sb_append(sb, "(long)(");
+                        else sb_append(sb, "(long long)(");
                     }
                     else if (strcmp(fn, "str") == 0) {
                         if (node->child_count > 0) {
@@ -864,7 +864,7 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                         int is_arr = (node->child_count > 0 &&
                                       infer_expr_type(node->children[0]) == TYPE_ARRAY);
                         sb_append(sb, is_arr ? "sub_array_len((SubArray*)("
-                                             : "(long)strlen((const char*)(");
+                                             : "(long long)strlen((const char*)(");
                         if (node->child_count > 0) generate_expression(sb, node->children[0]);
                         else sb_append(sb, "\"\"");
                         sb_append(sb, "))");
@@ -896,9 +896,9 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     }
                     else if (strcmp(fn, "sqrt") == 0) sb_append(sb, "sqrt(");
                     else if (strcmp(fn, "abs") == 0) sb_append(sb, "fabs(");
-                    else if (strcmp(fn, "floor") == 0) sb_append(sb, "(long)floor(");
-                    else if (strcmp(fn, "ceil") == 0) sb_append(sb, "(long)ceil(");
-                    else if (strcmp(fn, "round") == 0) sb_append(sb, "(long)round(");
+                    else if (strcmp(fn, "floor") == 0) sb_append(sb, "(long long)floor(");
+                    else if (strcmp(fn, "ceil") == 0) sb_append(sb, "(long long)ceil(");
+                    else if (strcmp(fn, "round") == 0) sb_append(sb, "(long long)round(");
                     else if (strcmp(fn, "min") == 0 || strcmp(fn, "max") == 0) {
                         /* fmin/fmax are double-only: using them for two
                            integers rounds anything past 2^53 and makes the
@@ -952,7 +952,7 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     else if (strcmp(fn, "char_at") == 0) {
                         sb_append(sb, "sub_str_char_at((const char*)(");
                         if (node->child_count > 0) generate_expression(sb, node->children[0]);
-                        sb_append(sb, "), (long)(");
+                        sb_append(sb, "), (long long)(");
                         if (node->child_count > 1) generate_expression(sb, node->children[1]);
                         else sb_append(sb, "0");
                         sb_append(sb, "))");
@@ -966,11 +966,11 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                                                             : "sub_str_substring_from((const char*)(");
                         if (node->child_count > 0) generate_expression(sb, node->children[0]);
                         else sb_append(sb, "\"\"");
-                        sb_append(sb, "), (long)(");
+                        sb_append(sb, "), (long long)(");
                         if (node->child_count > 1) generate_expression(sb, node->children[1]);
                         else sb_append(sb, "0");
                         if (node->child_count > 2) {
-                            sb_append(sb, "), (long)(");
+                            sb_append(sb, "), (long long)(");
                             generate_expression(sb, node->children[2]);
                         }
                         sb_append(sb, "))");
@@ -1103,7 +1103,7 @@ static int join_elem_kind(ASTNode *arr) {
    the declaration itself because a global is declared in one place and
    initialized in another, and both have to spell the type the same way. */
 static const char* c_decl_type(ASTNode *node) {
-    if (!node) return "long ";
+    if (!node) return "long long ";
     if (node->data_type == TYPE_STRING) return "char *";
     if (node->data_type == TYPE_BOOL)   return "bool ";
     if (node->data_type == TYPE_FLOAT)  return "double ";
@@ -1124,7 +1124,7 @@ static const char* c_decl_type(ASTNode *node) {
          (strcmp(node->right->value, "null") == 0 ||
           strcmp(node->right->value, "nil") == 0)))
         return "double ";
-    return "long ";
+    return "long long ";
 }
 
 /* The ` = <initializer>` half, or nothing when there is no initializer. */
@@ -1144,8 +1144,8 @@ static void c_decl_init(StringBuilder *sb, ASTNode *node) {
         sb_append(sb, " = sub_strdup(");
         generate_expression(sb, node->right);
         sb_append(sb, ")");
-    } else if (strcmp(type, "long ") == 0) {
-        sb_append(sb, " = (long)(");
+    } else if (strcmp(type, "long long ") == 0) {
+        sb_append(sb, " = (long long)(");
         generate_expression(sb, node->right);
         sb_append(sb, ")");
     } else {
@@ -1190,7 +1190,7 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
             DataType found_ret = find_return_type_recursive(node->body);
             DataType fn_type = node->data_type != TYPE_UNKNOWN ? node->data_type : found_ret;
             
-            if (fn_type == TYPE_INT || fn_type == TYPE_AUTO) ret_type = "long";
+            if (fn_type == TYPE_INT || fn_type == TYPE_AUTO) ret_type = "long long";
             else if (fn_type == TYPE_FLOAT) ret_type = "double";
             else if (fn_type == TYPE_STRING) ret_type = "char*";
             else if (fn_type == TYPE_BOOL) ret_type = "bool";
@@ -1254,7 +1254,7 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
                 if (node->children && node->child_count > 0 &&
                     node->children[0]->type == AST_RANGE_EXPR) {
                     ASTNode *range = node->children[0];
-                    sb_append(sb, "for (long %s = ", var);
+                    sb_append(sb, "for (long long %s = ", var);
                     if (range->right) {
                         /* range(start, end) */
                         if (range->left) generate_expression(sb, range->left);
@@ -1283,7 +1283,7 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
                         generate_expression(sb, node->condition);
                         sb_append(sb, ");\n");
                         indent_code(sb, indent);
-                        sb_append(sb, "for (long _idx_%d = 0; _str_%d && _str_%d[_idx_%d]; _idx_%d++) {\n", seq, seq, seq, seq, seq);
+                        sb_append(sb, "for (long long _idx_%d = 0; _str_%d && _str_%d[_idx_%d]; _idx_%d++) {\n", seq, seq, seq, seq, seq);
                         indent_code(sb, indent + 1);
                         sb_append(sb, "char _buf_%d[2] = {_str_%d[_idx_%d], '\\0'};\n", seq, seq, seq);
                         indent_code(sb, indent + 1);
@@ -1293,7 +1293,7 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
                         generate_expression(sb, node->condition);
                         sb_append(sb, ");\n");
                         indent_code(sb, indent);
-                        sb_append(sb, "for (long _idx_%d = 0; _arr_%d && _idx_%d < _arr_%d->count; _idx_%d++) {\n", seq, seq, seq, seq, seq);
+                        sb_append(sb, "for (long long _idx_%d = 0; _arr_%d && _idx_%d < _arr_%d->count; _idx_%d++) {\n", seq, seq, seq, seq, seq);
                         indent_code(sb, indent + 1);
                         DataType el = infer_elem_type(node->condition);
                         sb_append(sb, "%s %s = ", elem_c_type(el), var);
@@ -1301,7 +1301,7 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
                         sb_append(sb, "_arr_%d->items[_idx_%d]);\n", seq, seq);
                     }
                 } else {
-                    sb_append(sb, "for (long %s = 0; %s < 10; %s++) {\n", var, var, var);
+                    sb_append(sb, "for (long long %s = 0; %s < 10; %s++) {\n", var, var, var);
                 }
             }
             { int sv = g_break_switch; g_break_switch = -1;
@@ -1367,7 +1367,7 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
                 } else {
                 sb_append(sb, "sub_array_set((SubArray*)(");
                 generate_expression(sb, node->left->left);
-                sb_append(sb, "), (long)(");
+                sb_append(sb, "), (long long)(");
                 generate_expression(sb, node->left->right);
                 sb_append(sb, "), ");
                 gen_elem_in(sb, node->right, infer_elem_type(node->left->left));
@@ -1620,7 +1620,7 @@ static char* generate_c_code(ASTNode *ast) {
        defined, and both report a runtime error the interpreter also
        reports. */
     sb_append(sb, "static void sub_die(const char *msg);\n");
-    sb_append(sb, "static void sub_die_index(long idx, long count);\n");
+    sb_append(sb, "static void sub_die_index(long long idx, long long count);\n");
     sb_append(sb, "static inline char* sub_strdup(const char *s);\n\n");
     
     sb_append(sb, "/* Memory Management Helpers */\n");
@@ -1649,23 +1649,23 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    int kind; /* 0 int/bool, 1 string, 2 float */\n");
     sb_append(sb, "} SubObjKV;\n");
     sb_append(sb, "typedef struct SubObject {\n");
-    sb_append(sb, "    long count;\n");
-    sb_append(sb, "    long capacity;\n");
+    sb_append(sb, "    long long count;\n");
+    sb_append(sb, "    long long capacity;\n");
     sb_append(sb, "    SubObjKV *slots;\n");
     sb_append(sb, "} SubObject;\n\n");
     sb_append(sb, "static inline SubObject* sub_object_new(void) {\n");
     sb_append(sb, "    SubObject *obj = (SubObject*)calloc(1, sizeof(SubObject));\n");
     sb_append(sb, "    return obj;\n");
     sb_append(sb, "}\n");
-    sb_append(sb, "static inline long sub_obj_find(SubObject *o, const char *key) {\n");
+    sb_append(sb, "static inline long long sub_obj_find(SubObject *o, const char *key) {\n");
     sb_append(sb, "    if (!o || !key) return -1;\n");
-    sb_append(sb, "    for (long i = 0; i < o->count; i++)\n");
+    sb_append(sb, "    for (long long i = 0; i < o->count; i++)\n");
     sb_append(sb, "        if (strcmp(o->slots[i].key, key) == 0) return i;\n");
     sb_append(sb, "    return -1;\n");
     sb_append(sb, "}\n");
     sb_append(sb, "static inline void sub_obj_set(SubObject *o, const char *key, int kind, long long val) {\n");
     sb_append(sb, "    if (!o || !key) return;\n");
-    sb_append(sb, "    long i = sub_obj_find(o, key);\n");
+    sb_append(sb, "    long long i = sub_obj_find(o, key);\n");
     sb_append(sb, "    if (i < 0) {\n");
     sb_append(sb, "        if (o->count >= o->capacity) {\n");
     sb_append(sb, "            o->capacity = o->capacity ? o->capacity * 2 : 8;\n");
@@ -1677,11 +1677,11 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    o->slots[i].kind = kind;\n");
     sb_append(sb, "    o->slots[i].val = val;\n");
     sb_append(sb, "}\n");
-    sb_append(sb, "static inline long sub_obj_len(SubObject *o) {\n");
+    sb_append(sb, "static inline long long sub_obj_len(SubObject *o) {\n");
     sb_append(sb, "    return o ? o->count : 0;\n");
     sb_append(sb, "}\n");
     sb_append(sb, "static inline long long sub_obj_get(SubObject *o, const char *key) {\n");
-    sb_append(sb, "    long i = sub_obj_find(o, key);\n");
+    sb_append(sb, "    long long i = sub_obj_find(o, key);\n");
     sb_append(sb, "    if (i < 0) sub_die(\"object property read before assignment\");\n");
     sb_append(sb, "    return o->slots[i].val;\n");
     sb_append(sb, "}\n");
@@ -1708,7 +1708,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    if (!out) return sub_strdup(\"{}\");\n");
     sb_append(sb, "    strcpy(out, \"{\");\n");
     sb_append(sb, "    char scratch[64];\n");
-    sb_append(sb, "    for (long i = 0; i < o->count; i++) {\n");
+    sb_append(sb, "    for (long long i = 0; i < o->count; i++) {\n");
     sb_append(sb, "        const char *piece = sub_obj_kind_str(&o->slots[i], scratch, sizeof scratch);\n");
     sb_append(sb, "        size_t need = strlen(o->slots[i].key) + strlen(piece) + 8;\n");
     sb_append(sb, "        while (len + need > cap) { cap *= 2; out = (char*)realloc(out, cap); }\n");
@@ -1726,8 +1726,8 @@ static char* generate_c_code(ASTNode *ast) {
        element type SUB has. `kind` records which, because printing an array
        is the one operation with no static type to hand. */
     sb_append(sb, "typedef struct SubArray {\n");
-    sb_append(sb, "    long count;\n");
-    sb_append(sb, "    long capacity;\n");
+    sb_append(sb, "    long long count;\n");
+    sb_append(sb, "    long long capacity;\n");
     sb_append(sb, "    int  kind;   /* 0 int, 1 float, 2 string, 3 bool */\n");
     sb_append(sb, "    long long *items;\n");
     sb_append(sb, "} SubArray;\n\n");
@@ -1746,7 +1746,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    return a;\n");
     sb_append(sb, "}\n\n");
     
-    sb_append(sb, "static inline SubArray* sub_array_of(int kind, long n, ...) {\n");
+    sb_append(sb, "static inline SubArray* sub_array_of(int kind, long long n, ...) {\n");
     sb_append(sb, "    SubArray *a = sub_array_create();\n");
     sb_append(sb, "    if (!a) return NULL;\n");
     sb_append(sb, "    a->kind = kind;\n");
@@ -1756,7 +1756,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    }\n");
     sb_append(sb, "    va_list args;\n");
     sb_append(sb, "    va_start(args, n);\n");
-    sb_append(sb, "    for (long i = 0; i < n; i++) {\n");
+    sb_append(sb, "    for (long long i = 0; i < n; i++) {\n");
     sb_append(sb, "        a->items[a->count++] = va_arg(args, long long);\n");
     sb_append(sb, "    }\n");
     sb_append(sb, "    va_end(args);\n");
@@ -1779,12 +1779,12 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    return a->items[--a->count];\n");
     sb_append(sb, "}\n\n");
     
-    sb_append(sb, "static void sub_die_index(long idx, long count) {\n");
+    sb_append(sb, "static void sub_die_index(long long idx, long long count) {\n");
     sb_append(sb, "    fprintf(stderr, \"RuntimeError: array index %%ld out of "
                   "bounds [0, %%ld)\\n\", idx, count);\n");
     sb_append(sb, "    exit(70);\n}\n");
     /* A negative index counts from the end: a[-1] is the last element. */
-    sb_append(sb, "static inline long sub_array_idx(SubArray *a, long idx) {\n");
+    sb_append(sb, "static inline long long sub_array_idx(SubArray *a, long idx) {\n");
     sb_append(sb, "    if (!a) sub_die(\"index of a non-array\");\n");
     sb_append(sb, "    if (idx < 0) idx += a->count;\n");
     sb_append(sb, "    if (idx < 0 || idx >= a->count) sub_die_index(idx, a->count);\n");
@@ -1807,7 +1807,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    char *out = (char*)malloc(cap);\n");
     sb_append(sb, "    if (!out) return sub_strdup(\"[]\");\n");
     sb_append(sb, "    strcpy(out, \"[\");\n");
-    sb_append(sb, "    for (long i = 0; i < a->count; i++) {\n");
+    sb_append(sb, "    for (long long i = 0; i < a->count; i++) {\n");
     sb_append(sb, "        char buf[64];\n");
     sb_append(sb, "        const char *piece = buf;\n");
     sb_append(sb, "        if (a->kind == 1) snprintf(buf, sizeof buf, \"%%g\", sub_dbl(a->items[i]));\n");
@@ -1825,7 +1825,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    return out;\n");
     sb_append(sb, "}\n\n");
     
-    sb_append(sb, "static inline long sub_array_len(SubArray *a) {\n");
+    sb_append(sb, "static inline long long sub_array_len(SubArray *a) {\n");
     sb_append(sb, "    return a ? a->count : 0;\n");
     sb_append(sb, "}\n\n");
     
@@ -1840,7 +1840,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    size_t cap = sep_len * (size_t)(a->count - 1) + 1;\n");
     sb_append(sb, "    char **parts = (char**)malloc(sizeof(char*) * (size_t)a->count);\n");
     sb_append(sb, "    char scratch[64];\n");
-    sb_append(sb, "    for (long i = 0; i < a->count; i++) {\n");
+    sb_append(sb, "    for (long long i = 0; i < a->count; i++) {\n");
     sb_append(sb, "        const char *piece;\n");
     sb_append(sb, "        if (kind == 1) piece = (const char*)a->items[i] ? (const char*)a->items[i] : \"\";\n");
     sb_append(sb, "        else if (kind == 2) { double d; memcpy(&d, &a->items[i], sizeof(double));\n");
@@ -1853,7 +1853,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    char *res = (char*)malloc(cap);\n");
     sb_append(sb, "    res[0] = 0;\n");
     sb_append(sb, "    char *w = res;\n");
-    sb_append(sb, "    for (long i = 0; i < a->count; i++) {\n");
+    sb_append(sb, "    for (long long i = 0; i < a->count; i++) {\n");
     sb_append(sb, "        if (i > 0) { memcpy(w, sep, sep_len); w += sep_len; }\n");
     sb_append(sb, "        size_t n = strlen(parts[i]);\n");
     sb_append(sb, "        memcpy(w, parts[i], n); w += n;\n");
@@ -1884,7 +1884,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    return fmod(a, b);\n}\n");
     sb_append(sb, "static inline long long sub_min_i(long long a, long long b) { return a < b ? a : b; }\n");
     sb_append(sb, "static inline long long sub_max_i(long long a, long long b) { return a > b ? a : b; }\n");
-    sb_append(sb, "static inline long sub_str_len(const char *s) { return s ? (long)strlen(s) : 0; }\n");
+    sb_append(sb, "static inline long long sub_str_len(const char *s) { return s ? (long)strlen(s) : 0; }\n");
     sb_append(sb, "static inline char* sub_str_upper(const char *s) {\n");
     sb_append(sb, "    if (!s) return sub_strdup(\"\");\n");
     sb_append(sb, "    char *res = sub_strdup(s);\n");
@@ -1897,7 +1897,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    for (char *p = res; *p; p++) *p = (char)tolower((unsigned char)*p);\n");
     sb_append(sb, "    return res;\n");
     sb_append(sb, "}\n");
-    sb_append(sb, "static inline void sub_runtime_error(const char *fmt, long a, long b) {\n");
+    sb_append(sb, "static inline void sub_runtime_error(const char *fmt, long long a, long long b) {\n");
     sb_append(sb, "    fflush(stdout);\n");
     sb_append(sb, "    fprintf(stderr, fmt, a, b);\n");
     sb_append(sb, "    fputc(10, stderr);\n");
@@ -1906,22 +1906,22 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "/* [start, end) with the interpreter's clamping: a negative bound is 0, a\n");
     sb_append(sb, "   bound past the end is the length, and a start past the end collapses to\n");
     sb_append(sb, "   it. Every one of those cases is reachable from user arithmetic. */\n");
-    sb_append(sb, "static inline char* sub_str_substring(const char *s, long start, long end) {\n");
+    sb_append(sb, "static inline char* sub_str_substring(const char *s, long long start, long long end) {\n");
     sb_append(sb, "    if (!s) return sub_strdup(\"\");\n");
-    sb_append(sb, "    long len = (long)strlen(s);\n");
+    sb_append(sb, "    long long len = (long)strlen(s);\n");
     sb_append(sb, "    if (start < 0) start = 0;\n");
     sb_append(sb, "    if (end < 0) end = 0;\n");
     sb_append(sb, "    if (start > len) start = len;\n");
     sb_append(sb, "    if (end > len) end = len;\n");
     sb_append(sb, "    if (start > end) start = end;\n");
-    sb_append(sb, "    long n = end - start;\n");
+    sb_append(sb, "    long long n = end - start;\n");
     sb_append(sb, "    char *res = (char*)malloc((size_t)n + 1);\n");
     sb_append(sb, "    memcpy(res, s + start, (size_t)n);\n");
     sb_append(sb, "    res[n] = 0;\n");
     sb_append(sb, "    return res;\n");
     sb_append(sb, "}\n");
-    sb_append(sb, "static inline char* sub_str_substring_from(const char *s, long start) {\n");
-    sb_append(sb, "    return sub_str_substring(s, start, s ? (long)strlen(s) : 0);\n");
+    sb_append(sb, "static inline char* sub_str_substring_from(const char *s, long long start) {\n");
+    sb_append(sb, "    return sub_str_substring(s, start, s ? (long long)strlen(s) : 0);\n");
     sb_append(sb, "}\n");
     sb_append(sb, "/* strtok is the wrong tool and was the bug here: it treats the separator as\n");
     sb_append(sb, "   a set of characters, collapses runs of them, and drops empty fields, so\n");
@@ -1932,7 +1932,7 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    SubArray *arr = sub_array_create();\n");
     sb_append(sb, "    if (!s) { sub_array_push(arr, (long long)(intptr_t)sub_strdup(\"\")); return arr; }\n");
     sb_append(sb, "    if (!sep || !*sep) {\n");
-    sb_append(sb, "        for (long i = 0; s[i]; i++) {\n");
+    sb_append(sb, "        for (long long i = 0; s[i]; i++) {\n");
     sb_append(sb, "            char ch[2]; ch[0] = s[i]; ch[1] = 0;\n");
     sb_append(sb, "            sub_array_push(arr, (long long)(intptr_t)sub_strdup(ch));\n");
     sb_append(sb, "        }\n");
@@ -1983,14 +1983,14 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    if (*s == '\\0') return sub_strdup(\"\");\n");
     sb_append(sb, "    const char *end = s + strlen(s) - 1;\n");
     sb_append(sb, "    while (end > s && isspace((unsigned char)*end)) end--;\n");
-    sb_append(sb, "    long len = (long)(end - s + 1);\n");
+    sb_append(sb, "    long long len = (long)(end - s + 1);\n");
     sb_append(sb, "    char *res = (char*)malloc(len + 1);\n");
     sb_append(sb, "    memcpy(res, s, len);\n");
     sb_append(sb, "    res[len] = '\\0';\n");
     sb_append(sb, "    return res;\n");
     sb_append(sb, "}\n");
-    sb_append(sb, "static inline char* sub_str_char_at(const char *s, long idx) {\n");
-    sb_append(sb, "    long len = s ? (long)strlen(s) : 0;\n");
+    sb_append(sb, "static inline char* sub_str_char_at(const char *s, long long idx) {\n");
+    sb_append(sb, "    long long len = s ? (long)strlen(s) : 0;\n");
     sb_append(sb, "    if (idx < 0) idx += len;\n");
     sb_append(sb, "    if (idx < 0 || idx >= len)\n");
     sb_append(sb, "        sub_runtime_error(\"RuntimeError: char_at(%ld) out of range [0, %ld)\", idx, len);\n");
@@ -2011,8 +2011,8 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "    return sub_strdup(\"\");\n");
     sb_append(sb, "}\n");
     sb_append(sb, "static inline double sub_float_from_str(const char* s) { return s ? atof(s) : 0.0; }\n");
-    sb_append(sb, "static inline long sub_int_from_str(const char* s) { return s ? atol(s) : 0; }\n");
-    sb_append(sb, "static inline char* sub_str_from_long(long v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%ld\", v); return sub_strdup(buf); }\n");
+    sb_append(sb, "static inline long long sub_int_from_str(const char* s) { return s ? atol(s) : 0; }\n");
+    sb_append(sb, "static inline char* sub_str_from_long(long long v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%lld\", v); return sub_strdup(buf); }\n");
     sb_append(sb, "static inline char* sub_str_from_double(double v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%g\", v); return sub_strdup(buf); }\n\n");
 
     /* Networking builtins: the same minimal HTTP/1.1-over-sockets client the
@@ -2107,17 +2107,17 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "}\n");
     sb_append(sb, "static inline char* sub_net_fetch(const char* url) { return sub_net_request(\"GET\", url, NULL); }\n");
     sb_append(sb, "static inline char* sub_net_post(const char* url, const char* body) { return sub_net_request(\"POST\", url, body); }\n");
-    sb_append(sb, "static inline long sub_net_download(const char* url, const char* path) {\n");
+    sb_append(sb, "static inline long long sub_net_download(const char* url, const char* path) {\n");
     sb_append(sb, "    char* b = sub_net_request(\"GET\", url, NULL);\n");
     sb_append(sb, "    FILE* f = fopen(path, \"wb\");\n");
     sb_append(sb, "    if (!f) sub_die(\"net_download: cannot open output file\");\n");
     sb_append(sb, "    size_t n = fwrite(b, 1, strlen(b), f);\n");
-    sb_append(sb, "    fclose(f); return (long)n;\n");
+    sb_append(sb, "    fclose(f); return (long long)n;\n");
     sb_append(sb, "}\n");
     sb_append(sb, "#else\n");
     sb_append(sb, "static inline char* sub_net_fetch(const char* url) { (void)url; sub_die(\"net_fetch is not supported on this platform\"); }\n");
     sb_append(sb, "static inline char* sub_net_post(const char* url, const char* b) { (void)url; (void)b; sub_die(\"net_post is not supported on this platform\"); }\n");
-    sb_append(sb, "static inline long sub_net_download(const char* url, const char* p) { (void)url; (void)p; sub_die(\"net_download is not supported on this platform\"); }\n");
+    sb_append(sb, "static inline long long sub_net_download(const char* url, const char* p) { (void)url; (void)p; sub_die(\"net_download is not supported on this platform\"); }\n");
     sb_append(sb, "#endif\n\n");
     }
     

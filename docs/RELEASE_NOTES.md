@@ -1,5 +1,28 @@
 # Release Notes
 
+## v1.0.11
+
+Fixes the Windows regression-test failures (the C backend and the
+net checks disagreed with Windows' C type model).
+
+### C backend on LLP64
+
+Windows' C compiler is LLP64: `long` is 32-bit there, while Linux and
+macOS are LP64 where `long` is 64-bit. The C backend used `long`
+everywhere, so `subc --via-c` silently truncated 64-bit integers on
+Windows — `9007199254740993` printed as `1`. The emitted C now uses
+`long long` for every SUB integer (variables, parameters, return types,
+runtime helpers, printf formats `%lld`), which is 64-bit on all three
+platforms.
+
+### Networking checks on Windows
+
+`net_fetch`/`net_post` are POSIX-socket builtins; the Windows build
+compiles them to the documented runtime-error stub. The test suite now
+asserts the stub's behaviour on Windows (and skips, with a reason, the
+loopback flow the hosted macOS runners' firewall blocks) instead of
+failing checks that were never meant to run there.
+
 ## v1.0.10
 
 FreeBSD is now a first-class release platform.

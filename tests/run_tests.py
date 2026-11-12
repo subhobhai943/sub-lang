@@ -195,6 +195,24 @@ def run_net_checks():
         return [("test_net.sb (all backends)", None,
                  "loopback blocked by hosted macOS runners; covered on Linux")]
 
+    # net_fetch/net_post are POSIX-socket builtins: the Windows builds
+    # compile them to a stub that raises the documented runtime error, so
+    # a failing connect() on Windows means the stub worked. The stub text
+    # is asserted instead of the whole loopback flow.
+    if sys.platform == "win32":
+        results = []
+        workdir = tempfile.mkdtemp(prefix="sub_net_stub_")
+        with open(os.path.join(SCRIPT_DIR, "test_net.sb.in")) as f:
+            prog = f.read().replace("__PORT_FILE__", "1").replace("__PORT_ECHO__", "2")
+        sb_path = os.path.join(workdir, "test_net.sb")
+        with open(sb_path, "w") as f:
+            f.write(prog)
+        rc, out = run([SUBI, sb_path], cwd=workdir)
+        ok = rc != 0 and "not supported" in out
+        results.append(("subi: net stub on Windows", ok,
+                        f"exit {rc}: {out[:200]}"))
+        return results
+
     workdir = tempfile.mkdtemp(prefix="sub_net_test_")
     port_file, port_echo = free_port(), free_port()
     shutil.copy(os.path.join(SCRIPT_DIR, "net_echo_server.py"), workdir)
