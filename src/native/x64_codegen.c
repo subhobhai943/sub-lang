@@ -102,6 +102,33 @@ static void here(size_t site) { e_patch_rel32(T, site, C->text.len); }
    Locals
    ---------------------------------------------------------------- */
 
+/* Class declarations, so `Point.new` can find its field defaults wherever
+   the class was declared. The registry points into the program AST and owns
+   nothing; it is rebuilt per compilation. */
+#define MAX_NATIVE_CLASSES 64
+static ASTNode *g_native_classes[MAX_NATIVE_CLASSES];
+static int g_native_class_count;
+
+static void native_classes_collect(ASTNode *n) {
+    if (!n || g_native_class_count >= MAX_NATIVE_CLASSES) return;
+    if (n->type == AST_CLASS_DECL)
+        g_native_classes[g_native_class_count++] = n;
+    native_classes_collect(n->body);
+    native_classes_collect(n->left);
+    native_classes_collect(n->right);
+    for (int i = 0; i < n->child_count; i++)
+        native_classes_collect(n->children[i]);
+}
+
+static ASTNode *native_class_lookup(const char *name) {
+    if (!name) return NULL;
+    for (int i = 0; i < g_native_class_count; i++)
+        if (g_native_classes[i]->value &&
+            strcmp(g_native_classes[i]->value, name) == 0)
+            return g_native_classes[i];
+    return NULL;
+}
+
 /* The program's top-level variables. Unlike F.locals these outlive a
    function, so reset_fn() leaves them alone. */
 static Local GLOB[X64_G_GLOBAL_N];
@@ -285,8 +312,22 @@ static DataType ty(ASTNode *n) {
     switch (n->type) {
     case AST_ARRAY_LITERAL:
         return TYPE_ARRAY;
-    case AST_ARRAY_ACCESS:
+    case AST_OBJECT_LITERAL:
+        return TYPE_OBJECT;
+    case AST_ARRAY_ACCESS: {
+        /* obj["k"] has the property's recorded type, not an array element
+           type. Falls back through infer_expr_type, which consults the
+           same property registry the other backends use. */
+        if (n->left && infer_expr_type(n->left) == TYPE_OBJECT)
+            return infer_expr_type(n);
         return elem_type_of(n->left);
+    }
+    case AST_MEMBER_ACCESS:
+        /* .length is an int; obj.field is the property's recorded type;
+           ClassName.new is an object. */
+        if (n->value && !strcmp(n->value, "length")) return TYPE_INT;
+        if (n->value && !strcmp(n->value, "new")) return TYPE_OBJECT;
+        return infer_expr_type(n);
     case AST_IDENTIFIER: {
         Local *l = loc_find(n->value);
         if (l && l->type != TYPE_UNKNOWN) return l->type;
@@ -403,7 +444,8 @@ static int array_kind(DataType elem) {
 static DataType concrete(DataType t) {
     switch (t) {
     case TYPE_FLOAT: case TYPE_STRING: case TYPE_BOOL:
-    case TYPE_INT:   case TYPE_ARRAY:  return t;
+    case TYPE_INT:   case TYPE_ARRAY:
+    case TYPE_OBJECT:                    return t;
     default: return TYPE_INT;
     }
 }
@@ -418,7 +460,6 @@ static const char *ast_kind_name(ASTNodeType t) {
     case AST_MEMBER_ACCESS:   return "member access";
     case AST_NEW_EXPR:        return "`new`";
     case AST_ARROW_FUNCTION:  return "an arrow function";
-    case AST_CLASS_DECL:      return "a class declaration";
     case AST_TRY_STMT:        return "try/catch";
     case AST_THROW_STMT:      return "throw";
     case AST_SWITCH_STMT:     return "switch";
@@ -471,6 +512,7 @@ static void convert(DataType from, DataType want, ASTNode *src) {
         if (from == TYPE_FLOAT)      nc_call_rt(C, RT_F2S);
         else if (from == TYPE_BOOL)  nc_call_rt(C, RT_B2S);
         else if (from == TYPE_ARRAY) nc_call_rt(C, RT_ARR_STR);
+        else if (from == TYPE_OBJECT) nc_call_rt(C, RT_OBJ_STR);
         else                         nc_call_rt(C, RT_I2S);
         return;
     }
@@ -1115,12 +1157,137 @@ static void gen_expr(ASTNode *n) {
     }
 
     case AST_ARRAY_ACCESS: {
+        /* obj["key"]: string index reads a property. Non-literal or
+           non-string keys on an object are refused rather than guessed. */
+        if (infer_expr_type(n->left) == TYPE_OBJECT) {
+            if (!n->right || n->right->type != AST_LITERAL ||
+                n->right->data_type != TYPE_STRING || !n->right->value) {
+                nc_fail(C, "object indexing needs a literal string key "
+                           "(line %d)", n->line);
+                break;
+            }
+            DataType vt = ty(n);
+            gen_expr(n->left);
+            e_mov_r_r(T, RDI, RAX);
+            nc_load_cstr(C, RSI, n->right->value);
+            /* A property with no recorded static type could hold anything;
+               GETS renders whatever the slot actually holds, so the value
+               prints as what it is instead of as a raw pointer. */
+            nc_call_rt(C, (vt == TYPE_UNKNOWN || vt == TYPE_STRING)
+                             ? RT_OBJ_GETS : RT_OBJ_GET);
+            break;
+        }
         gen_expr(n->left);
         e_push(T, RAX);
         gen_as(n->right, TYPE_INT);
         e_mov_r_r(T, RSI, RAX);
         e_pop(T, RDI);
         nc_call_rt(C, RT_ARR_GET);
+        break;
+    }
+
+    case AST_MEMBER_ACCESS: {
+        const char *m = n->value;
+        if (!m || !n->left) { fail_unsupported(n, "expression"); break; }
+
+        /* s.length on a string, a.length on an array keep their existing
+           meaning; o.length on an object is the property count. */
+        DataType base = ty(n->left);
+        if (!strcmp(m, "length")) {
+            if (base == TYPE_OBJECT) {
+                gen_expr(n->left);
+                e_mov_r_r(T, RDI, RAX);
+                nc_call_rt(C, RT_OBJ_LEN);
+            } else if (base == TYPE_STRING) {
+                gen_expr(n->left);
+                e_mov_r_r(T, RDI, RAX);
+                nc_call_rt(C, RT_STRLEN);
+            } else {
+                gen_expr(n->left);
+                e_mov_r_mem(T, RAX, RAX, ARR_COUNT);
+            }
+            break;
+        }
+
+        /* ClassName.new: a fresh object with the class's field defaults.
+           The class table is built from AST_CLASS_DECL by
+           native_classes_collect(). */
+        if (!strcmp(m, "new") && n->left->type == AST_IDENTIFIER) {
+            ASTNode *cls = native_class_lookup(n->left->value);
+            if (!cls) {
+                nc_fail(C, "'%s' is not a class (line %d)",
+                        n->left->value ? n->left->value : "?", n->line);
+                break;
+            }
+            /* Instance with the class's declared field defaults, matching
+               the interpreter and the C backend. A method (fn) in the body
+               is refused rather than silently dropped. */
+            for (ASTNode *f = cls->body ? cls->body->body : NULL; f; f = f->next) {
+                if (f->type != AST_VAR_DECL && f->type != AST_CONST_DECL) {
+                    nc_fail(C, "class %s: only field declarations are "
+                               "supported (line %d)", cls->value ? cls->value : "?", f->line);
+                    break;
+                }
+            }
+            if (C->failed) break;
+            e_mov_r_imm64(T, RDI, 8);
+            nc_call_rt(C, RT_OBJ_NEW);
+            e_push(T, RAX);                          /* instance on the stack */
+            for (ASTNode *f = cls->body ? cls->body->body : NULL; f; f = f->next) {
+                if ((f->type == AST_VAR_DECL || f->type == AST_CONST_DECL) &&
+                    f->value && f->right) {
+                    DataType ft = ty(f->right);
+                    gen_as(f->right, ft);
+                    e_mov_r_r(T, RDX, RAX);          /* val */
+                    nc_load_cstr(C, RSI, f->value);  /* key */
+                    e_mov_r_mem(T, RDI, RSP, 0);    /* obj from its stack slot */
+                    e_mov_r_imm64(T, RCX, (uint64_t)(ft == TYPE_STRING ? 1 : ft == TYPE_FLOAT ? 2 : ft == TYPE_BOOL ? 3 : 0));
+                    nc_call_rt(C, RT_OBJ_SET);
+                }
+            }
+            e_pop(T, RAX);                           /* the instance */
+            break;
+        }
+
+        /* obj.field: read the property. Unknown-typed properties go
+           through GETS so the value is rendered per its runtime kind. */
+        if (base == TYPE_OBJECT || infer_expr_type(n->left) == TYPE_OBJECT) {
+            DataType vt = ty(n);
+            gen_expr(n->left);
+            e_mov_r_r(T, RDI, RAX);
+            nc_load_cstr(C, RSI, m);
+            nc_call_rt(C, (vt == TYPE_UNKNOWN || vt == TYPE_STRING)
+                             ? RT_OBJ_GETS : RT_OBJ_GET);
+            break;
+        }
+
+        fail_unsupported(n, "expression");
+        break;
+    }
+
+    case AST_OBJECT_LITERAL: {
+        /* Build the object at runtime, one set per pair, exactly like the
+           C backend. Parser stores pairs as AST_VAR_DECL (value=key,
+           right=expr). Non-literal keys are refused: the runtime stores
+           C strings. */
+        e_mov_r_imm64(T, RDI, 8);
+        nc_call_rt(C, RT_OBJ_NEW);
+        e_push(T, RAX);                      /* object lives on the stack */
+        for (int i = 0; i < n->child_count; i++) {
+            ASTNode *pair = n->children[i];
+            if (!pair || pair->type != AST_VAR_DECL || !pair->value || !pair->right) {
+                nc_fail(C, "object literals need literal keys (line %d)", n->line);
+                break;
+            }
+            DataType vt = ty(pair->right);
+            gen_as(pair->right, vt);
+            e_mov_r_r(T, RDX, RAX);          /* val */
+            nc_load_cstr(C, RSI, pair->value);
+            e_mov_r_mem(T, RDI, RSP, 0);    /* obj from its stack slot */
+            e_mov_r_imm64(T, RCX, (uint64_t)(vt == TYPE_STRING ? 1 : vt == TYPE_FLOAT ? 2 : vt == TYPE_BOOL ? 3 : 0));
+            nc_call_rt(C, RT_OBJ_SET);
+        }
+        e_pop(T, RAX);                       /* the object */
         break;
     }
 
@@ -1411,6 +1578,11 @@ static void gen_stmt(ASTNode *n) {
         /* emitted separately, at the top level */
         break;
 
+    case AST_CLASS_DECL:
+        /* Registration only: the class body is compiled into the .new
+           construction site, so there is nothing to emit here. */
+        break;
+
     case AST_VAR_DECL:
     case AST_CONST_DECL: {
         /* ty() knows about array literals where the semantic pass does not,
@@ -1448,6 +1620,26 @@ static void gen_stmt(ASTNode *n) {
     case AST_ASSIGN_STMT:
         if (n->left && n->left->type == AST_ARRAY_ACCESS) {
             ASTNode *acc = n->left;
+            /* obj["key"] = v */
+            if (infer_expr_type(acc->left) == TYPE_OBJECT) {
+                if (!acc->right || acc->right->type != AST_LITERAL ||
+                    acc->right->data_type != TYPE_STRING || !acc->right->value) {
+                    nc_fail(C, "object index assignment needs a literal "
+                               "string key (line %d)", n->line);
+                    break;
+                }
+                DataType vt = ty(n->right);
+                gen_expr(acc->left);
+                e_push(T, RAX);                  /* object */
+                gen_as(n->right, vt);
+                e_mov_r_r(T, RDX, RAX);          /* val */
+                nc_load_cstr(C, RSI, acc->right->value);
+                e_mov_r_mem(T, RDI, RSP, 0);    /* obj */
+                e_mov_r_imm64(T, RCX, (uint64_t)(vt == TYPE_STRING ? 1 : vt == TYPE_FLOAT ? 2 : vt == TYPE_BOOL ? 3 : 0));
+                nc_call_rt(C, RT_OBJ_SET);
+                e_pop(T, RAX);                   /* object back as the value */
+                break;
+            }
             if (concrete(ty(acc->left)) != TYPE_ARRAY) {
                 nc_fail(C, "indexed assignment needs an array (line %d)", n->line);
                 break;
@@ -1461,6 +1653,23 @@ static void gen_stmt(ASTNode *n) {
             e_pop(T, RSI);
             e_pop(T, RDI);
             nc_call_rt(C, RT_ARR_SET);
+            break;
+        }
+        /* obj.field = v */
+        if (n->left && n->left->type == AST_MEMBER_ACCESS &&
+            infer_expr_type(n->left->left) == TYPE_OBJECT) {
+            const char *key = n->left->value;
+            if (!key) { nc_fail(C, "member assignment needs a name (line %d)", n->line); break; }
+            DataType vt = ty(n->right);
+            gen_expr(n->left->left);
+            e_push(T, RAX);                      /* object */
+            gen_as(n->right, vt);
+            e_mov_r_r(T, RDX, RAX);              /* val */
+            nc_load_cstr(C, RSI, key);
+            e_mov_r_mem(T, RDI, RSP, 0);        /* obj */
+            e_mov_r_imm64(T, RCX, (uint64_t)(vt == TYPE_STRING ? 1 : vt == TYPE_FLOAT ? 2 : vt == TYPE_BOOL ? 3 : 0));
+            nc_call_rt(C, RT_OBJ_SET);
+            e_pop(T, RAX);                       /* object back as the value */
             break;
         }
         if (n->left && n->left->type == AST_IDENTIFIER)
@@ -1638,6 +1847,8 @@ int native_compile(ASTNode *program, const char *out_path,
 
     memset(&F, 0, sizeof(F));
     g_fns = NULL; g_nfns = g_cfns = 0;
+    g_native_class_count = 0;
+    native_classes_collect(program);
     fn_register(program);
     globals_bind(program);
 

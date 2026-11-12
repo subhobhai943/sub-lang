@@ -6,6 +6,8 @@
 
 #define _GNU_SOURCE
 #include "codegen_cpp.h"
+
+int codegen_reject_unsupported(ASTNode *n, const char *lang);
 #include "codegen_infer.h"
 #include "codegen_switch.h"
 #include "codegen_globals.h"
@@ -870,6 +872,8 @@ CPPVersion codegen_cpp_parse_version(const char *version_str) {
 char* codegen_cpp(ASTNode *ast, const char *source, CPPCodegenOptions *options) {
     (void)source; /* Reserved for embedded code extraction */
     (void)options; /* Options reserved for future fine-tuning */
+    if (codegen_reject_unsupported(ast, "c++"))
+        return NULL;
 
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;

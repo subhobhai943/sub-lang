@@ -493,6 +493,8 @@ static void indent_code(StringBuilder *sb, int level) {
     }
 }
 
+int codegen_reject_unsupported(ASTNode *n, const char *lang);
+
 static ASTNode* block_first(ASTNode *node) {
     if (!node) return NULL;
     if (node->body) return node->body;
@@ -1029,6 +1031,16 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
                 sb_append(sb, "len(");
                 generate_expr_python(sb, node->left);
                 sb_append(sb, ")");
+            } else if (node->value && strcmp(node->value, "new") == 0 &&
+                       node->left && node->left->type == AST_IDENTIFIER) {
+                /* ClassName.new: SUB constructs from the class declaration,
+                   which python maps to calling the class. */
+                sb_append(sb, "%s()", node->left->value ? node->left->value : "Object");
+            } else if (infer_expr_type(node->left) == TYPE_OBJECT) {
+                /* obj.field on a dict reads the key, not a python attribute */
+                sb_append(sb, "_sub_get(");
+                generate_expr_python(sb, node->left);
+                sb_append(sb, ", \"%s\")", node->value ? node->value : "");
             } else {
                 generate_expr_python(sb, node->left);
                 sb_append(sb, ".%s", node->value ? node->value : "");
@@ -1439,11 +1451,32 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_ASSIGN_STMT:
             indent_code(sb, indent);
             if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                if (infer_expr_type(node->left->left) == TYPE_OBJECT) {
+                    /* obj["key"] = v writes the dict key */
+                    sb_append(sb, "_sub_set(");
+                    generate_expr_python(sb, node->left->left);
+                    sb_append(sb, ", ");
+                    generate_expr_python(sb, node->left->right);
+                    sb_append(sb, ", ");
+                    generate_expr_python(sb, node->right);
+                    sb_append(sb, ")\n");
+                    break;
+                }
                 sb_append(sb, "_sub_put(");
                 generate_expr_python(sb, node->left->left);
                 sb_append(sb, ", ");
                 generate_expr_python(sb, node->left->right);
                 sb_append(sb, ", ");
+                generate_expr_python(sb, node->right);
+                sb_append(sb, ")\n");
+                break;
+            }
+            if (node->left && node->left->type == AST_MEMBER_ACCESS &&
+                infer_expr_type(node->left->left) == TYPE_OBJECT) {
+                /* obj.field = v writes the dict key, not a python attribute */
+                sb_append(sb, "_sub_set(");
+                generate_expr_python(sb, node->left->left);
+                sb_append(sb, ", \"%s\", ", node->left->value ? node->left->value : "");
                 generate_expr_python(sb, node->right);
                 sb_append(sb, ")\n");
                 break;
@@ -1468,7 +1501,26 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
                 sb_append(sb, "%s\n", node->value);
             }
             break;
-            
+
+        case AST_CLASS_DECL: {
+            /* A real python class: field defaults run in __init__, so every
+               instance gets its own copy exactly like the interpreter. */
+            sb_append(sb, "class %s:\n", node->value ? node->value : "SubClass");
+            sb_append(sb, "    def __init__(self):\n");
+            int wrote = 0;
+            for (ASTNode *f = block_first(node->body ? node->body : node); f; f = f->next) {
+                if ((f->type == AST_VAR_DECL || f->type == AST_CONST_DECL) && f->value) {
+                    sb_append(sb, "        self.%s = ", f->value);
+                    if (f->right) generate_expr_python(sb, f->right);
+                    else sb_append(sb, "None");
+                    sb_append(sb, "\n");
+                    wrote = 1;
+                }
+            }
+            if (!wrote) sb_append(sb, "        pass\n");
+            break;
+        }
+
         default:
             break;
     }
@@ -1508,6 +1560,10 @@ char* codegen_python(ASTNode *ast, const char *source) {
        Python's str() of a list quotes them. */
     sb_append(sb, "    if isinstance(v, _sub_t_list):\n");
     sb_append(sb, "        return '[' + ', '.join(_sub_str(x) for x in v) + ']'\n");
+    /* Objects print as {key: value, ...} with no quotes, like the
+       interpreter; dict.__str__ would quote and single-brace them. */
+    sb_append(sb, "    if isinstance(v, dict):\n");
+    sb_append(sb, "        return '{' + ', '.join(k + ': ' + _sub_str(x) for k, x in v.items()) + '}'\n");
     sb_append(sb, "    return _sub_to_str(v)\n");
     /* SUB divides and takes the remainder the way C, Java, Go and the
        interpreter do: truncated toward zero, so -7 / 2 is -3 and -7 % 3 is
@@ -1533,6 +1589,12 @@ char* codegen_python(ASTNode *ast, const char *source) {
        Left to the language, Python raised IndexError and exited 1 while
        Ruby and JavaScript quietly produced null. */
     sb_append(sb, "\n\ndef _sub_at(c, i):\n");
+    /* A dict is indexed by its key: the interpreter reads object
+       properties this way, and the length checks below make no sense
+       for it. */
+    sb_append(sb, "    if isinstance(c, dict):\n");
+    sb_append(sb, "        if i in c: return c[i]\n");
+    sb_append(sb, "        _sub_die('object property %s read before assignment' %% i)\n");
     sb_append(sb, "    n = len(c)\n");
     sb_append(sb, "    if i < 0: i += n\n");
     sb_append(sb, "    if i < 0 or i >= n:\n");
@@ -1540,6 +1602,14 @@ char* codegen_python(ASTNode *ast, const char *source) {
     sb_append(sb, "            _sub_die('string index %%d out of bounds' %% i)\n");
     sb_append(sb, "        _sub_die('array index %%d out of bounds [0, %%d)' %% (i, n))\n");
     sb_append(sb, "    return c[i]\n");
+    sb_append(sb, "\n\ndef _sub_get(o, k):\n");
+    sb_append(sb, "    if isinstance(o, dict):\n");
+    sb_append(sb, "        if k in o: return o[k]\n");
+    sb_append(sb, "        _sub_die('object property %s read before assignment' %% k)\n");
+    sb_append(sb, "    return getattr(o, k)\n");
+    sb_append(sb, "\n\ndef _sub_set(o, k, v):\n");
+    sb_append(sb, "    if isinstance(o, dict): o[k] = v\n");
+    sb_append(sb, "    else: setattr(o, k, v)\n");
     sb_append(sb, "\n\ndef _sub_put(a, i, v):\n");
     sb_append(sb, "    n = len(a)\n");
     sb_append(sb, "    if i < 0: i += n\n");
@@ -1736,8 +1806,20 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, "}");
             break;
         case AST_MEMBER_ACCESS:
-            generate_expr_js(sb, node->left);
-            sb_append(sb, ".%s", node->value ? node->value : "");
+            if (node->value && strcmp(node->value, "new") == 0 &&
+                node->left && node->left->type == AST_IDENTIFIER) {
+                /* ClassName.new -> the language's own construction */
+                sb_append(sb, "new %s()", node->left->value ? node->left->value : "Object");
+            } else if (node->value && strcmp(node->value, "length") == 0 &&
+                       infer_expr_type(node->left) == TYPE_OBJECT) {
+                /* o.length is the property count, not a JS length field */
+                sb_append(sb, "Object.keys(");
+                generate_expr_js(sb, node->left);
+                sb_append(sb, ").length");
+            } else {
+                generate_expr_js(sb, node->left);
+                sb_append(sb, ".%s", node->value ? node->value : "");
+            }
             break;
         case AST_ARRAY_ACCESS:
             sb_append(sb, "_subAt(");
@@ -2030,7 +2112,27 @@ static void generate_node_js(StringBuilder *sb, ASTNode *node, int indent) {
                 sb_append(sb, "%s\n", node->value);
             }
             break;
-            
+
+        case AST_CLASS_DECL: {
+            /* A real JS class: field defaults run in the constructor, so
+               instances are independent exactly like the interpreter. */
+            sb_append(sb, "class %s {\n", node->value ? node->value : "SubClass");
+            sb_append(sb, "    constructor() {\n");
+            int wrote = 0;
+            for (ASTNode *f = block_first(node->body ? node->body : node); f; f = f->next) {
+                if ((f->type == AST_VAR_DECL || f->type == AST_CONST_DECL) && f->value) {
+                    sb_append(sb, "        this.%s = ", f->value);
+                    if (f->right) generate_expr_js(sb, f->right);
+                    else sb_append(sb, "null");
+                    sb_append(sb, ";\n");
+                    wrote = 1;
+                }
+            }
+            if (!wrote) sb_append(sb, "        // no fields\n");
+            sb_append(sb, "    }\n}\n\n");
+            break;
+        }
+
         default:
             break;
     }
@@ -2074,11 +2176,20 @@ char* codegen_javascript(ASTNode *ast, const char *source) {
     sb_append(sb, "    if (v === null || v === undefined) return 'null';\n");
     sb_append(sb, "    if (typeof v === 'boolean') return v ? 'true' : 'false';\n");
     sb_append(sb, "    if (Array.isArray(v)) return '[' + v.map(_subStr).join(', ') + ']';\n");
+    /* Objects print as {key: value, ...} like the interpreter */
+    sb_append(sb, "    if (v !== null && typeof v === 'object' && !Array.isArray(v))\n");
+    sb_append(sb, "        return '{' + Object.keys(v).map(k => k + ': ' + _subStr(v[k])).join(', ') + '}';\n");
     sb_append(sb, "    if (typeof v === 'number')\n");
     sb_append(sb, "        return Number.isInteger(v) ? String(v) : _subFmt(v);\n");
     sb_append(sb, "    return String(v);\n");
     sb_append(sb, "}\n\n");
     sb_append(sb, "function _subAt(c, i) {\n");
+    /* An object (non-array) is indexed by key; the interpreter reads
+       properties this way. Length bounds do not apply. */
+    sb_append(sb, "    if (c !== null && typeof c === 'object' && !Array.isArray(c)) {\n");
+    sb_append(sb, "        if (i in c) return c[i];\n");
+    sb_append(sb, "        _subDie(`object property ${i} read before assignment`);\n");
+    sb_append(sb, "    }\n");
     sb_append(sb, "    const n = c.length;\n");
     sb_append(sb, "    if (i < 0) i += n;\n");
     sb_append(sb, "    if (i < 0 || i >= n)\n");
@@ -2691,7 +2802,34 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
     }
 }
 
+/* True when the program uses a construct this target cannot express.
+   Statically typed transpilers cannot model SUB's dynamic objects and
+   classes; refusing at transpile time with a clear message beats emitting
+   code that does not compile or silently means something else. */
+int codegen_reject_unsupported(ASTNode *n, const char *lang) {
+    if (!n) return 0;
+    if (n->type == AST_CLASS_DECL || n->type == AST_OBJECT_LITERAL) {
+        fprintf(stderr,
+                "Error: %s are not supported by the %s transpiler.\n"
+                "       Run this program with subi or subc, or transpile it\n"
+                "       to python, javascript, or ruby.\n",
+                n->type == AST_CLASS_DECL ? "class declarations"
+                                          : "object literals",
+                lang);
+        return 1;
+    }
+    if (codegen_reject_unsupported(n->body, lang) ||
+        codegen_reject_unsupported(n->left, lang) ||
+        codegen_reject_unsupported(n->right, lang))
+        return 1;
+    for (int i = 0; i < n->child_count; i++)
+        if (codegen_reject_unsupported(n->children[i], lang))
+            return 1;
+    return 0;
+}
+
 char* codegen_java(ASTNode *ast, const char *source) {
+    if (codegen_reject_unsupported(ast, "java")) return NULL;
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
 
@@ -3350,6 +3488,7 @@ static void generate_node_swift(StringBuilder *sb, ASTNode *node, int indent) {
 }
 
 char* codegen_swift(ASTNode *ast, const char *source) {
+    if (codegen_reject_unsupported(ast, "swift")) return NULL;
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
 
@@ -3845,6 +3984,7 @@ static void generate_node_kotlin(StringBuilder *sb, ASTNode *node, int indent) {
 }
 
 char* codegen_kotlin(ASTNode *ast, const char *source) {
+    if (codegen_reject_unsupported(ast, "kotlin")) return NULL;
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
 
@@ -4359,8 +4499,20 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, "}");
             break;
         case AST_MEMBER_ACCESS:
-            generate_expr_ruby(sb, node->left);
-            sb_append(sb, ".%s", node->value ? node->value : "");
+            if (node->value && strcmp(node->value, "new") == 0 &&
+                node->left && node->left->type == AST_IDENTIFIER) {
+                /* ClassName.new is Ruby's own construction idiom */
+                generate_expr_ruby(sb, node->left);
+                sb_append(sb, ".new");
+            } else if (infer_expr_type(node->left) == TYPE_OBJECT) {
+                /* obj.field on a Hash reads the key, not a method */
+                sb_append(sb, "_sub_get(");
+                generate_expr_ruby(sb, node->left);
+                sb_append(sb, ", \"%s\")", node->value ? node->value : "");
+            } else {
+                generate_expr_ruby(sb, node->left);
+                sb_append(sb, ".%s", node->value ? node->value : "");
+            }
             break;
         case AST_ARRAY_ACCESS:
             sb_append(sb, "_sub_at(");
@@ -4643,11 +4795,32 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_ASSIGN_STMT:
             indent_ruby(sb, indent);
             if (node->left && node->left->type == AST_ARRAY_ACCESS) {
+                if (infer_expr_type(node->left->left) == TYPE_OBJECT) {
+                    /* obj["key"] = v on a Hash writes the key */
+                    sb_append(sb, "_sub_set(");
+                    generate_expr_ruby(sb, node->left->left);
+                    sb_append(sb, ", ");
+                    generate_expr_ruby(sb, node->left->right);
+                    sb_append(sb, ", ");
+                    generate_expr_ruby(sb, node->right);
+                    sb_append(sb, ")\n");
+                    break;
+                }
                 sb_append(sb, "_sub_put(");
                 generate_expr_ruby(sb, node->left->left);
                 sb_append(sb, ", ");
                 generate_expr_ruby(sb, node->left->right);
                 sb_append(sb, ", ");
+                generate_expr_ruby(sb, node->right);
+                sb_append(sb, ")\n");
+                break;
+            }
+            if (node->left && node->left->type == AST_MEMBER_ACCESS &&
+                infer_expr_type(node->left->left) == TYPE_OBJECT) {
+                /* obj.field = v on a Hash writes the key, not a method */
+                sb_append(sb, "_sub_set(");
+                generate_expr_ruby(sb, node->left->left);
+                sb_append(sb, ", \"%s\", ", node->left->value ? node->left->value : "");
                 generate_expr_ruby(sb, node->right);
                 sb_append(sb, ")\n");
                 break;
@@ -4679,6 +4852,43 @@ static void generate_node_ruby(StringBuilder *sb, ASTNode *node, int indent) {
             sb_append(sb, "# UI: %s\n", node->value ? node->value : "component");
             break;
 
+        case AST_CLASS_DECL: {
+            /* A real Ruby class: attr_accessor for the declared fields,
+               initialize seeds each instance with the defaults, and
+               ClassName.new is Ruby's own construction - so SUB's
+               `Point.new` maps directly. */
+            sb_append(sb, "class %s\n", node->value ? node->value : "SubClass");
+            int nfields = 0;
+            for (ASTNode *f = block_first(node->body ? node->body : node); f; f = f->next)
+                if ((f->type == AST_VAR_DECL || f->type == AST_CONST_DECL) && f->value)
+                    nfields++;
+            if (nfields > 0) {
+                sb_append(sb, "  attr_accessor ");
+                int first = 1;
+                for (ASTNode *f = block_first(node->body ? node->body : node); f; f = f->next) {
+                    if ((f->type == AST_VAR_DECL || f->type == AST_CONST_DECL) && f->value) {
+                        sb_append(sb, "%s:%s", first ? "" : ", ", f->value);
+                        first = 0;
+                    }
+                }
+                sb_append(sb, "\n");
+            }
+            sb_append(sb, "  def initialize\n");
+            int wrote = 0;
+            for (ASTNode *f = block_first(node->body ? node->body : node); f; f = f->next) {
+                if ((f->type == AST_VAR_DECL || f->type == AST_CONST_DECL) && f->value) {
+                    sb_append(sb, "    @%s = ", f->value);
+                    if (f->right) generate_expr_ruby(sb, f->right);
+                    else sb_append(sb, "nil");
+                    sb_append(sb, "\n");
+                    wrote = 1;
+                }
+            }
+            if (!wrote) sb_append(sb, "    # no fields\n");
+            sb_append(sb, "  end\nend\n\n");
+            break;
+        }
+
         default:
             break;
     }
@@ -4700,6 +4910,9 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
     sb_append(sb, "  return sprintf(\"%%g\", v) if v.is_a?(Float)\n");
     sb_append(sb, "  return '[' + v.map { |x| _sub_str(x) }.join(', ') + ']' "
                   "if v.is_a?(Array)\n");
+    /* Objects print as {key: value, ...} like the interpreter */
+    sb_append(sb, "  return '{' + v.map { |k, x| k.to_s + ': ' + _sub_str(x) }"
+                  ".join(', ') + '}' if v.is_a?(Hash)\n");
     sb_append(sb, "  v.to_s\nend\n");
     /* Ruby's / and % floor like Python's; SUB truncates toward zero.
        Dividing by zero is a runtime error with status 70 in every backend. */
@@ -4759,6 +4972,12 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
     sb_append(sb, "  _sub_die('modulo by zero') if b == 0\n");
     sb_append(sb, "  a.to_f.remainder(b.to_f)\nend\n");
     sb_append(sb, "\ndef _sub_at(c, i)\n");
+    /* A Hash is indexed by key, the way the interpreter reads object
+       properties. */
+    sb_append(sb, "  if c.is_a?(Hash)\n");
+    sb_append(sb, "    return c[i] if c.key?(i)\n");
+    sb_append(sb, "    _sub_die(\"object property #{i} read before assignment\")\n");
+    sb_append(sb, "  end\n");
     sb_append(sb, "  n = c.length\n  i += n if i < 0\n");
     sb_append(sb, "  if i < 0 || i >= n\n");
     sb_append(sb, "    _sub_die(c.is_a?(String) ? \"string index #{i} out of bounds\" :\n");
@@ -4770,6 +4989,14 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
     sb_append(sb, "    _sub_die(\"array index #{i} out of bounds [0, #{n})\")\n  end\n");
     sb_append(sb, "  a[i] = v\nend\n");
     sb_append(sb, "\ndef _sub_push(a, v)\n  a.push(v)\n  nil\nend\n");
+    sb_append(sb, "\ndef _sub_get(o, k)\n");
+    sb_append(sb, "  return o[k] if o.is_a?(Hash) && o.key?(k)\n");
+    sb_append(sb, "  return o.send(k) if o.respond_to?(k)\n");
+    sb_append(sb, "  _sub_die(\"object property #{k} read before assignment\")\n");
+    sb_append(sb, "end\n");
+    sb_append(sb, "\ndef _sub_set(o, k, v)\n");
+    sb_append(sb, "  if o.is_a?(Hash) then o[k] = v else o.send(\"#{k}=\", v) end\n");
+    sb_append(sb, "  v\nend\n");
     sb_append(sb, "\ndef _sub_pop(a)\n");
     sb_append(sb, "  _sub_die('pop from empty array') if a.empty?\n");
     sb_append(sb, "  a.pop\nend\n");
@@ -5464,6 +5691,7 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
 }
 
 char* codegen_go(ASTNode *ast, const char *source) {
+    if (codegen_reject_unsupported(ast, "go")) return NULL;
     StringBuilder *sb = sb_create();
     if (!sb) return NULL;
 

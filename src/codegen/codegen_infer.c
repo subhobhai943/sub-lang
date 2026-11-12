@@ -197,6 +197,54 @@ void prop_reset(void) {
     g_props.count = 0;
 }
 
+/* Class declarations, so `let p = Point.new` can stamp p with Point's
+   declared field types. Points into the program AST; rebuilt per pass. */
+#define MAX_INFER_CLASSES 64
+static ASTNode *g_iclasses[MAX_INFER_CLASSES];
+static int g_iclass_count;
+
+static void iclasses_collect(ASTNode *n) {
+    if (!n || g_iclass_count >= MAX_INFER_CLASSES) return;
+    if (n->type == AST_CLASS_DECL) g_iclasses[g_iclass_count++] = n;
+    iclasses_collect(n->body);
+    iclasses_collect(n->left);
+    iclasses_collect(n->right);
+    for (int i = 0; i < n->child_count; i++)
+        iclasses_collect(n->children[i]);
+}
+
+static ASTNode* iclass_lookup(const char *name) {
+    if (!name) return NULL;
+    for (int i = 0; i < g_iclass_count; i++)
+        if (g_iclasses[i]->value &&
+            strcmp(g_iclasses[i]->value, name) == 0)
+            return g_iclasses[i];
+    return NULL;
+}
+
+/* Stamp a variable bound to `ClassName.new` with the class's field types,
+   so obj_prop_type(var, field) answers for p.x later. */
+static void record_instance_props(const char *var_name, ASTNode *ctor_expr) {
+    if (!var_name || !ctor_expr) return;
+    if (ctor_expr->type != AST_MEMBER_ACCESS || !ctor_expr->left ||
+        ctor_expr->left->type != AST_IDENTIFIER || !ctor_expr->left->value ||
+        !ctor_expr->value || strcmp(ctor_expr->value, "new") != 0)
+        return;
+    ASTNode *cls = iclass_lookup(ctor_expr->left->value);
+    if (!cls || !cls->body) return;
+    ASTNode *first = cls->body->body;
+    if (!first && cls->body->child_count > 0 &&
+        cls->body->children[0] &&
+        (cls->body->children[0]->type == AST_VAR_DECL ||
+         cls->body->children[0]->type == AST_CONST_DECL))
+        first = cls->body->children[0];
+    for (ASTNode *f = first; f; f = f->next) {
+        if ((f->type == AST_VAR_DECL || f->type == AST_CONST_DECL) &&
+            f->value && f->right)
+            prop_record(var_name, f->value, infer_expr_type(f->right));
+    }
+}
+
 static void elem_record(const char *name, DataType t) {
     if (!name || t == TYPE_UNKNOWN) return;
     for (int i = 0; i < g_elems.count; i++)
@@ -909,6 +957,10 @@ static void propagate_var_types_to_identifiers(ASTNode *node) {
                 prop_record(node->value, f->value, infer_expr_type(f->right));
         }
     }
+    if ((node->type == AST_VAR_DECL || node->type == AST_CONST_DECL) &&
+        node->value && node->right) {
+        record_instance_props(node->value, node->right);
+    }
     if (node->type == AST_ASSIGN_STMT && node->left && node->right) {
         if (node->left->type == AST_MEMBER_ACCESS &&
             node->left->left && node->left->left->type == AST_IDENTIFIER &&
@@ -1115,6 +1167,8 @@ static void propagate_param_types_to_identifiers(ASTNode *fn, ASTNode *node) {
 void infer_function_signatures(ASTNode *program) {
     g_elems.count = 0;
     g_props.count = 0;
+    g_iclass_count = 0;
+    iclasses_collect(program);
     if (!program) return;
 
     g_fns.count = 0;

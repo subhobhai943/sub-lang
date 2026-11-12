@@ -1712,6 +1712,383 @@ static void emit_arr_str(NCtx *c) {
 }
 
 /* ----------------------------------------------------------------
+   Objects: RT_OBJ_NEW / RT_OBJ_SET / RT_OBJ_GET / RT_OBJ_LEN
+   Header: count, capacity, slots pointer. Slot: key ptr, value, kind.
+   Same shape the C backend emits, so both backends mean the same thing.
+   ---------------------------------------------------------------- */
+
+static void emit_obj_new(NCtx *c) {
+    e_push(T, R12);
+    e_mov_r_r(T, R12, RDI);              /* capacity hint */
+
+    e_mov_r_imm64(T, RDI, OBJ_HEADER);
+    nc_call_rt(c, RT_ALLOC);
+    e_mov_r_r(T, R13, RAX);              /* header (callee-saved is free here) */
+
+    /* At least 4 slots, so the first set needs no null check. */
+    e_mov_r_r(T, RDI, R12);
+    e_test_r_r(T, RDI, RDI);
+    size_t have_cap = e_jcc(T, CC_NE);
+    e_mov_r_imm64(T, RDI, 4);
+    e_mov_r_r(T, R12, RDI);
+    here(c, have_cap);
+    e_mov_r_imm64(T, RSI, SLOT_SIZE);
+    e_imul_r_r(T, RDI, RSI);             /* capacity * 24 bytes */
+    nc_call_rt(c, RT_ALLOC);
+    e_mov_mem_r(T, R13, OBJ_SLOTS, RAX);
+
+    e_xor_r_r(T, RDX, RDX);
+    e_mov_mem_r(T, R13, OBJ_COUNT, RDX);
+    e_mov_mem_r(T, R13, OBJ_CAP, R12);
+    e_mov_r_r(T, RAX, R13);
+
+    e_pop(T, R12);
+    e_ret(T);
+}
+
+/* rdi=obj, rsi=key, rdx=val, rcx=kind. Grows the slot block when full; the
+   header never moves, so a variable holding the object keeps working.
+   Callee-saves: R12=obj, R13=key, R14=val, R15=kind, RBX=slot index. */
+static void emit_obj_set(NCtx *c) {
+    e_push(T, R12); e_push(T, R13); e_push(T, R14);
+    e_push(T, R15); e_push(T, RBX);
+    e_mov_r_r(T, R12, RDI);              /* obj       */
+    e_mov_r_r(T, R13, RSI);              /* key       */
+    e_mov_r_r(T, R14, RDX);              /* val       */
+    e_mov_r_r(T, R15, RCX);              /* kind      */
+
+    /* Scan for an existing slot with the same key: byte-compare inline,
+       the same way RT_FIND compares, so no libc is involved. */
+    e_mov_r_mem(T, RCX, R12, OBJ_COUNT);
+    e_xor_r_r(T, RBX, RBX);
+    size_t loop = T->len;
+    e_cmp_r_r(T, RBX, RCX);
+    size_t no_match = e_jcc(T, CC_GE);   /* i >= count: not found */
+    e_mov_r_mem(T, RAX, R12, OBJ_SLOTS);
+    e_mov_r_imm64(T, RDI, SLOT_SIZE);
+    e_imul_r_r(T, RDI, RBX);             /* rdi = i * 24 */
+    e_add_r_r(T, RAX, RDI);              /* rax = &slots[i] */
+    e_mov_r_r(T, R10, RAX);              /* keep slot ptr in R10 */
+    e_mov_r_mem(T, RDI, RAX, SLOT_KEY); /* slot's key string, not its address */
+    e_mov_r_r(T, RSI, R13);
+    size_t cmp_top = T->len;
+    e_movzx_r_mem8(T, R8, RDI, 0);
+    e_test_r_r(T, R8, R8);
+    size_t cmp_a_end = e_jcc(T, CC_E);
+    e_movzx_r_mem8(T, R9, RSI, 0);
+    e_cmp_r_r(T, R8, R9);
+    size_t cmp_ne = e_jcc(T, CC_NE);
+    e_add_r_imm(T, RDI, 1);
+    e_add_r_imm(T, RSI, 1);
+    size_t cmp_back = e_jmp(T); e_patch_rel32(T, cmp_back, cmp_top);
+    here(c, cmp_a_end);
+    e_movzx_r_mem8(T, R9, RSI, 0);
+    here(c, cmp_ne);
+    e_test_r_r(T, R9, R9);
+    size_t cmp_eq = e_jcc(T, CC_E);      /* both ended: equal keys */
+    e_add_r_imm(T, RBX, 1);
+    size_t loop_back = e_jmp(T); e_patch_rel32(T, loop_back, loop);
+    here(c, cmp_eq);
+    /* Found: overwrite value and kind in the existing slot. */
+    e_mov_mem_r(T, R10, SLOT_VAL, R14);
+    e_mov_mem_r(T, R10, SLOT_KIND, R15);
+    size_t done = e_jmp(T);
+
+    /* Not found: append a new slot at index `count`, growing first if the
+       block is full. */
+    here(c, no_match);
+    e_mov_r_mem(T, RAX, R12, OBJ_COUNT);
+    e_mov_r_mem(T, RDX, R12, OBJ_CAP);
+    e_cmp_r_r(T, RAX, RDX);
+    size_t fits = e_jcc(T, CC_L);
+
+    /* Grow: new_cap = cap ? cap*2 : 4. Allocate new_cap*24 bytes, copy the
+       old count*24 bytes across, point the header at the new block. */
+    e_mov_r_mem(T, RDI, R12, OBJ_CAP);
+    e_test_r_r(T, RDI, RDI);
+    size_t cap_nonzero = e_jcc(T, CC_NE);
+    e_mov_r_imm64(T, RDI, 4);
+    size_t cap_have = e_jmp(T);
+    here(c, cap_nonzero);
+    e_shl_r_imm8(T, RDI, 1);             /* cap*2 */
+    here(c, cap_have);
+    e_mov_mem_r(T, R12, OBJ_CAP, RDI);   /* header's new capacity */
+    e_mov_r_r(T, RSI, RDI);              /* new_cap */
+    e_mov_r_imm64(T, RDI, SLOT_SIZE);
+    e_imul_r_r(T, RSI, RDI);             /* new_cap * 24 bytes */
+    nc_call_rt(c, RT_ALLOC);
+    e_mov_r_r(T, R10, RAX);              /* new block lives in R10 */
+
+    /* copy old -> new, byte at a time, count*24 bytes */
+    e_mov_r_mem(T, RDI, R12, OBJ_SLOTS);
+    e_mov_r_r(T, RAX, R10);
+    e_mov_r_mem(T, RSI, R12, OBJ_COUNT);
+    e_mov_r_imm64(T, RDX, SLOT_SIZE);
+    e_imul_r_r(T, RSI, RDX);             /* count * 24 bytes */
+    e_xor_r_r(T, RCX, RCX);
+    size_t cp_loop = T->len;
+    e_cmp_r_r(T, RCX, RSI);
+    size_t cp_done = e_jcc(T, CC_GE);
+    e_movzx_r_mem8(T, R8, RDI, 0); e_mov_mem8_r(T, RAX, 0, R8);
+    e_add_r_imm(T, RDI, 1); e_add_r_imm(T, RAX, 1);
+    e_add_r_imm(T, RCX, 1);
+    size_t cp_back = e_jmp(T); e_patch_rel32(T, cp_back, cp_loop);
+    here(c, cp_done);
+    e_mov_mem_r(T, R12, OBJ_SLOTS, R10);
+
+    here(c, fits);
+    /* Append: slots[count] = {key, val, kind}; count++ */
+    e_mov_r_mem(T, RAX, R12, OBJ_SLOTS);
+    e_mov_r_mem(T, RDI, R12, OBJ_COUNT);
+    e_mov_r_r(T, RSI, RDI);
+    e_mov_r_imm64(T, RDX, SLOT_SIZE);
+    e_imul_r_r(T, RDX, RSI);             /* count * 24 */
+    e_add_r_r(T, RAX, RDX);              /* &slots[count] */
+    e_mov_mem_r(T, RAX, SLOT_KEY, R13);
+    e_mov_mem_r(T, RAX, SLOT_VAL, R14);
+    e_mov_mem_r(T, RAX, SLOT_KIND, R15);
+    e_mov_r_mem(T, RDX, R12, OBJ_COUNT);
+    e_add_r_imm(T, RDX, 1);
+    e_mov_mem_r(T, R12, OBJ_COUNT, RDX);
+
+    here(c, done);
+    e_pop(T, RBX);
+    e_pop(T, R15); e_pop(T, R14); e_pop(T, R13); e_pop(T, R12);
+    e_ret(T);
+}
+
+/* rdi=obj, rsi=key -> rax=val. Dies through RT_DIE when unset, matching
+   the interpreter's "cannot access property" error. */
+static void emit_obj_get(NCtx *c) {
+    e_push(T, R12); e_push(T, R13); e_push(T, R14);
+    e_mov_r_r(T, R12, RDI);
+    e_mov_r_r(T, R13, RSI);
+
+    e_mov_r_mem(T, RCX, R12, OBJ_COUNT);
+    e_xor_r_r(T, RBX, RBX);
+    size_t loop = T->len;
+    e_cmp_r_r(T, RBX, RCX);
+    size_t no_match = e_jcc(T, CC_GE);
+    e_mov_r_mem(T, RAX, R12, OBJ_SLOTS);
+    e_mov_r_imm64(T, RDI, SLOT_SIZE);
+    e_imul_r_r(T, RDI, RBX);
+    e_add_r_r(T, RAX, RDI);
+    e_push(T, RAX);                       /* slot ptr, for the value read */
+    e_mov_r_r(T, R10, RAX);               /* and in a callee-scratch reg */
+    e_mov_r_mem(T, RDI, RAX, SLOT_KEY);  /* slot's key string, not its address */
+    e_mov_r_r(T, RSI, R13);
+    size_t cmp_top = T->len;
+    e_movzx_r_mem8(T, R8, RDI, 0);
+    e_test_r_r(T, R8, R8);
+    size_t cmp_a_end = e_jcc(T, CC_E);
+    e_movzx_r_mem8(T, R9, RSI, 0);
+    e_cmp_r_r(T, R8, R9);
+    size_t cmp_ne = e_jcc(T, CC_NE);
+    e_add_r_imm(T, RDI, 1);
+    e_add_r_imm(T, RSI, 1);
+    size_t cmp_back = e_jmp(T); e_patch_rel32(T, cmp_back, cmp_top);
+    here(c, cmp_a_end);
+    e_movzx_r_mem8(T, R9, RSI, 0);
+    here(c, cmp_ne);
+    e_test_r_r(T, R9, R9);
+    size_t cmp_eq = e_jcc(T, CC_E);
+    e_pop(T, RAX);
+    e_add_r_imm(T, RBX, 1);
+    size_t loop_back = e_jmp(T); e_patch_rel32(T, loop_back, loop);
+    here(c, cmp_eq);
+    e_pop(T, RAX);
+    e_mov_r_r(T, R14, RAX);
+    e_mov_r_mem(T, RAX, R14, SLOT_VAL);
+    size_t out = e_jmp(T);
+
+    here(c, no_match);
+    /* "object property '<key>' read before assignment" would need a
+       formatted message; RT_DIE prints a fixed string. The interpreter
+       reports the same exit code, which is what conformance checks. */
+    nc_load_cstr(c, RDI, "object property read before assignment");
+    nc_call_rt(c, RT_DIE);
+    e_mov_r_r(T, RAX, R13);              /* unreachable */
+
+    here(c, out);
+    e_pop(T, R14); e_pop(T, R13); e_pop(T, R12);
+    e_ret(T);
+}
+
+/* rdi=obj, rsi=key -> rax = newly allocated string rendering of the slot
+   value, so a property whose static type is unknown prints as what it
+   actually holds (42 prints "42", not a pointer dereference). */
+static void emit_obj_gets(NCtx *c) {
+    e_push(T, R12); e_push(T, R13); e_push(T, R14);
+    e_mov_r_r(T, R12, RDI);
+    e_mov_r_r(T, R13, RSI);
+
+    e_mov_r_mem(T, RCX, R12, OBJ_COUNT);
+    e_xor_r_r(T, RBX, RBX);
+    size_t loop = T->len;
+    e_cmp_r_r(T, RBX, RCX);
+    size_t no_match = e_jcc(T, CC_GE);
+    e_mov_r_mem(T, RAX, R12, OBJ_SLOTS);
+    e_mov_r_imm64(T, RDI, SLOT_SIZE);
+    e_imul_r_r(T, RDI, RBX);
+    e_add_r_r(T, RAX, RDI);
+    e_mov_r_r(T, R14, RAX);               /* slot ptr */
+    e_mov_r_mem(T, RDI, RAX, SLOT_KEY);  /* slot's key string */
+    e_mov_r_r(T, RSI, R13);
+    size_t cmp_top = T->len;
+    e_movzx_r_mem8(T, R8, RDI, 0);
+    e_test_r_r(T, R8, R8);
+    size_t cmp_a_end = e_jcc(T, CC_E);
+    e_movzx_r_mem8(T, R9, RSI, 0);
+    e_cmp_r_r(T, R8, R9);
+    size_t cmp_ne = e_jcc(T, CC_NE);
+    e_add_r_imm(T, RDI, 1);
+    e_add_r_imm(T, RSI, 1);
+    size_t cmp_back = e_jmp(T); e_patch_rel32(T, cmp_back, cmp_top);
+    here(c, cmp_a_end);
+    e_movzx_r_mem8(T, R9, RSI, 0);
+    here(c, cmp_ne);
+    e_test_r_r(T, R9, R9);
+    size_t cmp_eq = e_jcc(T, CC_E);
+    e_add_r_imm(T, RBX, 1);
+    size_t loop_back = e_jmp(T); e_patch_rel32(T, loop_back, loop);
+    here(c, cmp_eq);
+
+    /* Found: render by kind. 1 = string (immortal pointer, as-is),
+       2 = float (F2S), 3 = bool (B2S), anything else = int (I2S). */
+    e_mov_r_mem(T, RAX, R14, SLOT_VAL);
+    e_mov_r_mem(T, RDX, R14, SLOT_KIND);
+    e_cmp_r_imm(T, RDX, 1);
+    size_t is_str = e_jcc(T, CC_E);
+    e_cmp_r_imm(T, RDX, 2);
+    size_t is_flt = e_jcc(T, CC_E);
+    e_cmp_r_imm(T, RDX, 3);
+    size_t is_bool = e_jcc(T, CC_E);
+    e_mov_r_r(T, RDI, RAX);
+    nc_call_rt(c, RT_I2S);
+    size_t done = e_jmp(T);
+    here(c, is_str);
+    size_t done_str = e_jmp(T);
+    here(c, is_bool);
+    e_mov_r_r(T, RDI, RAX);
+    nc_call_rt(c, RT_B2S);
+    size_t done_bool = e_jmp(T);
+    here(c, is_flt);
+    e_mov_r_r(T, RDI, RAX);
+    nc_call_rt(c, RT_F2S);
+    here(c, done);
+    here(c, done_str);
+    here(c, done_bool);
+    e_pop(T, R14); e_pop(T, R13); e_pop(T, R12);
+    e_ret(T);
+
+    here(c, no_match);
+    nc_load_cstr(c, RDI, "object property read before assignment");
+    nc_call_rt(c, RT_DIE);
+    e_ret(T);
+}
+
+static void emit_obj_len(NCtx *c) {
+    e_mov_r_mem(T, RAX, RDI, OBJ_COUNT);
+    e_ret(T);
+}
+
+/* rdi=obj -> rax = "{k: v, k2: v2}" as a fresh string, matching the
+   interpreter's and C backend's object rendering. Empty object is "{}".
+   Built from RT_CONCAT/RT_I2S/RT_F2S so no byte-level string code is
+   duplicated here. Callee-saves: R12=obj, R13=out, R14=slot index,
+   R15=count, RBX=slot ptr. */
+static void emit_obj_str(NCtx *c) {
+    e_push(T, R12); e_push(T, R13); e_push(T, R14); e_push(T, R15); e_push(T, RBX);
+    e_mov_r_r(T, R12, RDI);              /* obj */
+
+    /* out = concat("{", "") - a fresh brace string with no shared owner */
+    nc_load_cstr(c, RDI, "{");
+    nc_load_cstr(c, RSI, "");
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, R13, RAX);              /* out = "{" */
+    e_mov_r_mem(T, R15, R12, OBJ_COUNT);
+    e_xor_r_r(T, R14, R14);
+    size_t loop = T->len;
+    e_cmp_r_r(T, R14, R15);
+    size_t done = e_jcc(T, CC_GE);
+
+    /* out = concat(out, key) */
+    e_mov_r_mem(T, RAX, R12, OBJ_SLOTS);
+    e_mov_r_imm64(T, RDI, SLOT_SIZE);
+    e_imul_r_r(T, RDI, R14);
+    e_add_r_r(T, RAX, RDI);              /* &slots[i] */
+    e_mov_r_r(T, RBX, RAX);              /* slot ptr */
+    e_mov_r_mem(T, RSI, RAX, SLOT_KEY); /* key */
+    e_mov_r_r(T, RDI, R13);
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, R13, RAX);
+
+    /* out = concat(out, ": ") */
+    e_mov_r_r(T, RDI, R13);
+    nc_load_cstr(c, RSI, ": ");
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, R13, RAX);
+
+    /* value per kind: 1 string (as-is), 2 float (F2S), else I2S */
+    e_mov_r_mem(T, RDX, RBX, SLOT_KIND);
+    e_mov_r_mem(T, RAX, RBX, SLOT_VAL);
+    e_cmp_r_imm(T, RDX, 1);
+    size_t val_str = e_jcc(T, CC_E);
+    e_cmp_r_imm(T, RDX, 2);
+    size_t val_flt = e_jcc(T, CC_E);
+    e_cmp_r_imm(T, RDX, 3);
+    size_t val_bool = e_jcc(T, CC_E);
+    e_mov_r_r(T, RDI, RAX);
+    nc_call_rt(c, RT_I2S);
+    size_t val_have = e_jmp(T);
+    here(c, val_str);
+    /* string values are immortal; hand the pointer to concat as-is */
+    size_t val_have2 = e_jmp(T);
+    here(c, val_bool);
+    e_mov_r_r(T, RDI, RAX);
+    nc_call_rt(c, RT_B2S);
+    size_t val_have3 = e_jmp(T);
+    here(c, val_flt);
+    e_mov_r_r(T, RDI, RAX);
+    nc_call_rt(c, RT_F2S);
+    /* all joins land at the same point: value string in RAX */
+    here(c, val_have);
+    here(c, val_have2);
+    here(c, val_have3);
+
+    e_mov_r_r(T, RSI, RAX);
+    e_mov_r_r(T, RDI, R13);
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, R13, RAX);
+
+    /* separator: ", " between slots; the closing brace is added once,
+       after the loop, on the done path */
+    e_add_r_imm(T, R14, 1);
+    e_mov_r_r(T, RDI, R13);
+    e_cmp_r_r(T, R14, R15);
+    size_t last = e_jcc(T, CC_GE);
+    nc_load_cstr(c, RSI, ", ");
+    size_t sep_done = e_jmp(T);
+    here(c, last);
+    nc_load_cstr(c, RSI, "");
+    here(c, sep_done);
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, R13, RAX);
+    size_t loop_back = e_jmp(T); e_patch_rel32(T, loop_back, loop);
+
+    here(c, done);
+    /* every loop exit lands here with the last concat already applied to
+       R13; the empty object still needs its closing brace. Either way the
+       close-brace concat produces the final string in RAX. */
+    e_mov_r_r(T, RDI, R13);
+    nc_load_cstr(c, RSI, "}");
+    nc_call_rt(c, RT_CONCAT);
+    e_mov_r_r(T, R13, RAX);
+    e_pop(T, RBX); e_pop(T, R15); e_pop(T, R14); e_pop(T, R13); e_pop(T, R12);
+    e_ret(T);
+}
+
+/* ----------------------------------------------------------------
    Driver
    ---------------------------------------------------------------- */
 
@@ -1750,6 +2127,12 @@ void nc_emit_runtime(NCtx *c) {
         { RT_ARR_POP,  emit_arr_pop  },
         { RT_ARR_STR,  emit_arr_str  },
         { RT_ARR_COPY, emit_arr_copy },
+        { RT_OBJ_NEW,  emit_obj_new  },
+        { RT_OBJ_SET,  emit_obj_set  },
+        { RT_OBJ_GET,  emit_obj_get  },
+        { RT_OBJ_GETS, emit_obj_gets },
+        { RT_OBJ_LEN,  emit_obj_len  },
+        { RT_OBJ_STR,  emit_obj_str  },
     };
     int n = (int)(sizeof(routines) / sizeof(routines[0]));
     for (int i = 0; i < n; i++) {

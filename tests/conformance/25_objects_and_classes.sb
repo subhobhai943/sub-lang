@@ -1,0 +1,40 @@
+# Objects and classes have to mean the same thing on every backend: the
+# native backend used to refuse them, the C backend emitted (void*)0 and
+# segfaulted, and the interpreter never defined the class name at all.
+
+let o = {"name": "SUB", "version": 9}
+println(o["name"])
+println(o["version"])
+o["version"] = 10
+println(o["version"])
+o.tag = "lang"
+println(o.tag)
+println(o.length)
+println(o)
+
+let empty = {}
+println(empty)
+
+class Point {
+    let x = 0
+    let y = 0
+}
+
+let p = Point.new
+println(p.x)
+println(p.y)
+p.x = 10
+p.y = 20
+println(p.x)
+println(p.y)
+
+let q = Point.new
+println(q.x)
+p.x = 99
+println(q.x)
+println(p.x)
+
+let deep = {"a": {"b": 42}}
+println(deep["a"]["b"])
+
+println(1125899906842623 + 1)

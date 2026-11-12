@@ -61,6 +61,16 @@ typedef enum {
     RT_ARR_POP,    /* rdi=array                   -> rax=element    */
     RT_ARR_STR,    /* rdi=array                   -> rax=ptr        */
     RT_ARR_COPY,   /* rdi=array                   -> rax=new array  */
+
+    /* Objects: the same shape the C backend emits - a fixed header with
+       count/capacity and a separate block of {key, val, kind} slots.
+       Values are tagged 64-bit slots like array elements. */
+    RT_OBJ_NEW,    /* rdi=capacity                -> rax=object      */
+    RT_OBJ_SET,    /* rdi=obj, rsi=key, rdx=val, rcx=kind            */
+    RT_OBJ_GET,    /* rdi=obj, rsi=key            -> rax=val (dies if unset) */
+    RT_OBJ_GETS,   /* rdi=obj, rsi=key            -> rax=string rendering of val */
+    RT_OBJ_LEN,    /* rdi=obj                     -> rax=count       */
+    RT_OBJ_STR,    /* rdi=obj                     -> rax="{k: v, ...}" */
     RT_COUNT
 } RtId;
 
@@ -70,6 +80,16 @@ typedef enum {
 #define ARR_KIND   16
 #define ARR_DATA   24
 #define ARR_HEADER 32
+
+/* Object header layout. A slot is three quads: key ptr, value, kind. */
+#define OBJ_COUNT   0
+#define OBJ_CAP     8
+#define OBJ_SLOTS   16
+#define OBJ_HEADER  24
+#define SLOT_KEY    0
+#define SLOT_VAL    8
+#define SLOT_KIND   16
+#define SLOT_SIZE   24
 
 /* What an array's elements are, so the runtime can print them. Codegen
    knows the element type statically; the runtime needs it too because

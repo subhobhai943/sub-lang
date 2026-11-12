@@ -168,6 +168,12 @@ def check(case, target, spec, workdir):
 
     rc, _, err = run([SUB, case, target], workdir)
     if rc != 0:
+        # Some constructs are a language-level fit for only some targets:
+        # objects and classes transpile to python, javascript and ruby, but
+        # are refused (clearly, at transpile time) by the statically typed
+        # targets. A target that says so up front has nothing to test.
+        if "not supported by the" in (err or "") and "transpiler" in (err or ""):
+            return "skip", "target does not support this construct"
         return "fail", "transpile failed: %s" % first_errors(err)
 
     # The transpiler names output after the input file, except Java, which must
