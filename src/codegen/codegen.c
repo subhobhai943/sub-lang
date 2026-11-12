@@ -870,6 +870,30 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                         sb_append(sb, "))");
                     }
                     else if (strcmp(fn, "input") == 0) sb_append(sb, "sub_input(");
+                    else if (strcmp(fn, "net_fetch") == 0) {
+                        sb_append(sb, "sub_net_fetch((const char*)(");
+                        if (node->child_count > 0) generate_expression(sb, node->children[0]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "))");
+                    }
+                    else if (strcmp(fn, "net_post") == 0) {
+                        sb_append(sb, "sub_net_post((const char*)(");
+                        if (node->child_count > 0) generate_expression(sb, node->children[0]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "), (const char*)(");
+                        if (node->child_count > 1) generate_expression(sb, node->children[1]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "))");
+                    }
+                    else if (strcmp(fn, "net_download") == 0) {
+                        sb_append(sb, "sub_net_download((const char*)(");
+                        if (node->child_count > 0) generate_expression(sb, node->children[0]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "), (const char*)(");
+                        if (node->child_count > 1) generate_expression(sb, node->children[1]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "))");
+                    }
                     else if (strcmp(fn, "sqrt") == 0) sb_append(sb, "sqrt(");
                     else if (strcmp(fn, "abs") == 0) sb_append(sb, "fabs(");
                     else if (strcmp(fn, "floor") == 0) sb_append(sb, "(long)floor(");
@@ -991,6 +1015,8 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                         strcmp(fn, "upper") != 0 && strcmp(fn, "lower") != 0 &&
                         strcmp(fn, "substring") != 0 && strcmp(fn, "split") != 0 &&
                         strcmp(fn, "contains") != 0 && strcmp(fn, "replace") != 0 &&
+                        strcmp(fn, "net_fetch") != 0 && strcmp(fn, "net_post") != 0 &&
+                        strcmp(fn, "net_download") != 0 &&
                         strcmp(fn, "len") != 0 && strcmp(fn, "length") != 0 &&
                         (strcmp(fn, "str") != 0 || node->child_count > 0) &&
                         (strcmp(fn, "to_string") != 0 || node->child_count > 0)) {
@@ -1516,6 +1542,23 @@ static void generate_node(StringBuilder *sb, ASTNode *node, int indent) {
     }
 }
 
+/* True when the program calls a net_* builtin, so the C prelude only pulls
+   in the socket headers (and their name collisions) when they are used. */
+static bool ast_uses_net_builtin(ASTNode *n) {
+    if (!n) return false;
+    if (n->type == AST_CALL_EXPR && n->value &&
+        (!strcmp(n->value, "net_fetch") || !strcmp(n->value, "net_post") ||
+         !strcmp(n->value, "net_download")))
+        return true;
+    if (ast_uses_net_builtin(n->body) || ast_uses_net_builtin(n->left) ||
+        ast_uses_net_builtin(n->right) || ast_uses_net_builtin(n->condition))
+        return true;
+    for (int i = 0; i < n->child_count; i++)
+        if (ast_uses_net_builtin(n->children[i]))
+            return true;
+    return false;
+}
+
 /* Generate C code from AST */
 /* Class registry: every AST_CLASS_DECL in the program, so `Point.new`
    can find the class's declared field defaults no matter where the class
@@ -1971,6 +2014,112 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "static inline long sub_int_from_str(const char* s) { return s ? atol(s) : 0; }\n");
     sb_append(sb, "static inline char* sub_str_from_long(long v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%ld\", v); return sub_strdup(buf); }\n");
     sb_append(sb, "static inline char* sub_str_from_double(double v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%g\", v); return sub_strdup(buf); }\n\n");
+
+    /* Networking builtins: the same minimal HTTP/1.1-over-sockets client the
+       interpreter has, so a program using net_fetch means the same thing
+       through subc as through subi. http:// only; https needs TLS and dies
+       with the interpreter's message rather than returning nothing.
+       The headers are emitted only when the program actually calls one of
+       the builtins: unistd.h in particular declares truncate(), which
+       collides with a stdlib function of the same name (conformance case
+       19) when it is included for a program that never networks. */
+    if (ast_uses_net_builtin(ast)) {
+    sb_append(sb, "#ifndef _WIN32\n");
+    sb_append(sb, "#include <sys/types.h>\n#include <sys/socket.h>\n");
+    sb_append(sb, "#include <netdb.h>\n#include <unistd.h>\n#include <arpa/inet.h>\n");
+    sb_append(sb, "static char* sub_net_request(const char* method, const char* url, const char* body) {\n");
+    sb_append(sb, "    if (!url || strncmp(url, \"http://\", 7) != 0) {\n");
+    sb_append(sb, "        if (url && strncmp(url, \"https://\", 8) == 0)\n");
+    sb_append(sb, "            sub_die(\"https is not supported by net_fetch (no TLS in the builtin HTTP client)\");\n");
+    sb_append(sb, "        sub_die(\"net_fetch needs an http:// URL\");\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    char host[256]; int port = 80; const char* path = \"/\";\n");
+    sb_append(sb, "    const char* p = url + 7; const char* slash = strchr(p, '/');\n");
+    sb_append(sb, "    size_t hl = slash ? (size_t)(slash - p) : strlen(p);\n");
+    sb_append(sb, "    if (hl == 0 || hl >= sizeof(host)) sub_die(\"net_fetch: invalid host\");\n");
+    sb_append(sb, "    memcpy(host, p, hl); host[hl] = 0;\n");
+    sb_append(sb, "    if (slash) path = slash;\n");
+    sb_append(sb, "    char* colon = strchr(host, ':');\n");
+    sb_append(sb, "    if (colon) { *colon = 0; port = atoi(colon + 1); if (port <= 0) port = 80; }\n");
+    sb_append(sb, "    struct addrinfo hints, *res = NULL;\n");
+    sb_append(sb, "    memset(&hints, 0, sizeof hints);\n");
+    sb_append(sb, "    hints.ai_family = AF_UNSPEC; hints.ai_socktype = SOCK_STREAM;\n");
+    sb_append(sb, "    if (getaddrinfo(host, NULL, &hints, &res) != 0 || !res)\n");
+    sb_append(sb, "        sub_die(\"net_fetch: cannot resolve host\");\n");
+    sb_append(sb, "    struct sockaddr_storage ss;\n");
+    sb_append(sb, "    memcpy(&ss, res->ai_addr, res->ai_addrlen);\n");
+    sb_append(sb, "    if (ss.ss_family == AF_INET) ((struct sockaddr_in*)&ss)->sin_port = htons((short)port);\n");
+    sb_append(sb, "    else ((struct sockaddr_in6*)&ss)->sin6_port = htons((short)port);\n");
+    sb_append(sb, "    int fd = socket(res->ai_family, SOCK_STREAM, 0);\n");
+    sb_append(sb, "    freeaddrinfo(res);\n");
+    sb_append(sb, "    if (fd < 0) sub_die(\"net_fetch: cannot create socket\");\n");
+    sb_append(sb, "    if (connect(fd, (struct sockaddr*)&ss, sizeof ss) != 0) { close(fd); sub_die(\"net_fetch: cannot connect\"); }\n");
+    sb_append(sb, "    char req[4096]; int n = snprintf(req, sizeof req,\n");
+    sb_append(sb, "        \"%%s %%s HTTP/1.1\\r\\nHost: %%s\\r\\nConnection: close\\r\\nUser-Agent: SUB-lang/1.0\\r\\n\",\n");
+    sb_append(sb, "        method, path, host);\n");
+    sb_append(sb, "    if (body && strcmp(method, \"POST\") == 0)\n");
+    sb_append(sb, "        n += snprintf(req + n, sizeof(req) - (size_t)n,\n");
+    sb_append(sb, "            \"Content-Type: text/plain\\r\\nContent-Length: %%zu\\r\\n\", strlen(body));\n");
+    sb_append(sb, "    n += snprintf(req + n, sizeof(req) - (size_t)n, \"\\r\\n\");\n");
+    sb_append(sb, "    if (n <= 0 || (size_t)n >= sizeof(req)) { close(fd); sub_die(\"net_fetch: request too long\"); }\n");
+    sb_append(sb, "    size_t off = 0;\n");
+    sb_append(sb, "    while (off < (size_t)n) {\n");
+    sb_append(sb, "        ssize_t w = send(fd, req + off, (size_t)n - off, 0);\n");
+    sb_append(sb, "        if (w <= 0) { close(fd); sub_die(\"net_fetch: send failed\"); }\n");
+    sb_append(sb, "        off += (size_t)w;\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    if (body && strcmp(method, \"POST\") == 0) {\n");
+    sb_append(sb, "        const char* bp = body; size_t bl = strlen(bp); off = 0;\n");
+    sb_append(sb, "        while (off < bl) {\n");
+    sb_append(sb, "            ssize_t w = send(fd, bp + off, bl - off, 0);\n");
+    sb_append(sb, "        if (w <= 0) { close(fd); sub_die(\"net_fetch: send failed\"); }\n");
+    sb_append(sb, "            off += (size_t)w;\n");
+    sb_append(sb, "        }\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    size_t cap = 65536, len = 0; char* raw = (char*)malloc(cap);\n");
+    sb_append(sb, "    if (!raw) { close(fd); sub_die(\"net_fetch: out of memory\"); }\n");
+    sb_append(sb, "    for (;;) {\n");
+    sb_append(sb, "        if (len == cap) { cap *= 2; raw = (char*)realloc(raw, cap); if (!raw) { close(fd); sub_die(\"net_fetch: out of memory\"); } }\n");
+    sb_append(sb, "        ssize_t r = recv(fd, raw + len, cap - len, 0);\n");
+    sb_append(sb, "        if (r == 0) break;\n");
+    sb_append(sb, "        if (r < 0) { close(fd); free(raw); sub_die(\"net_fetch: read failed\"); }\n");
+    sb_append(sb, "        len += (size_t)r;\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    close(fd);\n");
+    sb_append(sb, "    raw = (char*)realloc(raw, len + 1); if (!raw) sub_die(\"net_fetch: out of memory\");\n");
+    sb_append(sb, "    raw[len] = 0;\n");
+    sb_append(sb, "    char* hdr_end = strstr(raw, \"\\r\\n\\r\\n\");\n");
+    sb_append(sb, "    if (!hdr_end) { free(raw); sub_die(\"net_fetch: malformed HTTP response\"); }\n");
+    sb_append(sb, "    *hdr_end = 0;\n");
+    sb_append(sb, "    char* body_start = hdr_end + 4;\n");
+    sb_append(sb, "    long long content_len = -1;\n");
+    sb_append(sb, "    char* line = raw;\n");
+    sb_append(sb, "    while ((line = strstr(line, \"\\r\\n\")) != NULL) {\n");
+    sb_append(sb, "        line += 2;\n");
+    sb_append(sb, "        if (strncasecmp(line, \"Content-Length:\", 15) == 0) content_len = strtoll(line + 15, NULL, 10);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    size_t blen = (content_len >= 0 && (size_t)content_len <= len - (size_t)(body_start - raw))\n");
+    sb_append(sb, "                ? (size_t)content_len : len - (size_t)(body_start - raw);\n");
+    sb_append(sb, "    char* out = (char*)malloc(blen + 1); if (!out) sub_die(\"net_fetch: out of memory\");\n");
+    sb_append(sb, "    memmove(out, body_start, blen); out[blen] = 0;\n");
+    sb_append(sb, "    free(raw);\n");
+    sb_append(sb, "    return out;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "static inline char* sub_net_fetch(const char* url) { return sub_net_request(\"GET\", url, NULL); }\n");
+    sb_append(sb, "static inline char* sub_net_post(const char* url, const char* body) { return sub_net_request(\"POST\", url, body); }\n");
+    sb_append(sb, "static inline long sub_net_download(const char* url, const char* path) {\n");
+    sb_append(sb, "    char* b = sub_net_request(\"GET\", url, NULL);\n");
+    sb_append(sb, "    FILE* f = fopen(path, \"wb\");\n");
+    sb_append(sb, "    if (!f) sub_die(\"net_download: cannot open output file\");\n");
+    sb_append(sb, "    size_t n = fwrite(b, 1, strlen(b), f);\n");
+    sb_append(sb, "    fclose(f); return (long)n;\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "#else\n");
+    sb_append(sb, "static inline char* sub_net_fetch(const char* url) { (void)url; sub_die(\"net_fetch is not supported on this platform\"); }\n");
+    sb_append(sb, "static inline char* sub_net_post(const char* url, const char* b) { (void)url; (void)b; sub_die(\"net_post is not supported on this platform\"); }\n");
+    sb_append(sb, "static inline long sub_net_download(const char* url, const char* p) { (void)url; (void)p; sub_die(\"net_download is not supported on this platform\"); }\n");
+    sb_append(sb, "#endif\n\n");
+    }
     
     /* Pass 1: the top-level variables, declared at file scope so that the
        functions below can name them. Uninitialized: C wants a constant

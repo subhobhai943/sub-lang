@@ -1,0 +1,13 @@
+# Networking builtins, checked against servers the test harness starts on
+# loopback (tests/run_tests.py fills in the port numbers and serves the
+# directory this file is generated into). All three entry points.
+let body = net_fetch("http://127.0.0.1:__PORT_FILE__/data.txt")
+println(body)
+
+let echoed = net_post("http://127.0.0.1:__PORT_ECHO__/echo", "ping-123")
+println(echoed)
+
+let n = net_download("http://127.0.0.1:__PORT_FILE__/data.txt", "out.txt")
+println(n)
+let saved = net_fetch("http://127.0.0.1:__PORT_FILE__/out.txt")
+println(saved)

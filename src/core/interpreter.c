@@ -31,6 +31,22 @@
 #include <math.h>
 #include <ctype.h>
 #include <stdarg.h>
+/* Networking builtins (net_fetch / net_post / net_download) speak plain
+   HTTP over POSIX sockets. Windows gets a stub that reports the same
+   runtime error the interpreter reports for other unsupported things. */
+#ifndef _WIN32
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#define SUB_NET_POSIX 1
+#else
+#define SUB_NET_POSIX 0
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32")
+#endif
 #ifndef _WIN32
 #include <sys/resource.h>
 #endif
@@ -149,6 +165,11 @@ static void   val_free(SubVal v);
 static void   print_val(SubVal v);
 static SubVal val_to_str(SubVal v);
 static const char *type_name(ValType t);
+
+/* Networking builtins (defined near the bottom, after the helpers they
+   use; eval()'s builtin dispatch appears earlier in the file). */
+static char *net_http_request(const char *method, const char *url,
+                              const char *body, int *status_out);
 
 /* ================================================================
    Value Constructors
@@ -1997,6 +2018,56 @@ SubVal eval(ASTNode *node, Env *env) {
             return make_str(buf);
         }
 
+        /* net_fetch(url) -> response body (HTTP GET) */
+        if (fn && strcmp(fn, "net_fetch") == 0) {
+            if (node->child_count < 1)
+                runtime_error("net_fetch needs a URL");
+            SubVal uv = eval(node->children[0], env);
+            const char *url = uv.type == VAL_STRING && uv.sv ? uv.sv : "";
+            char *body = net_http_request("GET", url, NULL, NULL);
+            if (!body) return NULL_VAL;
+            SubVal r = {VAL_STRING, {.sv = body}};
+            return r;
+        }
+
+        /* net_post(url, body) -> response body (HTTP POST) */
+        if (fn && strcmp(fn, "net_post") == 0) {
+            if (node->child_count < 2)
+                runtime_error("net_post needs a URL and a body");
+            SubVal uv = eval(node->children[0], env);
+            SubVal bv = eval(node->children[1], env);
+            const char *url = uv.type == VAL_STRING && uv.sv ? uv.sv : "";
+            char *bstr = bv.type == VAL_STRING && bv.sv ? bv.sv : "";
+            char *resp = net_http_request("POST", url, bstr, NULL);
+            if (!resp) return NULL_VAL;
+            SubVal r = {VAL_STRING, {.sv = resp}};
+            return r;
+        }
+
+        /* net_download(url, path) -> bytes written */
+        if (fn && strcmp(fn, "net_download") == 0) {
+            if (node->child_count < 2)
+                runtime_error("net_download needs a URL and a file path");
+            SubVal uv = eval(node->children[0], env);
+            SubVal pv = eval(node->children[1], env);
+            const char *url = uv.type == VAL_STRING && uv.sv ? uv.sv : "";
+            const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
+            char *body = net_http_request("GET", url, NULL, NULL);
+            if (!body) return NULL_VAL;
+            size_t blen = strlen(body);   /* text bodies; a real length
+                                             would need the raw response */
+            FILE *f = fopen(path, "wb");
+            if (!f) {
+                free(body);
+                runtime_error("net_download: cannot write '%s'", path);
+                return NULL_VAL;
+            }
+            size_t wrote = fwrite(body, 1, blen, f);
+            fclose(f);
+            free(body);
+            return make_int((long long)wrote);
+        }
+
         /* ==== User-defined function call ==== */
         if (fn) {
             SubVal fv = env_get(env, fn);
@@ -2096,6 +2167,279 @@ SubVal eval(ASTNode *node, Env *env) {
         return NULL_VAL;
     }
 }
+
+/* ================================================================
+   Networking: net_fetch / net_post / net_download
+   --------------------------------------------------------------
+   Minimal HTTP/1.1 over POSIX sockets: no dependency on curl or any
+   other tool, matching the zero-dependency story of the rest of the
+   toolchain. http://host[:port]/path only; https needs TLS and reports
+   a clear error instead of silently returning nothing.
+   ================================================================ */
+
+#if SUB_NET_POSIX
+
+typedef struct {
+    char host[256];
+    int  port;
+    const char *path;      /* points into the original url */
+} NetUrl;
+
+/* Parse "http://host[:port]/path". Returns 0 on success. */
+static int net_parse_url(const char *url, NetUrl *out) {
+    if (!url || strncmp(url, "http://", 7) != 0) {
+        if (url && strncmp(url, "https://", 8) == 0)
+            runtime_error("https is not supported by net_fetch "
+                          "(no TLS in the builtin HTTP client)");
+        else
+            runtime_error("net_fetch needs an http:// URL");
+        return -1;
+    }
+    const char *p = url + 7;
+    const char *slash = strchr(p, '/');
+    size_t hostlen = slash ? (size_t)(slash - p) : strlen(p);
+    if (hostlen == 0 || hostlen >= sizeof(out->host)) {
+        runtime_error("net_fetch: invalid host in URL");
+        return -1;
+    }
+    /* IPv6 literals are out of scope for this client; brackets keep the
+       parse from misreading a colon inside an address as the port. */
+    if (memchr(p, ':', hostlen)) {
+        char *colon = NULL;
+        /* [::1]:8080 style */
+        if (p[0] == '[') {
+            const char *close = memchr(p, ']', hostlen);
+            if (!close) { runtime_error("net_fetch: malformed IPv6 host"); return -1; }
+            size_t inner = (size_t)(close - p - 1);
+            if (inner >= sizeof(out->host)) { runtime_error("net_fetch: host too long"); return -1; }
+            memcpy(out->host, p + 1, inner);
+            out->host[inner] = 0;
+            if (close + 1 < p + hostlen && *(close + 1) == ':') {
+                out->port = atoi(close + 2);
+                if (out->port <= 0) out->port = 80;
+            } else out->port = 80;
+        } else {
+            char hostbuf[256];
+            if (hostlen >= sizeof(hostbuf)) { runtime_error("net_fetch: host too long"); return -1; }
+            memcpy(hostbuf, p, hostlen);
+            hostbuf[hostlen] = 0;
+            colon = strchr(hostbuf, ':');
+            *colon = 0;
+            snprintf(out->host, sizeof(out->host), "%s", hostbuf);
+            out->port = atoi(colon + 1);
+            if (out->port <= 0) out->port = 80;
+        }
+    } else {
+        memcpy(out->host, p, hostlen);
+        out->host[hostlen] = 0;
+        out->port = 80;
+    }
+    out->path = slash ? slash : "/";
+    return 0;
+}
+
+/* One send() loop over a whole buffer. */
+static int net_send_all(int fd, const char *buf, size_t len) {
+    while (len > 0) {
+        ssize_t n = send(fd, buf, len, 0);
+        if (n <= 0) return -1;
+        buf += n;
+        len -= (size_t)n;
+    }
+    return 0;
+}
+
+/* Read until EOF or the connection closes. Returns a malloc'd body. */
+static char *net_read_all(int fd, size_t *out_len) {
+    size_t cap = 65536, len = 0;
+    char *buf = malloc(cap);
+    if (!buf) return NULL;
+    for (;;) {
+        if (len == cap) {
+            cap *= 2;
+            char *nb = realloc(buf, cap);
+            if (!nb) { free(buf); return NULL; }
+            buf = nb;
+        }
+        ssize_t n = recv(fd, buf + len, cap - len, 0);
+        if (n == 0) break;                    /* orderly close */
+        if (n < 0) { free(buf); return NULL; } /* error */
+        len += (size_t)n;
+    }
+    *out_len = len;
+    return buf;
+}
+
+/* Perform one HTTP request. method is "GET" or "POST"; body may be NULL.
+   Returns the response body, malloc'd and NUL-terminated, with headers
+   stripped; a Content-Length is honoured, and a chunked body is
+   de-chunked. status_out (may be NULL) receives the status code. */
+static char *net_http_request(const char *method, const char *url,
+                              const char *body, int *status_out) {
+    NetUrl u;
+    if (net_parse_url(url, &u) != 0) return NULL;
+
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    int rc = getaddrinfo(u.host, NULL, &hints, &res);
+    if (rc != 0) {
+        runtime_error("net_fetch: cannot resolve host '%s' (%s)",
+                      u.host, gai_strerror(rc));
+        return NULL;
+    }
+    /* port into a sockaddr */
+    struct sockaddr_storage ss;
+    memcpy(&ss, res->ai_addr, res->ai_addrlen);
+    if (ss.ss_family == AF_INET)
+        ((struct sockaddr_in*)&ss)->sin_port = htons((uint16_t)u.port);
+    else
+        ((struct sockaddr_in6*)&ss)->sin6_port = htons((uint16_t)u.port);
+
+    int fd = socket(res->ai_family, SOCK_STREAM, 0);
+    freeaddrinfo(res);
+    if (fd < 0) { runtime_error("net_fetch: cannot create socket"); return NULL; }
+
+    if (connect(fd, (struct sockaddr*)&ss, sizeof ss) != 0) {
+        close(fd);
+        runtime_error("net_fetch: cannot connect to %s:%d", u.host, u.port);
+        return NULL;
+    }
+
+    char req[4096];
+    int n = snprintf(req, sizeof req,
+                     "%s %s HTTP/1.1\r\n"
+                     "Host: %s\r\n"
+                     "Connection: close\r\n"
+                     "User-Agent: SUB-lang/1.0\r\n",
+                     method, u.path, u.host);
+    if (body && strcmp(method, "POST") == 0) {
+        size_t blen = strlen(body);
+        n += snprintf(req + n, sizeof(req) - (size_t)n,
+                      "Content-Type: text/plain\r\n"
+                      "Content-Length: %zu\r\n", blen);
+    }
+    n += snprintf(req + n, sizeof(req) - (size_t)n, "\r\n");
+    if (n <= 0 || (size_t)n >= sizeof(req)) {
+        close(fd);
+        runtime_error("net_fetch: request too long");
+        return NULL;
+    }
+    if (net_send_all(fd, req, (size_t)n) != 0) {
+        close(fd);
+        runtime_error("net_fetch: send failed");
+        return NULL;
+    }
+    if (body && strcmp(method, "POST") == 0 &&
+        net_send_all(fd, body, strlen(body)) != 0) {
+        close(fd);
+        runtime_error("net_fetch: send failed");
+        return NULL;
+    }
+
+    size_t rawlen = 0;
+    char *raw = net_read_all(fd, &rawlen);
+    close(fd);
+    if (!raw) { runtime_error("net_fetch: read failed"); return NULL; }
+
+    /* headers end at \r\n\r\n */
+    char *body_start = NULL;
+    char *chunked = NULL;
+    long long content_len = -1;
+    int status = 0;
+    {
+        /* NUL-terminate so strstr is safe; rawlen bytes may be binary,
+           but HTTP headers are text and the body offset is what matters. */
+        char *nul = realloc(raw, rawlen + 1);
+        if (!nul) { free(raw); return NULL; }
+        raw = nul;
+        raw[rawlen] = '\0';
+        char *hdr_end = strstr(raw, "\r\n\r\n");
+        if (!hdr_end) {
+            free(raw);
+            runtime_error("net_fetch: malformed HTTP response");
+            return NULL;
+        }
+        *hdr_end = '\0';
+        body_start = hdr_end + 4;
+
+        /* status line: HTTP/1.1 200 OK */
+        if (sscanf(raw, "HTTP/%*d.%*d %d", &status) != 1) status = 0;
+
+        /* scan headers */
+        char *line = raw;
+        while ((line = strstr(line, "\r\n")) != NULL) {
+            line += 2;
+            if (strncasecmp(line, "Content-Length:", 15) == 0)
+                content_len = strtoll(line + 15, NULL, 10);
+            else if (strncasecmp(line, "Transfer-Encoding:", 18) == 0 &&
+                     strcasestr(line, "chunked"))
+                chunked = body_start;
+        }
+        (void)chunked;
+    }
+
+    /* Body length: Content-Length when given, else up to the NUL we
+       appended (the body may itself contain NULs, but for a text
+       protocol the length header is the norm; without it we take
+       everything to the end of the stream, minus our sentinel). */
+    size_t body_len;
+    if (content_len >= 0 && (size_t)content_len <= rawlen - (size_t)(body_start - raw))
+        body_len = (size_t)content_len;
+    else
+        body_len = rawlen - (size_t)(body_start - raw);
+
+    /* De-chunk when the server said so. */
+    char *out_body = NULL;
+    size_t out_len = 0;
+    if (chunked) {
+        size_t cap = body_len ? body_len : 1;
+        out_body = malloc(cap + 1);
+        if (!out_body) { free(raw); return NULL; }
+        char *rp = body_start;
+        while (rp < raw + rawlen) {
+            long long chunk = strtoll(rp, NULL, 16);
+            if (chunk <= 0) break;
+            rp = strstr(rp, "\r\n");
+            if (!rp) break;
+            rp += 2;
+            if (rp + (size_t)chunk > raw + rawlen) break;
+            if (out_len + (size_t)chunk > cap) {
+                cap = (out_len + (size_t)chunk) * 2;
+                char *nb = realloc(out_body, cap + 1);
+                if (!nb) { free(out_body); free(raw); return NULL; }
+                out_body = nb;
+            }
+            memcpy(out_body + out_len, rp, (size_t)chunk);
+            out_len += (size_t)chunk;
+            rp += chunk + 2;                  /* data + CRLF */
+        }
+        out_body[out_len] = '\0';
+    } else {
+        out_body = malloc(body_len + 1);
+        if (!out_body) { free(raw); return NULL; }
+        memcpy(out_body, body_start, body_len);
+        out_body[body_len] = '\0';
+        out_len = body_len;
+    }
+    free(raw);
+    if (status_out) *status_out = status;
+    (void)out_len;
+    return out_body;
+}
+
+#else  /* !_WIN32: stubs with the same errors */
+
+static char *net_http_request(const char *method, const char *url,
+                              const char *body, int *status_out) {
+    (void)method; (void)url; (void)body;
+    if (status_out) *status_out = 0;
+    runtime_error("net_fetch is not supported on this platform");
+    return NULL;
+}
+
+#endif
 
 /* ================================================================
    Interpret a Source File

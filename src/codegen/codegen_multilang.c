@@ -1121,6 +1121,12 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
                     break;
                 } else if (strcmp(fn, "sqrt") == 0) {
                     sb_append(sb, "math.sqrt(");
+                } else if (strcmp(fn, "net_fetch") == 0) {
+                    sb_append(sb, "_sub_net_fetch(");
+                } else if (strcmp(fn, "net_post") == 0) {
+                    sb_append(sb, "_sub_net_post(");
+                } else if (strcmp(fn, "net_download") == 0) {
+                    sb_append(sb, "_sub_net_download(");
                 } else if (strcmp(fn, "floor") == 0) {
                     sb_append(sb, "math.floor(");
                 } else if (strcmp(fn, "ceil") == 0) {
@@ -1629,6 +1635,39 @@ char* codegen_python(ASTNode *ast, const char *source) {
     sb_append(sb, "        return str(a) + str(b)\n");
     sb_append(sb, "    return a + b\n\n");
 
+    /* Networking builtins over urllib, the standard library's HTTP client.
+       http:// only; https needs TLS and reports the same error the other
+       backends report. */
+    sb_append(sb, "def _sub_net_fetch(url):\n");
+    sb_append(sb, "    import urllib.request\n");
+    sb_append(sb, "    if url.startswith('https://'):\n");
+    sb_append(sb, "        _sub_die('https is not supported by net_fetch (no TLS in the builtin HTTP client)')\n");
+    sb_append(sb, "    if not url.startswith('http://'):\n");
+    sb_append(sb, "        _sub_die('net_fetch needs an http:// URL')\n");
+    /* An HTTP error status still has a body, and the other backends return
+       it; raise nothing and read it the same way. */
+    sb_append(sb, "    try:\n");
+    sb_append(sb, "        with urllib.request.urlopen(url) as r:\n");
+    sb_append(sb, "            return r.read().decode('utf-8', 'replace')\n");
+    sb_append(sb, "    except urllib.error.HTTPError as e:\n");
+    sb_append(sb, "        return e.read().decode('utf-8', 'replace')\n\n");
+    sb_append(sb, "def _sub_net_post(url, body):\n");
+    sb_append(sb, "    import urllib.request\n");
+    sb_append(sb, "    if url.startswith('https://'):\n");
+    sb_append(sb, "        _sub_die('https is not supported by net_fetch (no TLS in the builtin HTTP client)')\n");
+    sb_append(sb, "    req = urllib.request.Request(url, data=str(body).encode('utf-8'),\n");
+    sb_append(sb, "                              method='POST')\n");
+    sb_append(sb, "    try:\n");
+    sb_append(sb, "        with urllib.request.urlopen(req) as r:\n");
+    sb_append(sb, "            return r.read().decode('utf-8', 'replace')\n");
+    sb_append(sb, "    except urllib.error.HTTPError as e:\n");
+    sb_append(sb, "        return e.read().decode('utf-8', 'replace')\n\n");
+    sb_append(sb, "def _sub_net_download(url, path):\n");
+    sb_append(sb, "    import urllib.request\n");
+    sb_append(sb, "    with urllib.request.urlopen(url) as r:\n");
+    sb_append(sb, "        data = r.read()\n");
+    sb_append(sb, "    with open(path, 'wb') as f:\n");
+    sb_append(sb, "        return f.write(data)\n\n");
     sb_append(sb, "def _sub_round(x):\n");
     sb_append(sb, "    # Python's round() is banker's rounding: round(2.5)\n");
     sb_append(sb, "    # is 2 and round(-2.5) is -2. SUB rounds halves away\n");
@@ -1774,6 +1813,12 @@ static void generate_expr_js(StringBuilder *sb, ASTNode *node) {
                 }
                 sb_append(sb, as_str ? ")" : "))");
                 break;
+            } else if (node->value && strcmp(node->value, "net_fetch") == 0) {
+                sb_append(sb, "await _subNetFetch(");
+            } else if (node->value && strcmp(node->value, "net_post") == 0) {
+                sb_append(sb, "await _subNetPost(");
+            } else if (node->value && strcmp(node->value, "net_download") == 0) {
+                sb_append(sb, "await _subNetDownload(");
             } else if (node->value) {
                 sb_append(sb, "%s(", node->value);
             } else {
@@ -2183,6 +2228,28 @@ char* codegen_javascript(ASTNode *ast, const char *source) {
     sb_append(sb, "        return Number.isInteger(v) ? String(v) : _subFmt(v);\n");
     sb_append(sb, "    return String(v);\n");
     sb_append(sb, "}\n\n");
+    /* Networking builtins. The generated program body runs inside an
+       async IIFE (see codegen_javascript), so these can use the built-in
+       fetch directly - no dependency, no shell-outs. http:// only; https
+       needs TLS and dies with the interpreter's message. */
+    sb_append(sb, "async function _subNetRaw(method, url, body) {\n");
+    sb_append(sb, "    if (url.startsWith('https://'))\n");
+    sb_append(sb, "        _subDie('https is not supported by net_fetch (no TLS in the builtin HTTP client)');\n");
+    sb_append(sb, "    if (!url.startsWith('http://'))\n");
+    sb_append(sb, "        _subDie('net_fetch needs an http:// URL');\n");
+    sb_append(sb, "    const opts = { method: method };\n");
+    sb_append(sb, "    if (body !== null) { opts.body = body;\n");
+    sb_append(sb, "        opts.headers = { 'Content-Type': 'text/plain' }; }\n");
+    sb_append(sb, "    const res = await fetch(url, opts);\n");
+    sb_append(sb, "    return await res.text();\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subNetFetch(url) { return _subNetRaw('GET', url, null); }\n");
+    sb_append(sb, "function _subNetPost(url, body) { return _subNetRaw('POST', url, body); }\n");
+    sb_append(sb, "async function _subNetDownload(url, path) {\n");
+    sb_append(sb, "    const data = await _subNetRaw('GET', url, null);\n");
+    sb_append(sb, "    require('fs').writeFileSync(path, data);\n");
+    sb_append(sb, "    return data.length;\n");
+    sb_append(sb, "}\n\n");
     sb_append(sb, "function _subAt(c, i) {\n");
     /* An object (non-array) is indexed by key; the interpreter reads
        properties this way. Length bounds do not apply. */
@@ -2269,7 +2336,11 @@ char* codegen_javascript(ASTNode *ast, const char *source) {
         sb_append(sb, "%s\n", embedded);
         free(embedded);
     }
+    /* The body runs inside an async IIFE so the networking builtins can
+       use the built-in fetch. Programs without them are unaffected. */
+    sb_append(sb, "(async () => {\n");
     generate_node_js(sb, ast, 0);
+    sb_append(sb, "})();\n");
     
     return sb_to_string(sb);
 }
@@ -4458,6 +4529,27 @@ static void generate_expr_ruby(StringBuilder *sb, ASTNode *node) {
                     sb_append(sb, " ");
                     generate_expr_ruby(sb, node->children[0]);
                 }
+            } else if (node->value && strcmp(node->value, "net_fetch") == 0) {
+                sb_append(sb, "_sub_net_fetch(");
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    generate_expr_ruby(sb, node->children[i]);
+                }
+                sb_append(sb, ")");
+            } else if (node->value && strcmp(node->value, "net_post") == 0) {
+                sb_append(sb, "_sub_net_post(");
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    generate_expr_ruby(sb, node->children[i]);
+                }
+                sb_append(sb, ")");
+            } else if (node->value && strcmp(node->value, "net_download") == 0) {
+                sb_append(sb, "_sub_net_download(");
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    generate_expr_ruby(sb, node->children[i]);
+                }
+                sb_append(sb, ")");
             } else {
                 if (node->value) {
                     sb_append(sb, "%s(", func_name);
@@ -4997,6 +5089,29 @@ char* codegen_ruby(ASTNode *ast, const char *source) {
     sb_append(sb, "\ndef _sub_set(o, k, v)\n");
     sb_append(sb, "  if o.is_a?(Hash) then o[k] = v else o.send(\"#{k}=\", v) end\n");
     sb_append(sb, "  v\nend\n");
+    /* Networking builtins over net/http, Ruby's standard library client.
+       http:// only; https needs TLS and reports the same error the other
+       backends report. */
+    sb_append(sb, "\nrequire 'net/http'\n");
+    sb_append(sb, "def _sub_net_raw(method, url, body)\n");
+    sb_append(sb, "  if url.start_with?('https://')\n");
+    sb_append(sb, "    _sub_die('https is not supported by net_fetch (no TLS in the builtin HTTP client)')\n");
+    sb_append(sb, "  end\n");
+    sb_append(sb, "  _sub_die('net_fetch needs an http:// URL') unless url.start_with?('http://')\n");
+    sb_append(sb, "  u = URI(url)\n");
+    sb_append(sb, "  req = (method == 'POST') ? Net::HTTP::Post.new(u) : Net::HTTP::Get.new(u)\n");
+    sb_append(sb, "  req['User-Agent'] = 'SUB-lang/1.0'\n");
+    sb_append(sb, "  req.body = body if method == 'POST' && body\n");
+    sb_append(sb, "  res = Net::HTTP.start(u.hostname, u.port) { |h| h.request(req) }\n");
+    sb_append(sb, "  res.body.to_s\n");
+    sb_append(sb, "end\n");
+    sb_append(sb, "\ndef _sub_net_fetch(url)\n  _sub_net_raw('GET', url, nil)\nend\n");
+    sb_append(sb, "\ndef _sub_net_post(url, body)\n  _sub_net_raw('POST', url, body)\nend\n");
+    sb_append(sb, "\ndef _sub_net_download(url, path)\n");
+    sb_append(sb, "  data = _sub_net_raw('GET', url, nil)\n");
+    sb_append(sb, "  File.binwrite(path, data)\n");
+    sb_append(sb, "  data.bytesize\n");
+    sb_append(sb, "end\n");
     sb_append(sb, "\ndef _sub_pop(a)\n");
     sb_append(sb, "  _sub_die('pop from empty array') if a.empty?\n");
     sb_append(sb, "  a.pop\nend\n");
@@ -5258,6 +5373,27 @@ static void generate_expr_go(StringBuilder *sb, ASTNode *node) {
                     if (node->children)
                         gen_printable(sb, node->children[i], "_sub_fmt",
                                       "_sub_arr", generate_expr_go);
+                }
+                sb_append(sb, ")");
+            } else if (node->value && strcmp(node->value, "net_fetch") == 0) {
+                sb_append(sb, "_sub_net_fetch(");
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    generate_expr_go(sb, node->children[i]);
+                }
+                sb_append(sb, ")");
+            } else if (node->value && strcmp(node->value, "net_post") == 0) {
+                sb_append(sb, "_sub_net_post(");
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    generate_expr_go(sb, node->children[i]);
+                }
+                sb_append(sb, ")");
+            } else if (node->value && strcmp(node->value, "net_download") == 0) {
+                sb_append(sb, "_sub_net_download(");
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    generate_expr_go(sb, node->children[i]);
                 }
                 sb_append(sb, ")");
             } else {
@@ -5690,6 +5826,23 @@ static void generate_node_go(StringBuilder *sb, ASTNode *node, int indent) {
     }
 }
 
+/* True when the program calls a net_* builtin, so the Go prelude can
+   import net/http and io only when they are needed. */
+static bool ast_uses_net_builtin(ASTNode *n) {
+    if (!n) return false;
+    if (n->type == AST_CALL_EXPR && n->value &&
+        (!strcmp(n->value, "net_fetch") || !strcmp(n->value, "net_post") ||
+         !strcmp(n->value, "net_download")))
+        return true;
+    if (ast_uses_net_builtin(n->body) || ast_uses_net_builtin(n->left) ||
+        ast_uses_net_builtin(n->right) || ast_uses_net_builtin(n->condition))
+        return true;
+    for (int i = 0; i < n->child_count; i++)
+        if (ast_uses_net_builtin(n->children[i]))
+            return true;
+    return false;
+}
+
 char* codegen_go(ASTNode *ast, const char *source) {
     if (codegen_reject_unsupported(ast, "go")) return NULL;
     StringBuilder *sb = sb_create();
@@ -5706,10 +5859,15 @@ char* codegen_go(ASTNode *ast, const char *source) {
     bool needs_str_fns  = ast_uses_str_builtin(ast);
     bool needs_strings  = ast_uses_go_pkg(ast, "strings") || needs_str_fns;
     bool needs_strconv  = true;   /* _sub_fmt always uses it */
+    bool needs_net     = ast_uses_net_builtin(ast);
+    bool needs_io      = needs_net;
+    /* _sub_net_raw uses strings.HasPrefix, so the net helpers need it too */
+    needs_strings = needs_strings || needs_net;
     needs_fmt = true;             /* _sub_str always uses fmt.Sprint */
     int  import_count   = (needs_fmt ? 1 : 0) + (needs_math ? 1 : 0) +
                           (needs_strings ? 1 : 0) + (needs_os ? 1 : 0) +
-                          (needs_strconv ? 1 : 0);
+                          (needs_strconv ? 1 : 0) +
+                          (needs_net ? 1 : 0) + (needs_io ? 1 : 0);
     if (import_count == 1) {
         sb_append(sb, "import \"%s\"\n\n",
                   needs_fmt ? "fmt" : needs_math ? "math" :
@@ -5721,6 +5879,8 @@ char* codegen_go(ASTNode *ast, const char *source) {
         if (needs_os)      sb_append(sb, "\t\"os\"\n");
         if (needs_strconv) sb_append(sb, "\t\"strconv\"\n");
         if (needs_strings) sb_append(sb, "\t\"strings\"\n");
+        if (needs_net)     sb_append(sb, "\t\"net/http\"\n");
+        if (needs_io)      sb_append(sb, "\t\"io\"\n");
         sb_append(sb, ")\n\n");
     }
 
@@ -5762,6 +5922,50 @@ char* codegen_go(ASTNode *ast, const char *source) {
     sb_append(sb, "func _sub_die(msg string) {\n");
     sb_append(sb, "\tfmt.Fprintln(os.Stderr, \"RuntimeError: \"+msg)\n");
     sb_append(sb, "\tos.Exit(70)\n}\n\n");
+    if (needs_net) {
+        /* Networking builtins over net/http, the standard library's client.
+           http:// only; https needs TLS and reports the same error the
+           other backends report. */
+        sb_append(sb, "func _sub_net_raw(method, url, body string) string {\n");
+        sb_append(sb, "\tif strings.HasPrefix(url, \"https://\") {\n");
+        sb_append(sb, "\t\t_sub_die(\"https is not supported by net_fetch (no TLS in the builtin HTTP client)\")\n");
+        sb_append(sb, "\t}\n");
+        sb_append(sb, "\tif !strings.HasPrefix(url, \"http://\") {\n");
+        sb_append(sb, "\t\t_sub_die(\"net_fetch needs an http:// URL\")\n");
+        sb_append(sb, "\t}\n");
+        sb_append(sb, "\tvar req *http.Request\n");
+        sb_append(sb, "\tvar err error\n");
+        sb_append(sb, "\tif body != \"\" && method == \"POST\" {\n");
+        sb_append(sb, "\t\treq, err = http.NewRequest(method, url, strings.NewReader(body))\n");
+        sb_append(sb, "\t} else {\n");
+        sb_append(sb, "\t\treq, err = http.NewRequest(method, url, nil)\n");
+        sb_append(sb, "\t}\n");
+        sb_append(sb, "\tif err != nil {\n");
+        sb_append(sb, "\t\t_sub_die(\"net_fetch: invalid request\")\n");
+        sb_append(sb, "\t}\n");
+        sb_append(sb, "\treq.Header.Set(\"User-Agent\", \"SUB-lang/1.0\")\n");
+        sb_append(sb, "\tres, err := http.DefaultClient.Do(req)\n");
+        sb_append(sb, "\tif err != nil {\n");
+        sb_append(sb, "\t\t_sub_die(\"net_fetch: request failed\")\n");
+        sb_append(sb, "\t}\n");
+        sb_append(sb, "\tdefer res.Body.Close()\n");
+        sb_append(sb, "\tb, err := io.ReadAll(res.Body)\n");
+        sb_append(sb, "\tif err != nil {\n");
+        sb_append(sb, "\t\t_sub_die(\"net_fetch: read failed\")\n");
+        sb_append(sb, "\t}\n");
+        sb_append(sb, "\treturn string(b)\n");
+        sb_append(sb, "}\n\n");
+        sb_append(sb, "func _sub_net_fetch(url string) string { return _sub_net_raw(\"GET\", url, \"\") }\n");
+        sb_append(sb, "func _sub_net_post(url string, body string) string { return _sub_net_raw(\"POST\", url, body) }\n");
+        sb_append(sb, "func _sub_net_download(url string, path string) int64 {\n");
+        sb_append(sb, "\tdata := _sub_net_raw(\"GET\", url, \"\")\n");
+        sb_append(sb, "\terr := os.WriteFile(path, []byte(data), 0644)\n");
+        sb_append(sb, "\tif err != nil {\n");
+        sb_append(sb, "\t\t_sub_die(\"net_download: cannot write file\")\n");
+        sb_append(sb, "\t}\n");
+        sb_append(sb, "\treturn int64(len(data))\n");
+        sb_append(sb, "}\n\n");
+    }
     if (needs_str_fns) {
         sb_append(sb, "func _sub_substring(s string, start int64, end int64) string {\n");
         sb_append(sb, "	n := int64(len(s))\n");

@@ -166,6 +166,101 @@ def test_transpile_and_run(sb_file, expected, lang, ext, runner):
     check_suffix(run_out, expected, label)
 
 
+def free_port():
+    """A port the kernel guarantees is free right now."""
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def run_net_checks():
+    """Run tests/test_net.sb.in against freshly started local servers.
+
+    Returns a list of (label, ok, detail). The generated program and the
+    servers live in one temp directory; net_download writes there, so the
+    final net_fetch reads the downloaded file back through the server -
+    which only works if the download really happened.
+    """
+    import subprocess, tempfile, threading, http.server, functools, shutil
+
+    results = []
+
+    workdir = tempfile.mkdtemp(prefix="sub_net_test_")
+    port_file, port_echo = free_port(), free_port()
+    shutil.copy(os.path.join(SCRIPT_DIR, "net_echo_server.py"), workdir)
+    with open(os.path.join(workdir, "data.txt"), "w") as f:
+        f.write("hello from sub-lang net test")
+
+    # Generate the program with the real ports.
+    with open(os.path.join(SCRIPT_DIR, "test_net.sb.in")) as f:
+        prog = f.read()
+    prog = prog.replace("__PORT_FILE__", str(port_file)).replace("__PORT_ECHO__", str(port_echo))
+    sb_path = os.path.join(workdir, "test_net.sb")
+    with open(sb_path, "w") as f:
+        f.write(prog)
+
+    expected = ("hello from sub-lang net test\n"
+                "ECHO:ping-123\n"
+                "28\n"
+                "hello from sub-lang net test")
+
+    # File server: serves the workdir, so out.txt becomes fetchable.
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
+                                directory=workdir)
+    httpd_files = http.server.ThreadingHTTPServer(("127.0.0.1", port_file), handler)
+    threading.Thread(target=httpd_files.serve_forever, daemon=True).start()
+
+    # Echo server: same process, different thread.
+    sys.path.insert(0, workdir)
+    import importlib
+    netmod_dir = os.path.join(workdir, "net_echo_server.py")
+    # run the echo server in-process via its handler class instead
+    import http.server as _hs
+    class EchoHandler(_hs.BaseHTTPRequestHandler):
+        def _reply(self):
+            n = int(self.headers.get('Content-Length', 0) or 0)
+            data = self.rfile.read(n) if n else b''
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'ECHO:' + data)
+        do_GET = do_POST = do_PUT = _reply
+        def log_message(self, *args): pass
+    httpd_echo = _hs.ThreadingHTTPServer(("127.0.0.1", port_echo), EchoHandler)
+    threading.Thread(target=httpd_echo.serve_forever, daemon=True).start()
+
+    try:
+        # interpreter
+        rc, out = run([SUBI, sb_path], cwd=workdir)
+        results.append(("subi: test_net.sb", rc == 0 and out.rstrip("\n").endswith(expected), f"exit {rc}: {out[:400]}"))
+        # subc (default: machine code, auto-falls back to C for net builtins)
+        if tool_available("gcc"):
+            exe = os.path.join(workdir, "net_compiled")
+            rc, out = run([SUBC, sb_path, "-o", exe], cwd=workdir)
+            if rc != 0:
+                results.append(("subc: test_net.sb", False, f"compile exit {rc}: {out[:400]}"))
+            else:
+                rc, out = run([exe], cwd=workdir)
+                results.append(("subc: test_net.sb", rc == 0 and out.rstrip("\n").endswith(expected), f"exit {rc}: {out[:400]}"))
+        # transpilers: python and javascript
+        for lang, ext, runner in (("python", ".py", ["python3"]), ("js", ".js", ["node"])):
+            if not tool_available(runner[0]):
+                results.append((f"sub {lang}: test_net.sb", None, "runtime not available"))
+                continue
+            out_file = os.path.join(workdir, "test_net" + ext)
+            rc, out = run([SUB, sb_path, lang], cwd=workdir)
+            if rc != 0 or not os.path.exists(out_file):
+                results.append((f"sub {lang}: test_net.sb", False, f"transpile exit {rc}: {out[:400]}"))
+                continue
+            rc, out = run(runner + [out_file], cwd=workdir)
+            results.append((f"sub {lang}: test_net.sb", rc == 0 and out.rstrip("\n").endswith(expected), f"exit {rc}: {out[:400]}"))
+    finally:
+        httpd_files.shutdown()
+        httpd_echo.shutdown()
+        shutil.rmtree(workdir, ignore_errors=True)
+    return results
+
+
 def main():
     missing = [p for p in (SUB, SUBC, SUBI) if not os.path.exists(p)]
     if missing:
@@ -250,6 +345,20 @@ def main():
             check_suffix(run_out, expected, label)
     elif "not available for this host" not in out:
         fail(label, f"compile exit {rc}: {out}")
+
+    # --- Networking: net_fetch / net_post / net_download ---
+    # Starts its own servers on loopback (an http.server for files and a
+    # tiny echo handler for POST), so the check is offline-safe: nothing
+    # leaves the machine, and both servers die with the test.
+    print("\n=== networking (local servers on 127.0.0.1) ===")
+    net_results = run_net_checks()
+    for label, ok, detail in net_results:
+        if ok is None:
+            print(f"  SKIP {label} ({detail})")
+        elif ok:
+            print(f"  OK   {label}")
+        else:
+            fail(label, detail)
 
     print(f"\n{'='*40}")
     if failures:

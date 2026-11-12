@@ -47,6 +47,7 @@
   - [Loops & Iteration](#loops--iteration)
   - [Pattern Matching](#pattern-matching)
   - [Exception Handling](#exception-handling)
+  - [Networking](#networking)
   - [String & Array Methods](#string--array-methods)
   - [Cross-Platform UI Declarations](#cross-platform-ui-declarations)
 - [Built-in Functions](#built-in-functions)
@@ -440,6 +441,36 @@ try {
 }
 ```
 
+### Networking
+
+Plain HTTP is a builtin, the same way `input()` is: no import, no library,
+no external tool. `net_fetch(url)` performs an HTTP GET and returns the
+response body as a string, `net_post(url, body)` POSTs and returns the
+response, and `net_download(url, path)` writes the body to a file and
+returns the byte count.
+
+```coffee
+let body = net_fetch("http://127.0.0.1:8000/hello.txt")
+println(body)                     # whatever the server sent
+
+let answer = net_post("http://127.0.0.1:8000/echo", "ping")
+println(answer)                   # the server's response to the POST
+
+let n = net_download("http://127.0.0.1:8000/hello.txt", "copy.txt")
+println(n)                        # bytes written
+```
+
+`http://` only - the builtin client has no TLS, so an `https://` URL is a
+clear runtime error rather than a silently empty body. A connection
+failure or an unresolvable host is a runtime error with exit status 70,
+like every other runtime error.
+
+The three builtins work through `subi`, through `subc` (a net program
+automatically builds through the C backend - the machine-code backend
+refuses them by name, with a note saying so), and through the `python`,
+`javascript` and `go` transpilers. `tests/run_tests.py` starts its own
+servers on loopback and checks all of the above offline.
+
 ### String & Array Methods
 
 #### Strings
@@ -512,6 +543,9 @@ ui.window(title="SUB App", width=800, height=600) {
 | `replace(s, old, new)` | Every occurrence | `replace("a-b", "-", "+")` |
 | `split(s[, sep])` | Cut into an array; empty fields kept | `split("a,,b", ",")` |
 | `join(arr[, sep])` | Join an array into a string | `join(arr, ", ")` |
+| `net_fetch(url)` | HTTP GET; returns the response body | `net_fetch("http://127.0.0.1:8000/hi.txt")` |
+| `net_post(url, body)` | HTTP POST; returns the response body | `net_post(url, "payload")` |
+| `net_download(url, path)` | GET to a file; returns bytes written | `net_download(url, "out.txt")` |
 
 All ten backends and the interpreter agree on these, down to the edge cases:
 `substring` clamps a negative bound to 0 rather than counting from the end,

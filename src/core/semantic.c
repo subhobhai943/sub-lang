@@ -539,7 +539,8 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                     return TYPE_STRING;
                 }
                 if (fn_name && (strcmp(fn_name, "len") == 0 || strcmp(fn_name, "int") == 0 ||
-                                strcmp(fn_name, "sizeof") == 0)) {
+                                strcmp(fn_name, "sizeof") == 0 ||
+                                strcmp(fn_name, "net_download") == 0)) {
                     for (int i = 0; i < node->child_count; i++)
                         check_expression_type(node->children[i], table);
                     node->data_type = TYPE_INT;
@@ -600,7 +601,10 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 if (fn_name && (strcmp(fn_name, "trim") == 0 || strcmp(fn_name, "char_at") == 0 ||
                                 strcmp(fn_name, "join") == 0 || strcmp(fn_name, "to_string") == 0 ||
                                 strcmp(fn_name, "upper") == 0 || strcmp(fn_name, "lower") == 0 ||
-                                strcmp(fn_name, "replace") == 0 || strcmp(fn_name, "substring") == 0)) {
+                                strcmp(fn_name, "replace") == 0 || strcmp(fn_name, "substring") == 0 ||
+                                /* Networking builtins return the response body. */
+                                strcmp(fn_name, "net_fetch") == 0 ||
+                                strcmp(fn_name, "net_post") == 0)) {
                     for (int i = 0; i < node->child_count; i++)
                         check_expression_type(node->children[i], table);
                     node->data_type = TYPE_STRING;
