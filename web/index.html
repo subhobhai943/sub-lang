@@ -47,7 +47,8 @@
 
   <!-- Hero -->
   <section class="hero">
-    <div class="container">
+    <canvas id="matrixRain" aria-hidden="true"></canvas>
+    <div class="container hero-inner">
       <h1>SUB — Simple Universal Builder</h1>
       <p class="hero-sub">
         A small language toolchain: one <code>.sb</code> source, compiled to native x86-64
@@ -60,6 +61,10 @@
       <div class="hero-actions">
         <a class="btn btn-primary" href="https://github.com/subhobhai943/sub-lang/releases" target="_blank" rel="noopener">Get the tools</a>
         <a class="btn btn-quiet" href="https://github.com/subhobhai943/sub-lang#readme" target="_blank" rel="noopener">Read the docs</a>
+      </div>
+      <div class="terminal-demo" aria-hidden="true">
+        <div class="term-bar"><span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span><span class="term-title">sub@dev: ~</span></div>
+        <div class="term-body"><pre id="termType"></pre><span class="term-cursor"></span></div>
       </div>
     </div>
   </section>
@@ -269,6 +274,7 @@ $ sub hello.sb rust</code></pre>
 </footer>
 
 <script src="assets/highlight.js"></script>
+<script src="assets/matrix.js"></script>
 <script src="assets/main.js"></script>
 </body>
 </html>
