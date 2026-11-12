@@ -127,11 +127,17 @@ static void runtime_error(const char *fmt, ...) {
 static uintptr_t g_stack_base   = 0;
 static size_t    g_stack_budget = 0;
 
+/* Set when the interpreter runs on a dedicated big-stack thread (see
+   interp_run_on_big_stack): the budget then reflects that thread's actual
+   stack, not the main thread's RLIMIT_STACK of a few megabytes. */
+static size_t g_thread_stack_size = 0;
+
 static void interp_stack_guard_init(void) {
     char probe;
     g_stack_base = (uintptr_t)&probe;
 
-    size_t limit = (size_t)1 << 20;  /* Windows default thread stack: 1 MiB */
+    size_t limit = g_thread_stack_size;
+    if (limit == 0) limit = (size_t)1 << 20;  /* Windows default: 1 MiB */
 #ifndef _WIN32
     struct rlimit rl;
     if (getrlimit(RLIMIT_STACK, &rl) == 0 &&
@@ -143,6 +149,7 @@ static void interp_stack_guard_init(void) {
     /* Spend at most half the stack so the error is reported well before the
        real overflow, leaving room for the frames below us. */
     g_stack_budget = limit / 2;
+    if (getenv("SUB_DEBUG_STACK")) fprintf(stderr, "[guard] budget=%zu MB\n", g_stack_budget >> 20);
 }
 
 static void interp_check_stack(void) {
@@ -2472,6 +2479,40 @@ int interpret_source(const char *source, Env *env) {
     parser_free_ast(ast);
     lexer_free_tokens(toks, ntok);
     return aborted ? 1 : 0;
+}
+
+#if SUB_NET_POSIX
+#include <pthread.h>
+#endif
+
+/* Run f(arg) on a thread with a large stack. A tree-walking interpreter
+   burns kilobytes of C stack per SUB-level recursion, and the main thread
+   inherits the process's 8 MiB default - so `fib(30)`-style recursion that
+   the compiled backends handle with room to spare died at ~1200 frames.
+   A dedicated 256 MiB stack puts the interpreter comfortably past the
+   compiled backends' practical limits while the stack guard still reports
+   a clean error if something truly unbounded runs. */
+int interp_run_on_big_stack(void *(*fn)(void *), void *arg) {
+#if SUB_NET_POSIX
+    pthread_attr_t attr;
+    pthread_t th;
+    g_thread_stack_size = (size_t)256 << 20;  /* before create: the worker
+                                                 may guard_init immediately */
+    if (pthread_attr_init(&attr) == 0 &&
+        pthread_attr_setstacksize(&attr, (size_t)256 << 20) == 0 &&
+        pthread_create(&th, &attr, fn, arg) == 0) {
+        void *ret = NULL;
+        pthread_join(th, &ret);
+        return ret ? *(int *)ret : 0;
+    } else {
+        g_thread_stack_size = 0;  /* fell back: budget from RLIMIT_STACK */
+    }
+    /* fall back to the calling thread if the thread cannot be made */
+#endif
+    {
+        void *ret = fn(arg);
+        return ret ? *(int *)ret : 0;
+    }
 }
 
 int interpret_file(const char *path) {

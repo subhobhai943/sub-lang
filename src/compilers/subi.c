@@ -1,6 +1,9 @@
 #define _GNU_SOURCE
 #include "sub_compiler.h"
 #include "interpreter.h"
+
+/* interpreter.c: run f(arg) on a thread with a large stack. */
+int interp_run_on_big_stack(void *(*fn)(void *), void *arg);
 #include "common.h"
 #include "logo.h"
 #include "windows_compat.h"
@@ -258,6 +261,14 @@ static void print_usage_interp(const char *prog) {
     printf("  %s                 # Start the REPL\n", prog);
 }
 
+/* Trampoline for running interpretation on a big-stack thread; see
+   interp_run_on_big_stack. */
+static void *run_interpret_file_thread(void *arg) {
+    static int rc;
+    rc = interpret_file((const char *)arg);
+    return &rc;
+}
+
 int main(int argc, char *argv[]) {
     sub_console_init_utf8();
     if (argc < 2) {
@@ -273,5 +284,5 @@ int main(int argc, char *argv[]) {
         printf("subi %s\n", SUB_VERSION);
         return 0;
     }
-    return interpret_file(argv[1]);
+    return interp_run_on_big_stack(run_interpret_file_thread, argv[1]);
 }
