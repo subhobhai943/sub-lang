@@ -660,28 +660,23 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     }
 
     /* --- Numeric operations --- */
-    /* Integers stay integers: routing int+int through a double silently
-       loses the low bits above 2^53, so 4611686018427387904 + 1 answered
-       ...904 through the interpreter while every other backend said ...905.
-       Floats still go through double, and a comparison may mix the two. */
-    int use_float = (L.type == VAL_FLOAT || R.type == VAL_FLOAT);
-    long long ia = L.iv, ib = R.iv;
     double a = (L.type == VAL_FLOAT) ? L.fv : (double)L.iv;
     double b = (R.type == VAL_FLOAT) ? R.fv : (double)R.iv;
+    int use_float = (L.type == VAL_FLOAT || R.type == VAL_FLOAT);
 
     /* Arithmetic */
-    if (strcmp(op, "+") == 0)  return use_float ? make_float(a + b)    : make_int(ia + ib);
-    if (strcmp(op, "-") == 0)  return use_float ? make_float(a - b)    : make_int(ia - ib);
-    if (strcmp(op, "*") == 0)  return use_float ? make_float(a * b)    : make_int(ia * ib);
+    if (strcmp(op, "+") == 0)  return use_float ? make_float(a + b)    : make_int((long long)(a + b));
+    if (strcmp(op, "-") == 0)  return use_float ? make_float(a - b)    : make_int((long long)(a - b));
+    if (strcmp(op, "*") == 0)  return use_float ? make_float(a * b)    : make_int((long long)(a * b));
 
     if (strcmp(op, "/") == 0) {
-        if (use_float ? b == 0.0 : ib == 0) { runtime_error("division by zero"); return NULL_VAL; }
-        return use_float ? make_float(a / b) : make_int(ia / ib);
+        if (b == 0.0) { runtime_error("division by zero"); return NULL_VAL; }
+        return use_float ? make_float(a / b) : make_int((long long)(a / b));
     }
 
     if (strcmp(op, "%") == 0) {
-        if (use_float ? b == 0.0 : ib == 0) { runtime_error("modulo by zero"); return NULL_VAL; }
-        return use_float ? make_float(fmod(a, b)) : make_int(ia % ib);
+        if (b == 0.0) { runtime_error("modulo by zero"); return NULL_VAL; }
+        return use_float ? make_float(fmod(a, b)) : make_int((long long)a % (long long)b);
     }
 
     if (strcmp(op, "**") == 0) {
@@ -702,6 +697,7 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     if (strcmp(op, ">=") == 0) return make_bool(a >= b);
 
     /* Bitwise (integers only) */
+    long long ia = (long long)a, ib = (long long)b;
     if (strcmp(op, "&")  == 0) return make_int(ia & ib);
     if (strcmp(op, "|")  == 0) return make_int(ia | ib);
     if (strcmp(op, "^")  == 0) return make_int(ia ^ ib);
@@ -752,6 +748,14 @@ static SubVal eval_block(ASTNode *node, Env *env) {
     }
 
     return last;
+}
+
+/* First statement of a statement list, honouring the same dual storage
+   (children[] array or body->next chain) that eval_block walks. */
+static ASTNode *stmt_first(ASTNode *node) {
+    if (!node) return NULL;
+    if (node->child_count > 0) return node->children[0];
+    return node->body;
 }
 
 /* ================================================================
@@ -1065,35 +1069,32 @@ SubVal eval(ASTNode *node, Env *env) {
             /* Compound: get current, compute, set */
             SubVal cur = env_get(env, name);
 
-            /* Convert to numbers. Integer paths stay integer: going through
-               double here dropped the low bits of large values (see the note
-               in eval_binary). */
-            long long cia = cur.type == VAL_FLOAT ? (long long)cur.fv : cur.iv;
-            long long cib = rhs.type == VAL_FLOAT ? (long long)rhs.fv : rhs.iv;
+            /* Convert to numbers */
+            double a, b;
             int use_float = (cur.type == VAL_FLOAT || rhs.type == VAL_FLOAT);
-            double cda = (cur.type == VAL_FLOAT) ? cur.fv : (double)cur.iv;
-            double cdb = (rhs.type == VAL_FLOAT) ? rhs.fv : (double)rhs.iv;
+            a = (cur.type == VAL_FLOAT) ? cur.fv : (double)cur.iv;
+            b = (rhs.type == VAL_FLOAT) ? rhs.fv : (double)rhs.iv;
 
             SubVal result;
-            if      (strcmp(op, "+=") == 0) result = use_float ? make_float(cda + cdb) : make_int(cia + cib);
-            else if (strcmp(op, "-=") == 0) result = use_float ? make_float(cda - cdb) : make_int(cia - cib);
-            else if (strcmp(op, "*=") == 0) result = use_float ? make_float(cda * cdb) : make_int(cia * cib);
+            if      (strcmp(op, "+=") == 0) result = use_float ? make_float(a + b) : make_int((long long)(a + b));
+            else if (strcmp(op, "-=") == 0) result = use_float ? make_float(a - b) : make_int((long long)(a - b));
+            else if (strcmp(op, "*=") == 0) result = use_float ? make_float(a * b) : make_int((long long)(a * b));
             else if (strcmp(op, "/=") == 0) {
-                if (use_float ? cdb == 0.0 : cib == 0) { runtime_error("division by zero"); return NULL_VAL; }
-                result = use_float ? make_float(cda / cdb) : make_int(cia / cib);
+                if (b == 0.0) { runtime_error("division by zero"); return NULL_VAL; }
+                result = use_float ? make_float(a / b) : make_int((long long)(a / b));
             }
             else if (strcmp(op, "%=") == 0) {
-                if (use_float ? cdb == 0.0 : cib == 0) { runtime_error("modulo by zero"); return NULL_VAL; }
-                result = use_float ? make_float(fmod(cda, cdb)) : make_int(cia % cib);
+                if (b == 0.0) { runtime_error("modulo by zero"); return NULL_VAL; }
+                result = use_float ? make_float(fmod(a, b)) : make_int((long long)a % (long long)b);
             }
             else if (strcmp(op, "**=") == 0) {
-                result = use_float ? make_float(pow(cda, cdb)) : make_int((long long)pow(cda, cdb));
+                result = use_float ? make_float(pow(a, b)) : make_int((long long)pow(a, b));
             }
-            else if (strcmp(op, "&=") == 0)  result = make_int(cia & cib);
-            else if (strcmp(op, "|=") == 0)  result = make_int(cia | cib);
-            else if (strcmp(op, "^=") == 0)  result = make_int(cia ^ cib);
-            else if (strcmp(op, "<<=") == 0) result = make_int(cia << cib);
-            else if (strcmp(op, ">>=") == 0) result = make_int(cia >> cib);
+            else if (strcmp(op, "&=") == 0)  result = make_int((long long)a & (long long)b);
+            else if (strcmp(op, "|=") == 0)  result = make_int((long long)a | (long long)b);
+            else if (strcmp(op, "^=") == 0)  result = make_int((long long)a ^ (long long)b);
+            else if (strcmp(op, "<<=") == 0) result = make_int((long long)a << (long long)b);
+            else if (strcmp(op, ">>=") == 0) result = make_int((long long)a >> (long long)b);
             else {
                 runtime_error("unknown assignment operator '%s'", op);
                 return NULL_VAL;
@@ -1109,6 +1110,35 @@ SubVal eval(ASTNode *node, Env *env) {
 
             env_set(env, name, result);
             return result;
+        }
+
+        /* Assignment through an index: arr[i] = v, and obj["key"] = v for
+           objects. Compound forms go through the array path above. */
+        if (node->left && node->left->type == AST_ARRAY_ACCESS &&
+            op && strcmp(op, "=") == 0) {
+            SubVal target = eval(node->left->left, env);
+            if (target.type == VAL_OBJECT && target.obj) {
+                SubVal key_val = val_to_str(eval(node->left->right, env));
+                object_set(target.obj, key_val.sv, val_copy(rhs));
+                val_free(key_val);
+                return rhs;
+            }
+            if (target.type == VAL_ARRAY && target.arr) {
+                SubVal idx_val = eval(node->left->right, env);
+                long long idx = val_as_int(idx_val);
+                if (idx < 0) idx += (long long)target.arr->count;
+                if (idx < 0 || idx >= target.arr->count) {
+                    runtime_error("array index %lld out of bounds [0, %d)",
+                                  idx, target.arr->count);
+                    return NULL_VAL;
+                }
+                if (expr_borrows_binding(node->right)) { /* already copied */ }
+                val_free(target.arr->items[idx]);
+                target.arr->items[idx] = rhs;
+                return rhs;
+            }
+            runtime_error("cannot index-assign into %s", type_name(target.type));
+            return NULL_VAL;
         }
 
         /* Compound assignment on array access: arr[i] += val */
@@ -1127,27 +1157,48 @@ SubVal eval(ASTNode *node, Env *env) {
                 return NULL_VAL;
             }
             SubVal *item = &arr_val.arr->items[idx];
-            long long iia = item->type == VAL_FLOAT ? (long long)item->fv : item->iv;
-            long long iib = rhs.type == VAL_FLOAT ? (long long)rhs.fv : rhs.iv;
-            double ida = (item->type == VAL_FLOAT) ? item->fv : (double)item->iv;
-            double idb = (rhs.type == VAL_FLOAT) ? rhs.fv : (double)rhs.iv;
+            double a = (item->type == VAL_FLOAT) ? item->fv : (double)item->iv;
+            double b = (rhs.type == VAL_FLOAT) ? rhs.fv : (double)rhs.iv;
             int uf = (item->type == VAL_FLOAT || rhs.type == VAL_FLOAT);
             SubVal result;
-            if      (strcmp(op, "+=") == 0) result = uf ? make_float(ida + idb) : make_int(iia + iib);
-            else if (strcmp(op, "-=") == 0) result = uf ? make_float(ida - idb) : make_int(iia - iib);
-            else if (strcmp(op, "*=") == 0) result = uf ? make_float(ida * idb) : make_int(iia * iib);
+            if      (strcmp(op, "+=") == 0) result = uf ? make_float(a + b) : make_int((long long)(a + b));
+            else if (strcmp(op, "-=") == 0) result = uf ? make_float(a - b) : make_int((long long)(a - b));
+            else if (strcmp(op, "*=") == 0) result = uf ? make_float(a * b) : make_int((long long)(a * b));
             else if (strcmp(op, "/=") == 0) {
-                if (uf ? idb == 0.0 : iib == 0) { runtime_error("division by zero"); return NULL_VAL; }
-                result = uf ? make_float(ida / idb) : make_int(iia / iib);
+                if (b == 0.0) { runtime_error("division by zero"); return NULL_VAL; }
+                result = uf ? make_float(a / b) : make_int((long long)(a / b));
             }
             else if (strcmp(op, "%=") == 0) {
-                if (uf ? idb == 0.0 : iib == 0) { runtime_error("modulo by zero"); return NULL_VAL; }
-                result = uf ? make_float(fmod(ida, idb)) : make_int(iia % iib);
+                if (b == 0.0) { runtime_error("modulo by zero"); return NULL_VAL; }
+                result = uf ? make_float(fmod(a, b)) : make_int((long long)a % (long long)b);
             }
             else result = rhs;
             val_free(*item);
             *item = result;
             return result;
+        }
+
+        /* Member assignment: obj.field = value (also writes object-literal
+           and class instances; `length` stays read-only). */
+        if (node->left && node->left->type == AST_MEMBER_ACCESS) {
+            const char *member = node->left->value;
+            if (op && strcmp(op, "=") != 0) {
+                runtime_error("compound assignment '%s' on property '%s' "
+                              "is not supported", op, member ? member : "?");
+                return NULL_VAL;
+            }
+            if (member && strcmp(member, "length") == 0) {
+                runtime_error("cannot assign to read-only property 'length'");
+                return NULL_VAL;
+            }
+            SubVal target = eval(node->left->left, env);
+            if (target.type != VAL_OBJECT || !target.obj) {
+                runtime_error("cannot set property '%s' on %s",
+                        member ? member : "?", type_name(target.type));
+                return NULL_VAL;
+            }
+            object_set(target.obj, member, val_copy(rhs));
+            return rhs;
         }
 
         /* Simple assignment fallback */
@@ -1458,6 +1509,33 @@ SubVal eval(ASTNode *node, Env *env) {
     }
 
     /* ============================================================
+       Class Declaration
+       ------------------------------------------------------------
+       `class Point { let x = 0 }` evaluates to a constructor: the class
+       name is bound to the decl's AST node, and `Point.new` builds an
+       object by evaluating each field declaration in a fresh scope. A
+       class body holding only field declarations is what the parser
+       produces today; a method (fn) inside the body is refused with a
+       clear error rather than being silently dropped.
+       ============================================================ */
+    case AST_CLASS_DECL: {
+        if (!node->value) return NULL_VAL;
+        for (ASTNode *stmt = stmt_first(node->body ? node->body : node); stmt; stmt = stmt->next) {
+            if (stmt->type != AST_VAR_DECL && stmt->type != AST_CONST_DECL) {
+                runtime_error("class %s: only field declarations are supported "
+                              "in the interpreter so far (line %d)",
+                              node->value, stmt->line);
+                return NULL_VAL;
+            }
+        }
+        SubVal ctor = {VAL_FUNC, {.fn = node}};
+        env_define(env, node->value, ctor);
+        /* env_define stores a copy of the value, and a VAL_FUNC "copy" is
+           the same node pointer, so the definition outlives this eval. */
+        return NULL_VAL;
+    }
+
+    /* ============================================================
        Object Literal { key: value, ... }
        ============================================================ */
     case AST_OBJECT_LITERAL: {
@@ -1513,6 +1591,26 @@ SubVal eval(ASTNode *node, Env *env) {
         /* Object property */
         if (obj.type == VAL_OBJECT && obj.obj) {
             return object_get(obj.obj, member);
+        }
+
+        /* Class constructor: `Point.new` evaluates the class's field
+           declarations into a fresh object. Anything else named `.new` on
+           a non-object is a runtime error below. */
+        if (obj.type == VAL_FUNC && obj.fn &&
+            obj.fn->type == AST_CLASS_DECL && strcmp(member, "new") == 0) {
+            SubVal inst = make_object_val();
+            Env *ctor_env = env_new(env);
+            for (ASTNode *stmt = stmt_first(obj.fn->body ? obj.fn->body : obj.fn); stmt; stmt = stmt->next) {
+                if (!stmt->value) continue;
+                SubVal field = stmt->right ? eval(stmt->right, ctor_env) : NULL_VAL;
+                /* object_set stores the value without copying, so hand it
+                   a copy; the evaluated field value is freed below. */
+                object_set(inst.obj, stmt->value, val_copy(field));
+                /* object_set copies, so the evaluated value is ours. */
+                val_free(field);
+            }
+            env_free(ctor_env);
+            return inst;
         }
 
         runtime_error("cannot access property '%s' on %s",
