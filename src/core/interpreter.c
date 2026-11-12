@@ -37,14 +37,23 @@
 #ifndef _WIN32
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>   /* sockaddr_in / sockaddr_in6. glibc's
+                             <sys/socket.h> pulls this in transitively, so
+                             Linux builds never noticed its absence;
+                             FreeBSD's headers do not, and clang failed on
+                             the incomplete types. */
 #include <netdb.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #define SUB_NET_POSIX 1
 #else
 #define SUB_NET_POSIX 0
-#include <winsock2.h>
-#include <ws2tcpip.h>
+/* No winsock2.h / ws2tcpip.h here on purpose: winnt.h declares the
+   TOKEN_INFORMATION_CLASS enumerator `TokenType`, which collides with
+   SUB's own TokenType typedef (see the long note in windows_compat.h).
+   The net builtins are a runtime-error stub on Windows anyway, so the
+   socket headers buy nothing and break every MinGW build that includes
+   this file. */
 #pragma comment(lib, "ws2_32")
 #endif
 #ifndef _WIN32
