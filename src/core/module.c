@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__FreeBSD__) || defined(__DragonFly__)
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#endif
 
 #ifdef _WIN32
 #  include <windows.h>
@@ -96,6 +100,14 @@ static char *exe_path(void) {
 #elif defined(__APPLE__)
     uint32_t n = (uint32_t)sizeof buf;
     if (_NSGetExecutablePath(buf, &n) != 0) return NULL;
+    return strdup(buf);
+#elif defined(__FreeBSD__) || defined(__DragonFly__)
+    /* No /proc/self/exe by default on FreeBSD (procfs is off unless
+       mounted). KERN_PROC_PATHNAME is the supported way, and it works
+       with no privileges and no mounts. */
+    size_t n = sizeof buf;
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+    if (sysctl(mib, 4, buf, &n, NULL, 0) != 0) return NULL;
     return strdup(buf);
 #else
     ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
