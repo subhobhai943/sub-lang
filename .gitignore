@@ -113,3 +113,8 @@ __pycache__/
 
 # compiled output of calculator.sb
 cal
+
+# The website is hand-written source, not transpiler output. This negation
+# must come after the blanket *.html / *.css / *.js rules above so that
+# git's last-match-wins evaluation lets web/ through.
+!web/**
