@@ -27,7 +27,7 @@
 
 > **v1.0.9** — Installers for every supported platform: a branded Windows `.msi` with a licence page, `.deb` and `.rpm` packages for Linux, macOS `.pkg`, Arch PKGBUILD, Alpine APKBUILD, AppImage, and a universal `curl | sh` installer. All of them put the tools on your `PATH`, install the standard library where `import` finds it, ship `man` pages, and give `.sb` files an icon.
 >
-> **v1.0.8** — Native compiler that emits x86-64 machine code itself (no C compiler required), direct AST interpreter (`subi`), multi-target transpiler (`sub`), classes, UI component declarations, and embed blocks.
+> **v1.0.8** — Native compiler that emits x86-64 machine code itself (no C compiler required), direct AST interpreter (`subi`), multi-target transpiler (`sub`), classes, and UI component declarations. (v1.0.8 also shipped embed blocks, which have since been removed from the language.)
 
 ---
 
@@ -48,7 +48,6 @@
   - [Pattern Matching](#pattern-matching)
   - [Exception Handling](#exception-handling)
   - [String & Array Methods](#string--array-methods)
-  - [Embedded Code Blocks](#embedded-code-blocks)
   - [Cross-Platform UI Declarations](#cross-platform-ui-declarations)
 - [Built-in Functions](#built-in-functions)
 - [Standard Library](#standard-library)
@@ -78,7 +77,6 @@
 - **A compiler, not a wrapper**: on x86-64 Linux `subc` goes from `.sb` straight to machine code in one process. Nothing is shelled out to, so the machine that compiles a SUB program needs no toolchain beyond `subc` itself.
 - **Dynamic & Static Flexibility**: SUB is dynamically typed, but a shared inference pass gives every function a concrete signature when targeting a statically typed language - so `fn add(a, b)` becomes `long add(long, long)` in C and `fn add(a: i64, b: i64) -> i64` in Rust without annotations.
 - **Standard Library**: four modules — `math`, `arrays`, `strings`, `io` — written in SUB and verified through every backend, loaded with `import`.
-- **Embedded Foreign Code**: Seamlessly mix foreign C, Go, or Python directly inside `.sb` files using `#embed` blocks.
 - **Cross-Platform UI Tree**: First-class declarative syntax for UI windows, labels, buttons, and inputs.
 
 ---
@@ -461,20 +459,6 @@ list.push(4)
 println(list.length)           # 4
 println(list.pop())            # 4
 println(list.join(" - "))      # 1 - 2 - 3
-```
-
-### Embedded Code Blocks
-
-Embed foreign target languages directly in SUB source:
-
-```coffee
-#embed c
-int custom_c_add(int a, int b) {
-    return a + b;
-}
-#endembed
-
-println("Embedded C code compiled seamlessly!")
 ```
 
 ### Cross-Platform UI Declarations

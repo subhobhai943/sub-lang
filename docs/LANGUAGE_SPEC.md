@@ -117,25 +117,14 @@ while i < 5 {
 | `range(n)`      | Generate range `[0, n)`          |
 | `range(a, b)`   | Generate range `[a, b)`          |
 
-### 2.8 Embedding Foreign Code
-
-```coffee
-embed c
-    #include <math.h>
-    double square(double x) { return x * x; }
-endembed
-```
-
-`embed <lang> ... endembed` blocks are recognized by the parser for the
-`c` and `cpp` targets specifically; any other language tag is accepted
-lexically but passed through as an opaque code block rather than being
-semantically understood.
-
 ## 3. Reserved Keywords
 
 `var`, `const`, `let`, `function`, `return`, `if`, `elif`, `else`, `for`,
-`while`, `do`, `end`, `break`, `continue`, `embed`, `endembed`, `true`,
-`false`, `null`
+`while`, `do`, `end`, `break`, `continue`, `true`, `false`, `null`
+
+(`embed`/`endembed` were reserved for the embed-block feature, which has been
+removed from the language; the lexer may still tokenize the words, but they
+are not part of SUB.)
 
 The lexer also recognizes a larger set of keywords reserved for future use
 (`class`, `try`/`catch`/`finally`/`throw`, `async`/`await`/`yield`, `ui`,

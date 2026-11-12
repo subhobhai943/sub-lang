@@ -4,8 +4,8 @@ Check that the TextMate grammar still describes the language the lexer parses.
 
 The grammar is a second, hand-written copy of SUB's keyword list, and copies
 drift. Before this check the checked-in grammar highlighted `and`, `or`, `not`
-and `export` -- none of which SUB has -- while missing `switch`, `**`, the six
-type keywords and the four embedded-language names. Every one of those is a
+and `export` -- none of which SUB has -- while missing `switch`, `**` and the
+six type keywords. Every one of those is a
 word the editor coloured wrongly, or failed to colour, for as long as the two
 files disagreed.
 

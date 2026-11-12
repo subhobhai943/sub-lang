@@ -60,7 +60,6 @@ This guide will help you set up syntax highlighting for SUB Language in various 
 ✅ Auto-closing brackets and quotes  
 ✅ Code folding for functions and loops  
 ✅ Smart indentation  
-✅ Embedded language support (Python, JavaScript, Ruby, etc.)  
 
 ### Testing the Syntax Highlighter
 
@@ -82,10 +81,6 @@ function greet(name) {
 for i in range(5) {
     greet("User " + i)
 }
-
-embed python
-    print("This is Python!")
-endembed
 ```
 
 Open this file in VS Code and you should see:
@@ -158,7 +153,7 @@ would take.
    endif
 
    " Keywords
-   syn keyword subKeyword var const let function fn def if elif else for while break continue return print show input end import class embed endembed
+   syn keyword subKeyword var const let function fn def if elif else for while break continue return print show input end import class
    syn keyword subBoolean true false null
    syn keyword subType int float string bool list dict array
 

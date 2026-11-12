@@ -16,7 +16,6 @@ Official VS Code extension providing syntax highlighting and language support fo
 - **Operators**: Arithmetic, comparison, logical, and assignment
 - **Functions**: Function declarations and calls
 - **Variables**: Variable declarations and usage
-- **Embedded Code**: Syntax highlighting for embedded Python, JavaScript, Java, C, Ruby, and more
 
 ### 📝 Code Snippets
 
@@ -33,8 +32,6 @@ Quick snippets for common SUB constructs:
 - `input` - Input statement
 - `class` - Class declaration
 - `import` - Import statement
-- `embedpy` - Embed Python code
-- `embedjs` - Embed JavaScript code
 - `return` - Return statement
 - `break` - Break statement
 - `continue` - Continue statement
@@ -96,11 +93,6 @@ greet("Developer")
 for i in range(5) {
     print(i)
 }
-
-# Embedded Python code
-embed python
-    print("This is Python code!")
-endembed
 ```
 
 ## About SUB Language

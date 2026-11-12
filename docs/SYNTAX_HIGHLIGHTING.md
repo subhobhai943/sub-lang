@@ -111,8 +111,7 @@ anything loads.
 
 Its keyword lists are a hand-written second copy of the language, and copies
 drift. This one had: `and`, `or`, `not` and `export` — none of which SUB has —
-while missing `switch`, `**`, all six type keywords and the four
-embedded-language names. `tests/grammar_keywords.py` now compares the grammar
+while missing `switch`, `**` and all six type keywords. `tests/grammar_keywords.py` now compares the grammar
 against `kw_table` in `src/core/lexer.c` and fails on a mismatch in either
 direction, so adding a keyword to the lexer and forgetting the grammar breaks
 the build.
@@ -134,8 +133,9 @@ verifies the parser still spells them that way.
 What the grammar colours, and what SUB actually has:
 
 **Comments** — `#` to end of line, `//` to end of line, and `/* */` blocks
-(which nest). `#embed` and `#endembed` open an embedded block and are not
-comments.
+(which nest). (`#embed`/`#endembed` opened an embedded block before that
+feature was removed; the comment rule still excludes the words so a stray
+`#embed` line is never painted as a comment.)
 
 **Declarations** — `let`, `const`, `var`, `fn`, `function`, `def`, `class`,
 `extends`, `implements`, `import`. (`var`, `function` and `def` are

@@ -43,22 +43,6 @@ function handleClick()
     ui.alert("Hello, " + name)
 end
 
-# Embedded Python for data processing
-embed python
-    import json
-    data = {"users": 100, "active": 75}
-    result = json.dumps(data)
-endembed
-
-# Embedded JavaScript for web features
-embed javascript
-    const config = {
-        theme: "dark",
-        language: "en"
-    };
-    console.log(config);
-endembed
-
 # Main program entry
 function main()
     print("Starting SUB application...")

@@ -79,12 +79,11 @@ parallel for i in range(1000) {
 }
 ```
 
-## Embedding beyond C/C++
+## Embedding beyond C/C++ (removed)
 
-`embed <lang> ... endembed` is parsed generically for any language tag, but
-only `c` and `cpp` are given dedicated AST node types today. Python,
-JavaScript, Ruby, Rust, and Go embed blocks are lexed but not semantically
-distinguished from opaque text.
+Embed blocks (`embed <lang> ... endembed`) have been removed from the
+language. The lexer may still tokenize the words as a legacy detail, but the
+feature is no longer part of SUB and should not be used.
 
 ## Build config / dependency manifests
 

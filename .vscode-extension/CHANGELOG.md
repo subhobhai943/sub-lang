@@ -10,8 +10,10 @@ All notable changes to the "SUB Language Support" extension will be documented i
 - Code folding support for functions, loops, and conditionals
 
 ### Improved
-- Enhanced syntax highlighting for embedded code blocks
 - Better bracket matching and auto-closing pairs
+
+### Removed
+- (Historical) highlighting and snippets for `embed` blocks — the embed-block language feature was later removed from SUB itself.
 
 ## [1.0.0] - Initial Release
 

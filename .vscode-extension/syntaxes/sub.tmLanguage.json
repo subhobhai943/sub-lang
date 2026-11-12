@@ -20,7 +20,7 @@
       "patterns": [
         {
           "name": "comment.line.number-sign.sub",
-          "comment": "#embed and #endembed open an embedded block; they are not comments.",
+          "comment": "#embed / #endembed opened an embedded block before that feature was removed; the rule still excludes the words so a stray #embed line is never painted as a comment.",
           "match": "#(?!embed\\b|endembed\\b).*$"
         },
         {

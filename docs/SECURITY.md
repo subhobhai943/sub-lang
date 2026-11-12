@@ -57,10 +57,6 @@ Being clear about this saves everyone time:
 - **Running a `.sb` program is running code.** There is no sandbox and none is
   planned. `subi hostile.sb` is as dangerous as running any other untrusted
   program, and that is by design, not a bug to report.
-- **`#embed` blocks are code injection by design.** They exist so a program
-  can drop raw target-language source into the output. A `.sb` file that uses
-  `#embed` to emit hostile C, Python or JavaScript is using a documented
-  feature.
 - **Transpiled output is source, not a sandbox.** `sub program.sb rust`
   produces Rust that you then compile yourself. Treat generated code from an
   untrusted `.sb` file the way you would treat any untrusted source.
@@ -79,8 +75,8 @@ Worth stating plainly, because it bounds what a SUB program can do at all:
 - There are **no file or process builtins**. A SUB program cannot open a file,
   spawn a process or open a socket. `input()` reads a line from stdin, and
   `print`/`println` write to stdout. That is the whole I/O surface.
-- What a compiled program can reach is whatever its host language can reach,
-  once `#embed` is involved.
+- A SUB program cannot reach beyond its host language's own surface: the
+  transpiled output is ordinary source in that language.
 - The interpreter has a recursion guard that measures actual stack use, so
   runaway recursion reports an error and exits rather than being killed by the
   OS.

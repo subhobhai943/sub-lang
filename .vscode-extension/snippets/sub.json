@@ -96,24 +96,6 @@
     ],
     "description": "Import a module"
   },
-  "Embed Python": {
-    "prefix": "embedpy",
-    "body": [
-      "embed python",
-      "    ${1:# Python code here}",
-      "endembed"
-    ],
-    "description": "Embed Python code"
-  },
-  "Embed JavaScript": {
-    "prefix": "embedjs",
-    "body": [
-      "embed javascript",
-      "    ${1:// JavaScript code here}",
-      "endembed"
-    ],
-    "description": "Embed JavaScript code"
-  },
   "Return Statement": {
     "prefix": "return",
     "body": [

@@ -221,6 +221,6 @@ All requirements from the roadmap have been implemented:
 ## Notes
 
 - The code generator uses a StringBuilder pattern for efficient string concatenation
-- Embedded C++ code (`#embed cpp` blocks) is extracted and included in output
+- Embedded C++ code (`#embed cpp` blocks) was extracted and included in output (the embed-block feature has since been removed from the language)
 - All generated code is compatible with C++17 and later standards
 - The implementation follows the existing codebase architecture and patterns
