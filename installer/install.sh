@@ -109,6 +109,7 @@ ARCH="$(uname -m)"
 case "$OS" in
     linux) OS="linux" ;;
     darwin) OS="macos" ;;
+    freebsd) OS="freebsd" ;;
     *) error "Unsupported OS: $OS" ;;
 esac
 

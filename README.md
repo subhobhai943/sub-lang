@@ -25,7 +25,7 @@
 
 ---
 
-> **v1.0.9** — Installers for every supported platform: a branded Windows `.msi` with a licence page, `.deb` and `.rpm` packages for Linux, macOS `.pkg`, Arch PKGBUILD, Alpine APKBUILD, AppImage, and a universal `curl | sh` installer. All of them put the tools on your `PATH`, install the standard library where `import` finds it, ship `man` pages, and give `.sb` files an icon.
+> **v1.0.10** — FreeBSD joins the family: a native pkg(8) package built on a real FreeBSD VM, plus a plain FreeBSD archive for the universal installer. Installers for every supported platform: a branded Windows `.msi` with a licence page, `.deb` and `.rpm` packages for Linux, macOS `.pkg`, FreeBSD pkg, Arch PKGBUILD, Alpine APKBUILD, AppImage, and a universal `curl | sh` installer. All of them put the tools on your `PATH`, install the standard library where `import` finds it, ship `man` pages, and give `.sb` files an icon.
 >
 > **v1.0.8** — Native compiler that emits x86-64 machine code itself (no C compiler required), direct AST interpreter (`subi`), multi-target transpiler (`sub`), classes, and UI component declarations. (v1.0.8 also shipped embed blocks, which have since been removed from the language.)
 
@@ -99,6 +99,7 @@ library where `import` finds it, and `man sub`, `man subc`, `man subi`.
 | Alpine Linux | APKBUILD | `abuild -r` (from `installer/alpine/`) |
 | Windows | `sub-lang-*-windows-x86_64.msi` | double-click it |
 | macOS (Apple Silicon) | `sub-lang-*-macos-arm64.pkg` | double-click it |
+| FreeBSD | `sub-lang-*-amd64.pkg` (pkg(8)) | `sudo pkg install ./sub-lang-*-amd64.pkg` |
 | Any Linux | AppImage | download and `chmod +x` it |
 | Any of the above | `sub-*.tar.gz` | unpack it anywhere |
 

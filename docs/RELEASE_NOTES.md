@@ -1,5 +1,25 @@
 # Release Notes
 
+## v1.0.10
+
+FreeBSD is now a first-class release platform.
+
+### FreeBSD
+
+- **pkg(8) package** (`installer/bsd/build-txz.sh`): `sub-lang-<version>-amd64.pkg`,
+  installed with `sudo pkg install ./sub-lang-*-amd64.pkg`. Native manifest
+  with file digests, tools in `/usr/local/bin`, stdlib in
+  `/usr/local/lib/sub/stdlib` where `import` looks for it, and `man` pages.
+- The release workflow builds it on a real FreeBSD 14 VM (`vmactions`), with
+  base clang (`gmake CC=cc`), and verifies the package layout after packing.
+  Cross-building from Linux would ship the wrong libc/ELF flavour, so the
+  build happens inside FreeBSD itself.
+- `subc` on FreeBSD compiles through the C backend (`subc --via-c`); the
+  direct machine-code emitter is x86-64 Linux ELF only. `subi` and `sub`
+  work everywhere.
+- The universal `installer/install.sh` now detects FreeBSD and pulls the
+  `sub-freebsd-x86_64` archive from the latest release.
+
 ## v1.0.9
 
 Installers. Every supported platform now has a package that installs the

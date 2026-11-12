@@ -220,11 +220,90 @@ jobs:
           retention-days: 5
 
   # ─────────────────────────────────────────────
+  # 3b. FreeBSD: build on a real FreeBSD VM and ship a pkg(8) archive.
+  # Cross-compiling from Linux would produce the wrong libc/ELF flavour;
+  # vm-actions boots an actual FreeBSD 14 in Hyper-V, builds with clang
+  # (base cc), and copies the tree back to the runner.
+  # ─────────────────────────────────────────────
+  build-freebsd:
+    name: build (freebsd-x86_64 pkg)
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and package inside FreeBSD 14
+        # vmactions mounts the workspace into the VM and syncs writes back,
+        # so dist/ produced here exists on the runner afterwards. gmake
+        # because the Makefile expects GNU make; CC=cc is base clang.
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: pkg install -y gmake
+          run: |
+            set -eu
+            gmake CC=cc clean all
+            ./sub --version && ./subc --version && ./subi --version
+            printf 'let x = 42\nprint(x)\n' > /tmp/smoke.sb
+            ./subi /tmp/smoke.sb
+            # A library import from /tmp proves the stdlib lands where the
+            # module resolver looks for an installed tree.
+            mkdir -p /tmp/bsdtree && cp -r sub subc subi stdlib /tmp/bsdtree/
+            cd /tmp/bsdtree
+            printf 'import "strings"\nprintln(capitalize("freebsd"))\n' > check.sb
+            test "$(./subi check.sb)" = "Freebsd"
+            # subc's direct machine-code emitter targets Linux ELF; on BSD
+            # the supported route is the C backend via base clang.
+            CC=cc ./subc --via-c check.sb -o check_bin && test "$(./check_bin)" = "Freebsd"
+            cd - >/dev/null
+            sh installer/bsd/build-txz.sh "${{ needs.verify.outputs.numeric }}" dist
+            tar xJf dist/*.pkg -O +MANIFEST | head -5
+
+      - name: The package unpacks and the layout is right
+        run: |
+          set -eu
+          mkdir -p /tmp/peek && tar xJf dist/*.pkg -C /tmp/peek
+          for f in usr/local/bin/sub usr/local/bin/subc usr/local/bin/subi usr/local/lib/sub/stdlib/math.sb; do
+            test -f "/tmp/peek/$f" || test -f "/tmp/peek/./$f" || { echo "::error::$f missing from package"; exit 1; }
+          done
+          file /tmp/peek/usr/local/bin/subi | grep -i freebsd
+          python3 - "$(tar xJf dist/*.pkg -O +MANIFEST)" <<'PY'
+          import json, sys
+          m = json.loads(sys.argv[1])
+          assert m["arch"] == "amd64" and m["name"] == "sub-lang", m
+          print("manifest ok:", m["version"], "flatsize", m["flatsize"])
+          PY
+
+      - name: Upload the .pkg
+        uses: actions/upload-artifact@v4
+        with:
+          name: freebsd-pkg
+          path: dist/*.pkg
+          retention-days: 5
+
+      - name: Also ship the plain .tar.gz archive
+        # install.sh fallback path for BSD users who want no pkg db.
+        run: |
+          set -eu
+          mkdir -p sub-freebsd-x86_64
+          cp sub subc subi sub-freebsd-x86_64/
+          cp -r stdlib sub-freebsd-x86_64/
+          cp LICENSE README.md sub-freebsd-x86_64/
+          tar czf sub-freebsd-x86_64.tar.gz sub-freebsd-x86_64/
+
+      - name: Upload the freebsd archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: sub-freebsd-x86_64
+          path: sub-freebsd-x86_64.tar.gz
+          retention-days: 5
+
+  # ─────────────────────────────────────────────
   # 4. Create GitHub Release
   # ─────────────────────────────────────────────
   create-release:
     needs: [verify, build-unix, build-linux-packages, build-windows-msi,
-            build-macos-pkg]
+            build-macos-pkg, build-freebsd]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -249,11 +328,12 @@ jobs:
           echo "Release assets:"
           ls -lh ./release-assets/
           for want in sub-linux-x86_64.tar.gz sub-linux-arm64.tar.gz \
-                      sub-macos-arm64.tar.gz; do
+                      sub-macos-arm64.tar.gz sub-freebsd-x86_64.tar.gz; do
             test -f "./release-assets/$want" || { echo "::error::missing $want"; exit 1; }
           done
           ls ./release-assets/*.msi >/dev/null || { echo "::error::no Windows MSI"; exit 1; }
           ls ./release-assets/*.pkg >/dev/null || { echo "::error::no macOS .pkg"; exit 1; }
+          ls ./release-assets/sub-lang-*-amd64.pkg >/dev/null || { echo "::error::no FreeBSD pkg"; exit 1; }
           # Two of each: x86_64 and arm64. A count, not a glob, because one
           # architecture failing to build is exactly the case a glob passes.
           for kind in deb rpm; do
@@ -311,6 +391,8 @@ jobs:
             echo "| Linux | .src.rpm (rebuild it yourself) | any | \`sub-lang-*.src.rpm\` |";
             echo "| macOS | .pkg installer | arm64 (Apple Silicon) | \`sub-lang-*-macos-arm64.pkg\` |";
             echo "| macOS | .tar.gz | arm64 (Apple Silicon) | \`sub-macos-arm64.tar.gz\` |";
+            echo "| FreeBSD | pkg(8) package | x86_64 | \`sub-lang-*-amd64.pkg\` |";
+            echo "| FreeBSD | .tar.gz | x86_64 | \`sub-freebsd-x86_64.tar.gz\` |";
             echo "| Windows | .msi installer | x86_64 | \`sub-lang-*-windows-x86_64.msi\` |";
             echo "";
             echo "### Installing";
@@ -324,6 +406,9 @@ jobs:
             echo "";
             echo "# macOS - double-click the .pkg, or:";
             echo "sudo installer -pkg sub-lang-*-macos-arm64.pkg -target /";
+            echo "";
+            echo "# FreeBSD - native pkg(8) package:";
+            echo "sudo pkg install ./sub-lang-*-amd64.pkg";
             echo "";
             echo "# Or install on any Linux/macOS with one command:";
             echo "curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh";
