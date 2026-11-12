@@ -46,7 +46,12 @@ FIXTURES = [
     ("hello_native.sb", "Hello, World\nSUB Language - Simple Universal Builder\n30"),
     ("fizzbuzz.sb", fizzbuzz_output()),
     ("fibonacci.sb", fibonacci_output()),
+    # A class program that used to die with "undefined variable 'Point'"
+    # through subi and segfault through subc's C backend. The c++ target
+    # honestly refuses it (see the SKIP in the cpp step).
+    ("../tests/test_class.sb", "10\n20"),
 ]
+
 
 failures = []
 
@@ -188,7 +193,11 @@ def main():
             label = f"sub cpp(compiled): {fname}"
             rc, out = run([SUB, sb_file, "cpp"])
             cpp_file = os.path.join(ROOT_DIR, stem + ".cpp")
-            if rc == 0 and os.path.exists(cpp_file):
+            if "not supported by the" in out and "transpiler" in out:
+                # Honest refusal: the c++ target cannot express this
+                # construct and says so. Nothing to test there.
+                print(f"  SKIP {label} ({' '.join(l for l in out.splitlines() if 'not supported' in l)[:60]})")
+            elif rc == 0 and os.path.exists(cpp_file):
                 bin_path = os.path.join(ROOT_DIR, stem + "_cpp" + EXE)
                 rc, out = run(["g++", cpp_file, "-o", bin_path])
                 if rc == 0 and os.path.exists(bin_path):
@@ -203,6 +212,44 @@ def main():
                 os.remove(cpp_file)
         else:
             print(f"  SKIP sub cpp(compiled): {fname} (g++ not found)")
+
+    # --- Special-purpose checks ---
+
+    # 64-bit integer precision. int+int used to go through a double, so
+    # 2**53 + 1 rounded to 2**53 through subi while the native backend kept
+    # the exact value. Only the interpreter and subc are int64-native here;
+    # the JS target genuinely cannot represent this value, which is why it
+    # is not a plain FIXTURE.
+    print("\n=== int64 precision ===")
+    sb_file = os.path.join(SCRIPT_DIR, "test_int64.sb")
+    expected = "9007199254740993\n4611686018427387905"
+    test_interpreter(sb_file, expected)
+    if tool_available("gcc"):
+        out_name = os.path.join(ROOT_DIR, "_regtest_i64")
+        label = "subc (via C): test_int64.sb"
+        rc, out = run([SUBC, sb_file, "--via-c", "-o", out_name])
+        if rc == 0 and os.path.exists(out_name + EXE):
+            rc, run_out = run([out_name + EXE])
+            os.remove(out_name + EXE)
+            if rc != 0:
+                fail(label, f"run exit {rc}: {run_out}")
+            else:
+                check_suffix(run_out, expected, label)
+        else:
+            fail(label, f"compile exit {rc}: {out}")
+    # and the machine-code backend with no compiler involved at all
+    label = "subc (machine code): test_int64.sb"
+    out_name = os.path.join(ROOT_DIR, "_regtest_i64n")
+    rc, out = run([SUBC, sb_file, "--native", "-o", out_name])
+    if rc == 0 and os.path.exists(out_name + EXE):
+        rc, run_out = run([out_name + EXE])
+        os.remove(out_name + EXE)
+        if rc != 0:
+            fail(label, f"run exit {rc}: {run_out}")
+        else:
+            check_suffix(run_out, expected, label)
+    elif "not available for this host" not in out:
+        fail(label, f"compile exit {rc}: {out}")
 
     print(f"\n{'='*40}")
     if failures:

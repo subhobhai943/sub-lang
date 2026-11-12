@@ -1,0 +1,5 @@
+# 64-bit integers keep their low bits: the interpreter used to route int+int
+# through a double, so 2**53 + 1 rounded to 2**53 and 2**62 + 1 lost its
+# last digit entirely.
+println(9007199254740992 + 1)          # 2**53 + 1, exact only as an integer
+println(4611686018427387904 + 1)      # 2**62 + 1
