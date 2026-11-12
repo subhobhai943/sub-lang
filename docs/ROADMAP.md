@@ -17,10 +17,13 @@ end
 
 ## Classes / OOP
 
-`class`, `extends`, `implements`, `new`, `this`, `super`, `static`,
-`private`/`public`/`protected` are all lexer keywords, but there is no
-parser support (`class Foo ... end` currently produces parse errors — see
-`tests/test_class.sb`).
+`class` now parses and runs: field declarations, `ClassName.new` instances,
+member and index reads/writes (see the README's Classes & Objects section)
+work through `subi`, both `subc` backends, and the python/javascript/ruby
+transpilers. Still aspirational: methods in class bodies, `extends`,
+`implements`, `this`, `super`, `static`, `private`/`public`/`protected` -
+the lexer reserves all of them, and the interpreter reports a clear error
+for a method inside a class body rather than silently dropping it.
 
 ## Error handling
 

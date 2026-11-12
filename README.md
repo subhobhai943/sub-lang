@@ -198,16 +198,19 @@ through memory - so it gives up roughly 4x against `gcc -O2` while still
 running about 90x faster than the interpreter. What it buys is that nothing
 else has to be installed.
 
-**Not yet in the machine-code backend:** objects, classes, `input()`,
-`try`/`catch`, iterating a string, and functions of more than six parameters.
-Programs using these compile through the C backend automatically, and `subc`
-names the construct that forced the fallback rather than failing silently.
+**Not yet in the machine-code backend:** `input()`, `try`/`catch`,
+iterating a string, and functions of more than six parameters. Programs using
+these compile through the C backend automatically, and `subc` names the
+construct that forced the fallback rather than failing silently.
 
 Everything else compiles to machine code, including arrays (literals,
 indexing, indexed assignment, `len`, `push`/`append`, `pop`, `for x in a`),
-the string builtins (`substring`, `char_at`, `contains`, `replace`, `split`,
-`join`), `switch`, `do`/`while`, `break`/`continue`, and top-level variables
-read and assigned from inside functions.
+objects and classes (key/value objects with tagged slots, `obj.k` and
+`obj["k"]` reads and writes, `o.length`, `ClassName.new` seeded with the
+class's field defaults, `{key: value, ...}` rendering), the string builtins
+(`substring`, `char_at`, `contains`, `replace`, `split`, `join`), `switch`,
+`do`/`while`, `break`/`continue`, and top-level variables read and assigned
+from inside functions.
 
 ### 2. Direct Interpreter (`subi`)
 
@@ -338,6 +341,14 @@ p.y = 20
 println(p.x)  # 10
 println(p.y)  # 20
 ```
+
+A class body holds field declarations; each `.new` evaluates the defaults
+into a fresh object, so instances are independent. `p.x = 10` writes the
+object's slot and `p.x` reads it. Objects work through the interpreter,
+both `subc` backends, and the python, javascript and ruby transpilers;
+the remaining statically typed transpilers refuse a program that declares
+a class (or uses an object literal) with a clear message rather than
+emitting code that means something else.
 
 ### Control Flow
 
