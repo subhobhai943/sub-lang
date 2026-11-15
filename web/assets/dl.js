@@ -41,6 +41,9 @@
       var ver = document.getElementById("dlVersion");
       if (ver && rel.tag_name) ver.textContent = rel.tag_name;
 
+      var footerVer = document.getElementById("footerVersion");
+      if (footerVer && rel.tag_name) footerVer.textContent = rel.tag_name;
+
       var names = (rel.assets || []).map(function (a) { return a.name; });
       Object.keys(PATTERNS).forEach(function (plat) {
         var card = document.querySelector('.dl-card[data-os="' + plat + '"]');

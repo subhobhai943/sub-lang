@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Examples — SUB Language</title>
+<meta name="description" content="SUB language examples: Hello World, FizzBuzz, Fibonacci, classes, switch/case, and a stdlib tour.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="../">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
+      <span>SUB</span>
+    </a>
+    <nav class="site-nav" id="siteNav">
+      <a href="../docs/getting-started.html">Docs</a>
+      <a href="../docs/stdlib.html">Stdlib</a>
+      <a href="../examples/">Examples</a>
+      <a href="../#download">Download</a>
+      <a href="../community/">Community</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar" id="docsSidebar">
+    <div class="docs-sidebar-inner">
+      <h4>Documentation</h4>
+      <a href="../docs/getting-started.html">Getting Started</a>
+      <a href="../docs/language-reference.html">Language Reference</a>
+      <a href="../docs/stdlib.html">Standard Library</a>
+      <a href="../docs/installation.html">Installation</a>
+      <h4>Advanced</h4>
+      <a href="../docs/transpilation.html">Transpilation</a>
+      <a href="../docs/native-compilation.html">Native Compilation</a>
+      <h4>More</h4>
+      <a href="../examples/" class="active">Examples</a>
+      <a href="../community/">Community</a>
+      <a href="../community/roadmap.html">Roadmap</a>
+      <a href="../changelog.html">Changelog</a>
+    </div>
+  </aside>
+
+  <main class="docs-content prose" id="content">
+    <button class="sidebar-toggle" id="sidebarToggle">Menu</button>
+    <nav class="breadcrumbs">
+      <a href="../">Home</a><span class="sep">/</span><span>Examples</span>
+    </nav>
+
+    <h1>Examples</h1>
+    <p>Learn SUB by reading real programs. Each example includes the source code and expected output. Run them with <code>subi</code> or compile with <code>subc</code>.</p>
+
+    <!-- Hello World -->
+    <h2>Hello World</h2>
+    <p>The classic first program. Declare a variable, concatenate strings, and print.</p>
+    <pre><code class="lang-sb">let name = "World"
+let greeting = "Hello, " + name + "!"
+
+println(greeting)</code></pre>
+    <p><strong>Output:</strong></p>
+    <pre><code>Hello, World!</code></pre>
+
+    <!-- FizzBuzz -->
+    <h2>FizzBuzz</h2>
+    <p>The classic programming exercise. Print numbers 1–100, but print "Fizz" for multiples of 3, "Buzz" for multiples of 5, and "FizzBuzz" for multiples of both.</p>
+    <pre><code class="lang-sb">for i in range(1, 101) {
+    if i % 15 == 0 {
+        println("FizzBuzz")
+    } elif i % 3 == 0 {
+        println("Fizz")
+    } elif i % 5 == 0 {
+        println("Buzz")
+    } else {
+        println(i)
+    }
+}</code></pre>
+    <p><strong>Output (first 15 lines):</strong></p>
+    <pre><code>1
+2
+Fizz
+4
+Buzz
+Fizz
+7
+8
+Fizz
+Buzz
+11
+Fizz
+13
+14
+FizzBuzz</code></pre>
+
+    <!-- Fibonacci -->
+    <h2>Fibonacci</h2>
+    <p>Compute the first 20 Fibonacci numbers using a loop.</p>
+    <pre><code class="lang-sb">fn fibonacci(n) {
+    let a = 0
+    let b = 1
+    let result = []
+
+    for i in range(0, n) {
+        push(result, a)
+        let temp = a + b
+        a = b
+        b = temp
+    }
+
+    return result
+}
+
+let fibs = fibonacci(20)
+for num in fibs {
+    println(num)
+}</code></pre>
+    <p><strong>Output:</strong></p>
+    <pre><code>0
+1
+1
+2
+3
+5
+8
+13
+21
+34
+55
+89
+144
+233
+377
+610
+987
+1597
+2584
+4181</code></pre>
+
+    <!-- Classes -->
+    <h2>Classes</h2>
+    <p>Define a <code>Point</code> class with fields, create instances with <code>.new</code>, and access members with dot notation.</p>
+    <pre><code class="lang-sb">class Point {
+    let x = 0
+    let y = 0
+}
+
+let p1 = Point.new
+p1.x = 10
+p1.y = 20
+
+let p2 = Point.new
+p2.x = 3
+p2.y = 4
+
+# Calculate distance between two points
+fn distance(a, b) {
+    let dx = a.x - b.x
+    let dy = a.y - b.y
+    return sqrt(dx * dx + dy * dy)
+}
+
+println("p1 = (" + str(p1.x) + ", " + str(p1.y) + ")")
+println("p2 = (" + str(p2.x) + ", " + str(p2.y) + ")")
+println("Distance: " + str(distance(p1, p2)))</code></pre>
+    <p><strong>Output:</strong></p>
+    <pre><code>p1 = (10, 20)
+p2 = (3, 4)
+Distance: 18.7883</code></pre>
+
+    <!-- Switch/Case -->
+    <h2>Switch / Case</h2>
+    <p>Pattern matching over values. Cases support multiple values and there is no fall-through.</p>
+    <pre><code class="lang-sb">fn describe_day(day) {
+    switch day {
+        case "Monday":
+            return "Start of the work week"
+        case "Tuesday", "Wednesday", "Thursday":
+            return "Midweek"
+        case "Friday":
+            return "Almost weekend!"
+        case "Saturday", "Sunday":
+            return "Weekend! 🎉"
+        default:
+            return "Unknown day"
+    }
+}
+
+let days = ["Monday", "Wednesday", "Friday", "Saturday"]
+
+for day in days {
+    println(day + ": " + describe_day(day))
+}</code></pre>
+    <p><strong>Output:</strong></p>
+    <pre><code>Monday: Start of the work week
+Wednesday: Midweek
+Friday: Almost weekend!
+Saturday: Weekend! 🎉</code></pre>
+
+    <!-- Stdlib Tour -->
+    <h2>Standard Library Tour</h2>
+    <p>A quick tour of the standard library modules: math, arrays, strings, and io.</p>
+    <pre><code class="lang-sb">import math
+import arrays
+import strings
+import io
+
+# ── Math ──
+io.heading("Math")
+println("PI = " + str(math.PI))
+println("sqrt(144) = " + str(math.sqrt(144)))
+println("factorial(10) = " + str(math.factorial(10)))
+println("is_prime(97) = " + str(math.is_prime(97)))
+println("fib(10) = " + str(math.fib(10)))
+
+# ── Arrays ──
+io.heading("Arrays")
+let nums = [5, 2, 8, 1, 9, 3, 7]
+println("Sum: " + str(arrays.sum_int(nums)))
+println("Sorted: " + str(arrays.sorted_int(nums)))
+println("Has 8? " + str(arrays.has_int(nums, 8)))
+println("Unique: " + str(arrays.unique_int([1, 2, 2, 3, 3, 3])))
+
+# ── Strings ──
+io.heading("Strings")
+let msg = "Hello, SUB Language!"
+println("Upper: " + upper(msg))
+println("Words: " + str(strings.words(msg)))
+println("Reverse: " + strings.reverse(msg))
+println("Slug: " + strings.slugify("Hello World Example"))
+println("Palindrome? " + str(strings.is_palindrome("racecar")))
+
+# ── IO ──
+io.heading("IO Colors")
+println(io.green("✓ Build succeeded"))
+println(io.yellow("⚠ Deprecated feature used"))
+println(io.red("✗ Compilation failed"))
+println(io.cyan("ℹ Processing 42 files..."))</code></pre>
+    <p><strong>Output:</strong></p>
+    <pre><code>═══ Math ═══
+PI = 3.14159
+sqrt(144) = 12
+factorial(10) = 3628800
+is_prime(97) = true
+fib(10) = 55
+
+═══ Arrays ═══
+Sum: 35
+Sorted: [1, 2, 3, 5, 7, 8, 9]
+Has 8? true
+Unique: [1, 2, 3]
+
+═══ Strings ═══
+Upper: HELLO, SUB LANGUAGE!
+Words: ["Hello," "SUB" "Language!"]
+Reverse: !egaugnaL BUS ,olleH
+Slug: hello-world-example
+Palindrome? true
+
+═══ IO Colors ═══
+✓ Build succeeded
+⚠ Deprecated feature used
+✗ Compilation failed
+ℹ Processing 42 files...</code></pre>
+
+    <h2>More Examples</h2>
+    <div class="example-grid">
+      <div class="example-card">
+        <h3>Error Handling</h3>
+        <p>Try/catch/finally for robust error management.</p>
+        <pre><code class="lang-sb">fn safe_divide(a, b) {
+    if b == 0 {
+        throw "Division by zero"
+    }
+    return a / b
+}
+
+try {
+    println(safe_divide(10, 0))
+} catch err {
+    println("Caught: " + err)
+} finally {
+    println("Done")
+}</code></pre>
+      </div>
+      <div class="example-card">
+        <h3>User Input</h3>
+        <p>Interactive programs with stdin.</p>
+        <pre><code class="lang-sb">let name = input("What is your name? ")
+let age = int(input("How old are you? "))
+
+println("Hello, " + name + "!")
+println("Next year you'll be " + str(age + 1))</code></pre>
+      </div>
+      <div class="example-card">
+        <h3>Networking</h3>
+        <p>HTTP requests with built-in net functions.</p>
+        <pre><code class="lang-sb">let response = net_fetch("https://httpbin.org/get")
+println(response)</code></pre>
+      </div>
+    </div>
+
+    <h2>Next Steps</h2>
+    <ul>
+      <li><a href="../docs/language-reference.html">Language Reference</a> — full syntax guide</li>
+      <li><a href="../docs/stdlib.html">Standard Library</a> — all 9 modules documented</li>
+      <li><a href="../community/">Community</a> — contribute examples of your own</li>
+    </ul>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
+      <div>
+        <strong>SUB Language</strong>
+        <span>Simple Universal Builder · <span id="footerVersion">v1.0.11</span> · MIT License</span>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="../community/">Contributing</a></li>
+      <li><a href="../security.html">Security</a></li>
+    </ul>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+  </div>
+</footer>
+<script src="../assets/highlight.js"></script>
+<script src="../assets/dl.js"></script>
+<script src="../assets/main.js"></script>
+<script>document.getElementById('sidebarToggle').onclick=function(){document.getElementById('docsSidebar').classList.toggle('open')}</script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Native Compilation — SUB Language</title>
+<meta name="description" content="How subc works: direct x86-64 machine code emission, ELF64 output, memory layout, and the C fallback backend.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="../">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
+      <span>SUB</span>
+    </a>
+    <nav class="site-nav" id="siteNav">
+      <a href="../docs/getting-started.html">Docs</a>
+      <a href="../docs/stdlib.html">Stdlib</a>
+      <a href="../examples/">Examples</a>
+      <a href="../#download">Download</a>
+      <a href="../community/">Community</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar" id="docsSidebar">
+    <div class="docs-sidebar-inner">
+      <h4>Documentation</h4>
+      <a href="getting-started.html">Getting Started</a>
+      <a href="language-reference.html">Language Reference</a>
+      <a href="stdlib.html">Standard Library</a>
+      <a href="installation.html">Installation</a>
+      <h4>Advanced</h4>
+      <a href="transpilation.html">Transpilation</a>
+      <a href="native-compilation.html" class="active">Native Compilation</a>
+      <h4>More</h4>
+      <a href="../examples/">Examples</a>
+      <a href="../community/">Community</a>
+      <a href="../community/roadmap.html">Roadmap</a>
+      <a href="../changelog.html">Changelog</a>
+    </div>
+  </aside>
+
+  <main class="docs-content prose" id="content">
+    <button class="sidebar-toggle" id="sidebarToggle">Menu</button>
+    <nav class="breadcrumbs">
+      <a href="../">Home</a><span class="sep">/</span><a href="getting-started.html">Docs</a><span class="sep">/</span><span>Native Compilation</span>
+    </nav>
+
+    <h1>Native Compilation</h1>
+    <p>The <code>subc</code> compiler is SUB's native code generator. It compiles <code>.sb</code> source directly to x86-64 machine code and writes a complete ELF64 executable — no assembler, no linker, no libc required.</p>
+
+    <h2>Usage</h2>
+    <pre><code>$ subc program.sb -o program
+$ ./program</code></pre>
+    <p>The output is a self-contained static ELF binary, typically a few kilobytes in size.</p>
+
+    <h2>The Native x86-64 Backend</h2>
+    <p>Unlike traditional compilers that emit assembly text and delegate to an assembler and linker, <code>subc</code> emits machine code bytes directly into memory buffers. The entire compilation pipeline runs in a single process:</p>
+    <ol>
+      <li><strong>Parse</strong> — build the AST from source</li>
+      <li><strong>Codegen</strong> — walk the AST and emit x86-64 machine code bytes</li>
+      <li><strong>ELF emit</strong> — write the ELF64 header, program headers, sections, and raw code to disk</li>
+    </ol>
+
+    <div class="callout callout-info">
+      <p><strong>Why no assembler?</strong> Emitting machine code directly eliminates toolchain dependencies. The resulting binary has zero runtime dependencies — no libc, no dynamic linker, nothing. It just runs.</p>
+    </div>
+
+    <h2>ELF64 Output Format</h2>
+    <p>The compiler writes a valid ELF64 executable that the Linux kernel can load directly. The ELF structure includes:</p>
+    <table>
+      <tr><th>Component</th><th>Description</th></tr>
+      <tr><td>ELF header</td><td>64-byte header identifying the file as an x86-64 ELF executable</td></tr>
+      <tr><td>Program headers</td><td>LOAD segments for code (text) and data (BSS)</td></tr>
+      <tr><td>Text section</td><td>Executable machine code</td></tr>
+      <tr><td>Data section</td><td>Read-only data (string literals, constants)</td></tr>
+      <tr><td>BSS section</td><td>Uninitialized data (heap, variables)</td></tr>
+      <tr><td>Entry point</td><td>Address of the <code>_start</code> routine</td></tr>
+    </table>
+
+    <h2>Memory Layout</h2>
+    <p>The compiled binary uses a fixed memory layout:</p>
+    <pre><code>┌─────────────────────────────────┐ 0x400000
+│         .text (code)            │  Machine code, read-only, executable
+├─────────────────────────────────┤ 0x500000
+│         .bss (data)             │  Heap + static variables
+│     (64 MB bump heap)           │
+└─────────────────────────────────┘</code></pre>
+
+    <table>
+      <tr><th>Region</th><th>Base address</th><th>Description</th></tr>
+      <tr><td>Text</td><td><code>0x400000</code></td><td>Machine code. Loaded as read-only + executable.</td></tr>
+      <tr><td>BSS</td><td><code>0x500000</code></td><td>Data segment. Contains the bump-allocator heap.</td></tr>
+      <tr><td>Heap</td><td><code>0x500000</code></td><td>64 MB bump heap for dynamic allocations (strings, arrays, objects).</td></tr>
+    </table>
+
+    <div class="callout callout-warn">
+      <p><strong>Limitation:</strong> The 64 MB bump heap is a simple allocator — it does not free memory. This is fine for small programs but means long-running programs with heavy allocation may exhaust the heap. A garbage collector is planned for a future release.</p>
+    </div>
+
+    <h2>Runtime Routines</h2>
+    <p>Since the compiled binary has no libc, the compiler emits small runtime routines directly into the text section. These handle:</p>
+    <ul>
+      <li><strong>System calls</strong> — <code>write</code>, <code>read</code>, <code>exit</code>, <code>mmap</code> via Linux <code>syscall</code> instruction</li>
+      <li><strong>String operations</strong> — concatenation, comparison, length, conversion</li>
+      <li><strong>Print routines</strong> — integer-to-string, float-to-string, newline output</li>
+      <li><strong>Memory management</strong> — bump allocator for the heap</li>
+      <li><strong>Array/object operations</strong> — push, pop, indexing, key lookup</li>
+    </ul>
+    <p>These routines are written in x86-64 machine code and linked directly into every binary. They add only a few hundred bytes to the output.</p>
+
+    <h2>C Fallback Backend</h2>
+    <p>For platforms where the native x86-64 backend is not available (macOS, Windows, FreeBSD, non-x86 architectures), <code>subc</code> provides a C fallback:</p>
+    <pre><code>$ subc program.sb --via-c -o program</code></pre>
+    <p>This mode generates C source code, then invokes the system C compiler (GCC or Clang) to produce the final binary. The C backend is portable and works on any platform with a C compiler.</p>
+
+    <div class="callout callout-tip">
+      <p><strong>Tip:</strong> The <code>--via-c</code> flag is automatically selected on non-Linux-x86-64 platforms. You only need to specify it explicitly if you want C output on Linux.</p>
+    </div>
+
+    <h3>How the C fallback works</h3>
+    <ol>
+      <li>Parse the <code>.sb</code> source into the AST</li>
+      <li>Walk the AST and emit C source code to a temporary file</li>
+      <li>Invoke <code>cc</code> (or the compiler specified by <code>$CC</code>) to compile the C file</li>
+      <li>Link the result into a native binary</li>
+      <li>Clean up the temporary C file</li>
+    </ol>
+
+    <h2>Platform Support</h2>
+    <table>
+      <tr><th>Platform</th><th>Native backend</th><th>C fallback</th></tr>
+      <tr><td>x86-64 Linux</td><td>✓ (direct ELF emission)</td><td>✓</td></tr>
+      <tr><td>x86-64 macOS</td><td>—</td><td>✓</td></tr>
+      <tr><td>ARM64 macOS</td><td>—</td><td>✓</td></tr>
+      <tr><td>x86-64 Windows</td><td>—</td><td>✓</td></tr>
+      <tr><td>x86-64 FreeBSD</td><td>—</td><td>✓</td></tr>
+      <tr><td>Other</td><td>—</td><td>✓ (if C compiler available)</td></tr>
+    </table>
+
+    <h2>Binary Size</h2>
+    <p>Compiled SUB binaries are remarkably small because they include only the runtime routines they actually use:</p>
+    <pre><code>$ subc hello.sb -o hello
+$ ls -la hello
+-rwxr-xr-x  1 user user  3842 Jan 15 10:30 hello
+
+$ file hello
+hello: ELF 64-bit LSB executable, x86-64, statically linked, stripped</code></pre>
+    <p>A "Hello, World!" program compiles to under 4 KB.</p>
+
+    <h2>Next Steps</h2>
+    <ul>
+      <li><a href="transpilation.html">Transpilation</a> — generate code in 13 languages instead</li>
+      <li><a href="../community/">Contributing</a> — help add native backends for more architectures</li>
+    </ul>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
+      <div>
+        <strong>SUB Language</strong>
+        <span>Simple Universal Builder · <span id="footerVersion">v1.0.11</span> · MIT License</span>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="../community/">Contributing</a></li>
+      <li><a href="../security.html">Security</a></li>
+    </ul>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+  </div>
+</footer>
+<script src="../assets/highlight.js"></script>
+<script src="../assets/dl.js"></script>
+<script src="../assets/main.js"></script>
+<script>document.getElementById('sidebarToggle').onclick=function(){document.getElementById('docsSidebar').classList.toggle('open')}</script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+# ============================================================
+# SUB Standard Library - testing
+#
+#   import "testing"
+#
+# Self-checking programs: assert conditions, compare values, and report
+# pass/fail. A program that imports this module and runs assertions is its
+# own test suite -- no external runner needed.
+#
+# Every assertion prints its result. A failure calls `throw`, which aborts
+# the program with a non-zero exit code through every backend.
+# ============================================================
+
+let _test_pass_count = 0
+let _test_fail_count = 0
+
+# Abort if `condition` is false. `msg` is printed on failure.
+fn assert(condition: bool, msg: string): void {
+    if condition {
+        _test_pass_count = _test_pass_count + 1
+        println("  PASS: " + msg)
+    } else {
+        _test_fail_count = _test_fail_count + 1
+        println("  FAIL: " + msg)
+        throw("Assertion failed: " + msg)
+    }
+}
+
+# Abort if `a` is not equal to `b`.
+fn assert_eq(a, b, msg: string): void {
+    if a == b {
+        _test_pass_count = _test_pass_count + 1
+        println("  PASS: " + msg)
+    } else {
+        _test_fail_count = _test_fail_count + 1
+        println("  FAIL: " + msg + " (got " + str(a) + ", expected " + str(b) + ")")
+        throw("Assertion failed: " + msg)
+    }
+}
+
+# Abort if `a` is equal to `b`.
+fn assert_ne(a, b, msg: string): void {
+    if a != b {
+        _test_pass_count = _test_pass_count + 1
+        println("  PASS: " + msg)
+    } else {
+        _test_fail_count = _test_fail_count + 1
+        println("  FAIL: " + msg + " (values should differ, both are " + str(a) + ")")
+        throw("Assertion failed: " + msg)
+    }
+}
+
+# Abort if `val` is not truthy.
+fn assert_true(val: bool, msg: string): void {
+    assert(val, msg)
+}
+
+# Abort if `val` is truthy.
+fn assert_false(val: bool, msg: string): void {
+    assert(!val, msg)
+}
+
+# Print a test header. Call assertions after this, then check summary.
+fn test(name: string) {
+    println("TEST: " + name)
+}
+
+# Print a summary line. Call this at the end of your test program.
+fn summary(): void {
+    let total = _test_pass_count + _test_fail_count
+    println("")
+    println("Results: " + str(_test_pass_count) + " passed, " + str(_test_fail_count) + " failed, " + str(total) + " total")
+}

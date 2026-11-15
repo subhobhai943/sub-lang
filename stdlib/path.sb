@@ -1,0 +1,121 @@
+# ============================================================
+# SUB Standard Library - path
+#
+#   import "path"
+#
+# Path manipulation using only string operations. All functions work with
+# forward-slash paths ("/a/b/c"), which is what every backend's runtime
+# uses. No filesystem access -- pure string surgery.
+# ============================================================
+
+import "strings"
+
+# Join path segments with "/". Empty segments are skipped.
+fn path_join(parts) {
+    let clean = []
+    let i = 0
+    while i < len(parts) {
+        let p = str(parts[i])
+        if len(p) >= 1 {
+            push(clean, p)
+        }
+        i = i + 1
+    }
+    return join(clean, "/")
+}
+
+# Everything before the last "/". dirname("/a/b/c") is "/a/b".
+# A path with no separator returns ".".
+fn dirname(p: string): string {
+    let last = 0 - 1
+    let i = len(p) - 1
+    while i >= 0 {
+        if char_at(p, i) == "/" {
+            last = i
+            break
+        }
+        i = i - 1
+    }
+    if last < 0 {
+        return "."
+    }
+    if last == 0 {
+        return "/"
+    }
+    return substring(p, 0, last)
+}
+
+# Everything after the last "/". basename("/a/b/c.sb") is "c.sb".
+fn basename(p: string): string {
+    let last = 0 - 1
+    let i = len(p) - 1
+    while i >= 0 {
+        if char_at(p, i) == "/" {
+            last = i
+            break
+        }
+        i = i - 1
+    }
+    return substring(p, last + 1, len(p))
+}
+
+# The file extension including the dot: "file.sb" → ".sb".
+# No extension returns "".
+fn extension(p: string): string {
+    let name = basename(p)
+    let dot = 0 - 1
+    let i = len(name) - 1
+    while i >= 0 {
+        if char_at(name, i) == "." {
+            dot = i
+            break
+        }
+        i = i - 1
+    }
+    if dot <= 0 {
+        return ""
+    }
+    return substring(name, dot, len(name))
+}
+
+# The file name without its extension: "file.sb" → "file".
+fn stem(p: string): string {
+    let name = basename(p)
+    let ext = extension(p)
+    if len(ext) == 0 {
+        return name
+    }
+    return substring(name, 0, len(name) - len(ext))
+}
+
+# True when `p` starts with "/".
+fn is_absolute(p: string): bool {
+    return len(p) > 0 && char_at(p, 0) == "/"
+}
+
+# Remove trailing slashes (except for "/" itself) and collapse runs of "//".
+fn normalize(p: string): string {
+    if len(p) == 0 {
+        return "."
+    }
+    let parts = split(p, "/")
+    let clean = []
+    let i = 0
+    while i < len(parts) {
+        if len(parts[i]) > 0 && parts[i] != "." {
+            push(clean, parts[i])
+        }
+        i = i + 1
+    }
+    if len(clean) == 0 {
+        if starts_with(p, "/") {
+            return "/"
+        }
+        return "."
+    }
+    let out = path_join(clean)
+    if starts_with(p, "/") {
+        out = "/" + out
+    }
+    return out
+}

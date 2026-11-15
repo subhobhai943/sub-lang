@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Installation — SUB Language</title>
+<meta name="description" content="Install SUB on Windows, macOS, Linux, FreeBSD, or build from source. Platform packages, universal installer, and verification.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="../">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
+      <span>SUB</span>
+    </a>
+    <nav class="site-nav" id="siteNav">
+      <a href="../docs/getting-started.html">Docs</a>
+      <a href="../docs/stdlib.html">Stdlib</a>
+      <a href="../examples/">Examples</a>
+      <a href="../#download">Download</a>
+      <a href="../community/">Community</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar" id="docsSidebar">
+    <div class="docs-sidebar-inner">
+      <h4>Documentation</h4>
+      <a href="getting-started.html">Getting Started</a>
+      <a href="language-reference.html">Language Reference</a>
+      <a href="stdlib.html">Standard Library</a>
+      <a href="installation.html" class="active">Installation</a>
+      <h4>Advanced</h4>
+      <a href="transpilation.html">Transpilation</a>
+      <a href="native-compilation.html">Native Compilation</a>
+      <h4>More</h4>
+      <a href="../examples/">Examples</a>
+      <a href="../community/">Community</a>
+      <a href="../community/roadmap.html">Roadmap</a>
+      <a href="../changelog.html">Changelog</a>
+    </div>
+  </aside>
+
+  <main class="docs-content prose" id="content">
+    <button class="sidebar-toggle" id="sidebarToggle">Menu</button>
+    <nav class="breadcrumbs">
+      <a href="../">Home</a><span class="sep">/</span><a href="getting-started.html">Docs</a><span class="sep">/</span><span>Installation</span>
+    </nav>
+
+    <h1>Installation</h1>
+    <p>SUB runs on Linux, macOS, Windows, and FreeBSD. Choose the method that suits your platform.</p>
+
+    <h2>Universal Installer</h2>
+    <p>The fastest way to install on any Unix-like system. This script detects your platform and installs the correct binaries.</p>
+    <pre><code>curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh</code></pre>
+    <div class="callout callout-tip">
+      <p><strong>Tip:</strong> The installer places binaries in <code>/usr/local/bin</code> by default. Pass <code>PREFIX=$HOME/.local</code> to install to a custom location.</p>
+    </div>
+
+    <h2>Windows</h2>
+
+    <h3>MSI Installer (recommended)</h3>
+    <p>Download the <code>.msi</code> installer from the <a href="https://github.com/subhobhai943/sub-lang/releases/latest" target="_blank" rel="noopener">latest release</a> and run it. The installer adds <code>subi</code>, <code>subc</code>, and <code>sub</code> to your PATH.</p>
+
+    <h3>Build from Source (MinGW)</h3>
+    <p>If you prefer to build from source on Windows, you need <a href="https://www.mingw-w64.org/" target="_blank" rel="noopener">MinGW-w64</a>:</p>
+    <pre><code>git clone https://github.com/subhobhai943/sub-lang.git
+cd sub-lang
+make CC=x86_64-w64-mingw32-gcc
+make install PREFIX=/c/sub-lang</code></pre>
+
+    <h2>macOS</h2>
+
+    <h3>.pkg Installer (recommended)</h3>
+    <p>Download the <code>.pkg</code> installer for your architecture from the <a href="https://github.com/subhobhai943/sub-lang/releases/latest" target="_blank" rel="noopener">latest release</a>. Supports both Apple Silicon (arm64) and Intel (x86_64).</p>
+
+    <h3>Homebrew (coming soon)</h3>
+    <p>Homebrew support is planned. For now, use the .pkg installer or build from source.</p>
+
+    <h3>Build from Source</h3>
+    <pre><code>git clone https://github.com/subhobhai943/sub-lang.git
+cd sub-lang
+make
+sudo make install</code></pre>
+    <p>You need Xcode Command Line Tools installed: <code>xcode-select --install</code>.</p>
+
+    <h2>Linux</h2>
+
+    <h3>Debian / Ubuntu (.deb)</h3>
+    <pre><code>wget https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-lang_1.0.11_amd64.deb
+sudo dpkg -i sub-lang_1.0.11_amd64.deb</code></pre>
+    <p>Also available for arm64.</p>
+
+    <h3>Fedora / RHEL (.rpm)</h3>
+    <pre><code>wget https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-lang-1.0.11-1.x86_64.rpm
+sudo rpm -i sub-lang-1.0.11-1.x86_64.rpm</code></pre>
+    <p>Also available for aarch64.</p>
+
+    <h3>Arch Linux (PKGBUILD)</h3>
+    <pre><code>git clone https://github.com/subhobhai943/sub-lang.git
+cd sub-lang/packaging/arch
+makepkg -si</code></pre>
+
+    <h3>Alpine Linux (APKBUILD)</h3>
+    <pre><code>git clone https://github.com/subhobhai943/sub-lang.git
+cd sub-lang/packaging/alpine
+abuild -r</code></pre>
+
+    <h3>AppImage</h3>
+    <p>A portable AppImage is available for any Linux distribution:</p>
+    <pre><code>wget https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-lang-x86_64.appimage
+chmod +x sub-lang-x86_64.appimage
+./sub-lang-x86_64.appimage --install</code></pre>
+
+    <h3>Build from Source</h3>
+    <pre><code>git clone https://github.com/subhobhai943/sub-lang.git
+cd sub-lang
+make
+sudo make install</code></pre>
+    <p>Requires GCC or Clang. No other dependencies — SUB is self-contained C.</p>
+
+    <h2>FreeBSD</h2>
+
+    <h3>pkg(8)</h3>
+    <pre><code>pkg install https://github.com/subhobhai943/sub-lang/releases/latest/download/sub-lang-1.0.11-amd64.pkg</code></pre>
+
+    <h3>Build from Source</h3>
+    <pre><code>git clone https://github.com/subhobhai943/sub-lang.git
+cd sub-lang
+gmake
+sudo gmake install</code></pre>
+    <div class="callout callout-info">
+      <p><strong>Note:</strong> Use <code>gmake</code> (GNU make) on FreeBSD. The BSD <code>make</code> is not supported.</p>
+    </div>
+
+    <h2>Building from Source</h2>
+    <p>All platforms share the same build process. The only requirement is a C compiler (GCC or Clang).</p>
+    <pre><code>git clone https://github.com/subhobhai943/sub-lang.git
+cd sub-lang
+
+# Build all three tools
+make
+
+# Install to /usr/local (default)
+sudo make install
+
+# Install to a custom location
+make install PREFIX=$HOME/.local</code></pre>
+
+    <h3>Build targets</h3>
+    <table>
+      <tr><th>Command</th><th>Description</th></tr>
+      <tr><td><code>make</code></td><td>Build <code>subi</code>, <code>subc</code>, and <code>sub</code></td></tr>
+      <tr><td><code>make install</code></td><td>Install binaries, stdlib, and man pages</td></tr>
+      <tr><td><code>make test</code></td><td>Run the conformance test suite</td></tr>
+      <tr><td><code>make clean</code></td><td>Remove build artifacts</td></tr>
+    </table>
+
+    <h3>Make variables</h3>
+    <table>
+      <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+      <tr><td><code>CC</code></td><td><code>cc</code></td><td>C compiler</td></tr>
+      <tr><td><code>PREFIX</code></td><td><code>/usr/local</code></td><td>Installation prefix</td></tr>
+      <tr><td><code>CFLAGS</code></td><td><code>-O2 -Wall</code></td><td>Compiler flags</td></tr>
+    </table>
+
+    <h2>Verifying Checksums</h2>
+    <p>Every release ships with a <code>checksums-sha256.txt</code> file. Verify your download:</p>
+    <pre><code># Download the checksums file
+wget https://github.com/subhobhai943/sub-lang/releases/latest/download/checksums-sha256.txt
+
+# Verify a specific file
+sha256sum -c checksums-sha256.txt --ignore-missing
+
+# Or on macOS
+shasum -a 256 -c checksums-sha256.txt</code></pre>
+
+    <div class="callout callout-warn">
+      <p><strong>Warning:</strong> Always verify checksums when downloading from the internet. A mismatched checksum indicates the file may have been tampered with.</p>
+    </div>
+
+    <h2>Uninstallation</h2>
+
+    <h3>Universal installer / source build</h3>
+    <pre><code># If installed with PREFIX=/usr/local (default):
+sudo rm /usr/local/bin/subi
+sudo rm /usr/local/bin/subc
+sudo rm /usr/local/bin/sub
+sudo rm -rf /usr/local/lib/sub-lang
+sudo rm -rf /usr/local/share/man/man1/sub*.1</code></pre>
+
+    <h3>Debian / Ubuntu</h3>
+    <pre><code>sudo apt remove sub-lang</code></pre>
+
+    <h3>Fedora / RHEL</h3>
+    <pre><code>sudo rpm -e sub-lang</code></pre>
+
+    <h3>Windows</h3>
+    <p>Use <strong>Add or Remove Programs</strong> in Settings, or run the MSI installer again and choose "Remove".</p>
+
+    <h3>macOS</h3>
+    <pre><code>sudo rm -rf /usr/local/bin/subi /usr/local/bin/subc /usr/local/bin/sub
+sudo rm -rf /usr/local/lib/sub-lang</code></pre>
+
+    <h3>FreeBSD</h3>
+    <pre><code>sudo pkg delete sub-lang</code></pre>
+
+    <h2>Next Steps</h2>
+    <ul>
+      <li><a href="getting-started.html">Getting Started</a> — write your first program</li>
+      <li><a href="language-reference.html">Language Reference</a> — full syntax guide</li>
+    </ul>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
+      <div>
+        <strong>SUB Language</strong>
+        <span>Simple Universal Builder · <span id="footerVersion">v1.0.11</span> · MIT License</span>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="../community/">Contributing</a></li>
+      <li><a href="../security.html">Security</a></li>
+    </ul>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+  </div>
+</footer>
+<script src="../assets/highlight.js"></script>
+<script src="../assets/dl.js"></script>
+<script src="../assets/main.js"></script>
+<script>document.getElementById('sidebarToggle').onclick=function(){document.getElementById('docsSidebar').classList.toggle('open')}</script>
+</body>
+</html>

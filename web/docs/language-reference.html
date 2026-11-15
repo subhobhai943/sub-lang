@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Language Reference — SUB Language</title>
+<meta name="description" content="Complete reference for the SUB programming language: syntax, types, control flow, classes, error handling, builtins, and UI DSL.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="../">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
+      <span>SUB</span>
+    </a>
+    <nav class="site-nav" id="siteNav">
+      <a href="../docs/getting-started.html">Docs</a>
+      <a href="../docs/stdlib.html">Stdlib</a>
+      <a href="../examples/">Examples</a>
+      <a href="../#download">Download</a>
+      <a href="../community/">Community</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar" id="docsSidebar">
+    <div class="docs-sidebar-inner">
+      <h4>Documentation</h4>
+      <a href="getting-started.html">Getting Started</a>
+      <a href="language-reference.html" class="active">Language Reference</a>
+      <a href="stdlib.html">Standard Library</a>
+      <a href="installation.html">Installation</a>
+      <h4>Advanced</h4>
+      <a href="transpilation.html">Transpilation</a>
+      <a href="native-compilation.html">Native Compilation</a>
+      <h4>More</h4>
+      <a href="../examples/">Examples</a>
+      <a href="../community/">Community</a>
+      <a href="../community/roadmap.html">Roadmap</a>
+      <a href="../changelog.html">Changelog</a>
+    </div>
+  </aside>
+
+  <main class="docs-content prose" id="content">
+    <button class="sidebar-toggle" id="sidebarToggle">Menu</button>
+    <nav class="breadcrumbs">
+      <a href="../">Home</a><span class="sep">/</span><a href="getting-started.html">Docs</a><span class="sep">/</span><span>Language Reference</span>
+    </nav>
+
+    <h1>Language Reference</h1>
+    <p>This page documents every feature of the SUB language. For the standard library modules, see the <a href="stdlib.html">Standard Library</a> page.</p>
+
+    <h2>Comments</h2>
+    <p>SUB uses <code>#</code> for single-line comments. Everything after <code>#</code> on a line is ignored by the parser.</p>
+    <pre><code class="lang-sb"># This is a comment
+let x = 42  # inline comment</code></pre>
+
+    <h2>Variables</h2>
+    <p>Declare mutable variables with <code>let</code> and immutable bindings with <code>const</code>.</p>
+    <pre><code class="lang-sb">let name = "Alice"     # mutable
+const PI = 3.14159     # immutable — reassignment is an error
+
+name = "Bob"           # OK
+# PI = 3               # Error: cannot reassign const</code></pre>
+
+    <h2>Data Types</h2>
+    <p>SUB has seven value types. The type is inferred from the assigned value — there are no type annotations.</p>
+    <table>
+      <tr><th>Type</th><th>Example</th><th>Notes</th></tr>
+      <tr><td><code>int</code></td><td><code>42</code>, <code>-7</code></td><td>Arbitrary-precision integers</td></tr>
+      <tr><td><code>float</code></td><td><code>3.14</code>, <code>-0.5</code></td><td>64-bit IEEE 754 double</td></tr>
+      <tr><td><code>string</code></td><td><code>"hello"</code></td><td>UTF-8, double-quoted</td></tr>
+      <tr><td><code>bool</code></td><td><code>true</code>, <code>false</code></td><td>Logical values</td></tr>
+      <tr><td><code>null</code></td><td><code>null</code></td><td>Absence of a value</td></tr>
+      <tr><td><code>array</code></td><td><code>[1, 2, 3]</code></td><td>Ordered, heterogeneous</td></tr>
+      <tr><td><code>object</code></td><td><code>{"key": "value"}</code></td><td>Key-value map</td></tr>
+    </table>
+    <pre><code class="lang-sb">let count = 100
+let price = 9.99
+let greeting = "Hello"
+let active = true
+let nothing = null
+let items = [1, "two", 3.0]
+let config = {"debug": true, "level": 5}</code></pre>
+
+    <h2>Functions</h2>
+    <p>Define functions with the <code>fn</code> keyword. Functions can take parameters and return values with <code>return</code>.</p>
+    <pre><code class="lang-sb">fn greet(name) {
+    return "Hello, " + name + "!"
+}
+
+fn add(a, b) {
+    return a + b
+}
+
+println(greet("World"))   # Hello, World!
+println(add(3, 4))        # 7</code></pre>
+
+    <div class="callout callout-info">
+      <p><strong>Note:</strong> Functions must be defined before they are called. There is no hoisting.</p>
+    </div>
+
+    <h2>Control Flow</h2>
+
+    <h3>if / elif / else</h3>
+    <pre><code class="lang-sb">let score = 85
+
+if score >= 90 {
+    println("A")
+} elif score >= 80 {
+    println("B")
+} elif score >= 70 {
+    println("C")
+} else {
+    println("F")
+}</code></pre>
+
+    <h3>for-in loop</h3>
+    <p>Iterate over arrays or ranges.</p>
+    <pre><code class="lang-sb">let fruits = ["apple", "banana", "cherry"]
+
+for fruit in fruits {
+    println(fruit)
+}
+
+# Using range
+for i in range(0, 5) {
+    println(i)   # 0, 1, 2, 3, 4
+}</code></pre>
+
+    <h3>while loop</h3>
+    <pre><code class="lang-sb">let count = 0
+while count < 5 {
+    println(count)
+    count = count + 1
+}</code></pre>
+
+    <h3>do-while loop</h3>
+    <p>Executes the body at least once before checking the condition.</p>
+    <pre><code class="lang-sb">let x = 10
+do {
+    println(x)
+    x = x - 1
+} while x > 0</code></pre>
+
+    <h3>switch / case / default</h3>
+    <p>Pattern matching over integers, strings, and floats. No fall-through — each case runs its body and exits.</p>
+    <pre><code class="lang-sb">let day = "Monday"
+
+switch day {
+    case "Monday":
+        println("Start of the week")
+    case "Friday":
+        println("Almost weekend")
+    case "Saturday", "Sunday":
+        println("Weekend!")
+    default:
+        println("Midweek")
+}</code></pre>
+
+    <h2>Classes</h2>
+    <p>SUB supports class-based object-oriented programming. Define classes with <code>class</code>, create instances with <code>.new</code>, and access fields with dot notation.</p>
+    <pre><code class="lang-sb">class Point {
+    let x = 0
+    let y = 0
+}
+
+let p = Point.new
+p.x = 10
+p.y = 20
+
+println(p.x)   # 10
+println(p.y)   # 20</code></pre>
+
+    <div class="callout callout-tip">
+      <p><strong>Tip:</strong> Classes transpile to idiomatic constructs in every target language — structs in Rust, classes in Java/Python, interfaces in TypeScript.</p>
+    </div>
+
+    <h2>Error Handling</h2>
+    <p>Use <code>try</code>/<code>catch</code>/<code>finally</code> for error handling and <code>throw</code> to raise errors.</p>
+    <pre><code class="lang-sb">fn divide(a, b) {
+    if b == 0 {
+        throw "Division by zero"
+    }
+    return a / b
+}
+
+try {
+    let result = divide(10, 0)
+    println(result)
+} catch err {
+    println("Error: " + err)
+} finally {
+    println("Cleanup done")
+}</code></pre>
+
+    <h2>Modules</h2>
+    <p>Import standard library modules or user-defined modules with <code>import</code>.</p>
+    <pre><code class="lang-sb">import math
+import arrays
+import strings
+
+let result = math.sqrt(144)
+println(result)   # 12
+
+let nums = [3, 1, 4, 1, 5]
+let total = arrays.sum_int(nums)
+println(total)    # 14</code></pre>
+
+    <h2>Operators</h2>
+    <table>
+      <tr><th>Category</th><th>Operators</th></tr>
+      <tr><td>Arithmetic</td><td><code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code> <code>**</code></td></tr>
+      <tr><td>Comparison</td><td><code>==</code> <code>!=</code> <code>&lt;</code> <code>&gt;</code> <code>&lt;=</code> <code>&gt;=</code></td></tr>
+      <tr><td>Logical</td><td><code>&amp;&amp;</code> <code>!</code></td></tr>
+      <tr><td>Assignment</td><td><code>=</code></td></tr>
+      <tr><td>String concat</td><td><code>+</code></td></tr>
+    </table>
+    <pre><code class="lang-sb">let a = 10 + 5      # 15
+let b = 10 % 3      # 1
+let c = 2 ** 8      # 256
+let d = "Hello" + " " + "World"  # "Hello World"
+let e = (5 > 3) && (2 != 4)      # true</code></pre>
+
+    <h2>Built-in Functions</h2>
+    <p>These functions are available globally without importing any module.</p>
+
+    <h3>I/O</h3>
+    <div class="api-fn">
+      <h3>print(value)</h3>
+      <p>Print a value to stdout without a trailing newline.</p>
+    </div>
+    <div class="api-fn">
+      <h3>println(value)</h3>
+      <p>Print a value to stdout followed by a newline.</p>
+    </div>
+    <div class="api-fn">
+      <h3>input(prompt)</h3>
+      <p>Read a line of text from stdin. Displays the optional prompt string.</p>
+    </div>
+
+    <h3>Type Conversion</h3>
+    <div class="api-fn">
+      <h3>str(value)</h3>
+      <p>Convert any value to its string representation.</p>
+    </div>
+    <div class="api-fn">
+      <h3>int(value)</h3>
+      <p>Convert a string or float to an integer.</p>
+    </div>
+    <div class="api-fn">
+      <h3>float(value)</h3>
+      <p>Convert a string or integer to a float.</p>
+    </div>
+    <div class="api-fn">
+      <h3>type(value)</h3>
+      <p>Return the type name of a value as a string: <code>"int"</code>, <code>"float"</code>, <code>"string"</code>, <code>"bool"</code>, <code>"null"</code>, <code>"array"</code>, <code>"object"</code>.</p>
+    </div>
+
+    <h3>Collections</h3>
+    <div class="api-fn">
+      <h3>len(value)</h3>
+      <p>Return the length of a string, array, or object.</p>
+    </div>
+    <div class="api-fn">
+      <h3>push(array, value)</h3>
+      <p>Append a value to the end of an array.</p>
+    </div>
+    <div class="api-fn">
+      <h3>pop(array)</h3>
+      <p>Remove and return the last element of an array.</p>
+    </div>
+
+    <h3>Math</h3>
+    <div class="api-fn">
+      <h3>abs(value)</h3>
+      <p>Return the absolute value of a number.</p>
+    </div>
+    <div class="api-fn">
+      <h3>min(a, b)</h3>
+      <p>Return the smaller of two numbers.</p>
+    </div>
+    <div class="api-fn">
+      <h3>max(a, b)</h3>
+      <p>Return the larger of two numbers.</p>
+    </div>
+    <div class="api-fn">
+      <h3>sqrt(value)</h3>
+      <p>Return the square root of a number.</p>
+    </div>
+    <div class="api-fn">
+      <h3>floor(value)</h3>
+      <p>Round a float down to the nearest integer.</p>
+    </div>
+    <div class="api-fn">
+      <h3>ceil(value)</h3>
+      <p>Round a float up to the nearest integer.</p>
+    </div>
+    <div class="api-fn">
+      <h3>round(value)</h3>
+      <p>Round a float to the nearest integer.</p>
+    </div>
+
+    <h3>String Operations</h3>
+    <div class="api-fn">
+      <h3>upper(string)</h3>
+      <p>Return the string with all characters converted to uppercase.</p>
+    </div>
+    <div class="api-fn">
+      <h3>lower(string)</h3>
+      <p>Return the string with all characters converted to lowercase.</p>
+    </div>
+    <div class="api-fn">
+      <h3>trim(string)</h3>
+      <p>Remove leading and trailing whitespace.</p>
+    </div>
+    <div class="api-fn">
+      <h3>split(string, delimiter)</h3>
+      <p>Split a string by a delimiter and return an array of substrings.</p>
+    </div>
+    <div class="api-fn">
+      <h3>join(array, delimiter)</h3>
+      <p>Join an array of strings with a delimiter into a single string.</p>
+    </div>
+    <div class="api-fn">
+      <h3>substring(string, start, end)</h3>
+      <p>Return a portion of the string from index <code>start</code> to <code>end</code> (exclusive).</p>
+    </div>
+    <div class="api-fn">
+      <h3>contains(string, needle)</h3>
+      <p>Return <code>true</code> if the string contains the substring.</p>
+    </div>
+    <div class="api-fn">
+      <h3>replace(string, old, new)</h3>
+      <p>Return a new string with all occurrences of <code>old</code> replaced by <code>new</code>.</p>
+    </div>
+    <div class="api-fn">
+      <h3>char_at(string, index)</h3>
+      <p>Return the character at the given index.</p>
+    </div>
+
+    <h3>Utility</h3>
+    <div class="api-fn">
+      <h3>range(start, end)</h3>
+      <p>Return an array of integers from <code>start</code> (inclusive) to <code>end</code> (exclusive).</p>
+    </div>
+
+    <h3>Networking</h3>
+    <div class="api-fn">
+      <h3>net_fetch(url)</h3>
+      <p>Perform an HTTP GET request and return the response body as a string.</p>
+    </div>
+    <div class="api-fn">
+      <h3>net_post(url, body)</h3>
+      <p>Perform an HTTP POST request with the given body and return the response.</p>
+    </div>
+    <div class="api-fn">
+      <h3>net_download(url, path)</h3>
+      <p>Download the contents of a URL and save them to a local file at <code>path</code>.</p>
+    </div>
+
+    <h2>UI DSL</h2>
+    <p>SUB includes a first-class declarative UI syntax for building graphical interfaces. UI trees are composed of <code>ui.window</code>, <code>ui.label</code>, <code>ui.button</code>, and other UI primitives.</p>
+    <pre><code class="lang-sb">ui.window {
+    title: "My App"
+    width: 400
+    height: 300
+
+    ui.label {
+        text: "Hello, SUB!"
+        font_size: 24
+    }
+
+    ui.button {
+        text: "Click me"
+        on_click: fn() {
+            println("Button clicked!")
+        }
+    }
+}</code></pre>
+
+    <div class="callout callout-info">
+      <p><strong>Note:</strong> The UI DSL is a declarative tree — it describes what the interface looks like, not how to draw it. Different renderers can interpret the same tree for different platforms.</p>
+    </div>
+
+    <h2>Next Steps</h2>
+    <ul>
+      <li><a href="stdlib.html">Standard Library</a> — explore math, arrays, strings, io, and more</li>
+      <li><a href="../examples/">Examples</a> — real programs to learn from</li>
+      <li><a href="transpilation.html">Transpilation</a> — learn how SUB targets 13 languages</li>
+    </ul>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
+      <div>
+        <strong>SUB Language</strong>
+        <span>Simple Universal Builder · <span id="footerVersion">v1.0.11</span> · MIT License</span>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="../community/">Contributing</a></li>
+      <li><a href="../security.html">Security</a></li>
+    </ul>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+  </div>
+</footer>
+<script src="../assets/highlight.js"></script>
+<script src="../assets/dl.js"></script>
+<script src="../assets/main.js"></script>
+<script>document.getElementById('sidebarToggle').onclick=function(){document.getElementById('docsSidebar').classList.toggle('open')}</script>
+</body>
+</html>

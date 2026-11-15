@@ -940,6 +940,63 @@ static const char *shadow_name(const char *name) {
     return name;
 }
 
+/* Defined after java_reserved and py_ident; the mangling is identical, only
+   the keyword set differs. */
+
+static int java_reserved(const char *name) {
+    static const char *kw[] = {
+        "abstract", "assert", "boolean", "break", "byte", "case", "catch",
+        "char", "class", "const", "continue", "default", "do", "double",
+        "else", "enum", "extends", "final", "finally", "float", "for",
+        "goto", "if", "implements", "import", "instanceof", "int", "interface",
+        "long", "native", "new", "package", "private", "protected", "public",
+        "return", "short", "static", "strictfp", "super", "switch", "synchronized",
+        "this", "throw", "throws", "transient", "try", "void", "volatile",
+        "while", NULL
+    };
+    if (!name) return 0;
+    for (int i = 0; kw[i]; i++)
+        if (strcmp(name, kw[i]) == 0) return 1;
+    return 0;
+}
+
+/* Python reserves words SUB does not, so a SUB function called `assert`
+   would come out as `def assert(` -- a syntax error with no way to escape it.
+   The name is suffixed consistently, at declaration and at every use. */
+static int python_reserved(const char *name) {
+    static const char *kw[] = {
+        "False", "None", "True", "and", "as", "assert", "async", "await",
+        "break", "class", "continue", "def", "del", "elif", "else", "except",
+        "finally", "for", "from", "global", "if", "import", "in", "is",
+        "lambda", "nonlocal", "not", "or", "pass", "raise", "return",
+        "try", "while", "with", "yield", NULL
+    };
+    if (!name) return 0;
+    for (int i = 0; kw[i]; i++)
+        if (strcmp(name, kw[i]) == 0) return 1;
+    return 0;
+}
+
+static const char *py_ident(const char *name) {
+    static char buf[8][64];
+    static int slot = 0;
+    if (!name) return "func";
+    if (!python_reserved(name)) return name;
+    slot = (slot + 1) % 8;
+    snprintf(buf[slot], sizeof buf[0], "%s_", name);
+    return buf[slot];
+}
+
+static const char *java_ident(const char *name) {
+    static char buf[8][64];
+    static int slot = 0;
+    if (!name) return "func";
+    if (!java_reserved(name)) return name;
+    slot = (slot + 1) % 8;
+    snprintf(buf[slot], sizeof buf[0], "%s_", name);
+    return buf[slot];
+}
+
 /* Give `src` a private name if it is already in scope, and record it either
    way. Returns the name the loop should be generated under. */
 static const char *shadow_declare_loop_var(const char *src) {
@@ -1143,7 +1200,7 @@ static void generate_expr_python(StringBuilder *sb, ASTNode *node) {
                 } else if (strcmp(fn, "type") == 0) {
                     sb_append(sb, "(lambda x: 'int' if isinstance(x, int) and not isinstance(x, bool) else ('float' if isinstance(x, float) else ('string' if isinstance(x, str) else ('bool' if isinstance(x, bool) else ('array' if isinstance(x, list) else ('null' if x is None else type(x).__name__))))))(");
                 } else {
-                    sb_append(sb, "%s(", fn);
+                    sb_append(sb, "%s(", py_ident(fn));
                 }
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");
@@ -1230,7 +1287,7 @@ static void generate_node_python(StringBuilder *sb, ASTNode *node, int indent) {
         case AST_FUNCTION_DECL: {
             int scope_mark = g_nscope, rename_mark = g_nrename;
             g_nscope = g_nrename = 0;
-            sb_append(sb, "\ndef %s(", node->value ? node->value : "func");
+            sb_append(sb, "\ndef %s(", py_ident(node->value ? node->value : "func"));
             for (int i = 0; i < node->child_count; i++) {
                 if (i > 0) sb_append(sb, ", ");
                 sb_append(sb, "%s", node->children[i]->value ? node->children[i]->value : "arg");
@@ -2477,7 +2534,7 @@ static void generate_expr_java(StringBuilder *sb, ASTNode *node) {
                 sb_append(sb, ")");
             } else {
                 if (node->value) {
-                    sb_append(sb, "%s(", fn);
+                    sb_append(sb, "%s(", java_ident(fn));
                 } else {
                     generate_expr_java(sb, node->left);
                     sb_append(sb, "(");
@@ -2696,7 +2753,7 @@ static void generate_node_java(StringBuilder *sb, ASTNode *node, int indent) {
             indent_code(sb, indent);
             g_java_fn_type = node->data_type;
             sb_append(sb, "public static %s %s(", java_param_type(node),
-                      node->value ? node->value : "func");
+                      java_ident(node->value ? node->value : "func"));
             if (node->children && node->child_count > 0) {
                 for (int i = 0; i < node->child_count; i++) {
                     if (i > 0) sb_append(sb, ", ");

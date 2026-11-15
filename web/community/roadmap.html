@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roadmap — SUB Language</title>
+<meta name="description" content="SUB language roadmap: completed features, in-progress work, and planned features like generics, async/await, and FFI.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="../">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
+      <span>SUB</span>
+    </a>
+    <nav class="site-nav" id="siteNav">
+      <a href="../docs/getting-started.html">Docs</a>
+      <a href="../docs/stdlib.html">Stdlib</a>
+      <a href="../examples/">Examples</a>
+      <a href="../#download">Download</a>
+      <a href="../community/">Community</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar" id="docsSidebar">
+    <div class="docs-sidebar-inner">
+      <h4>Documentation</h4>
+      <a href="../docs/getting-started.html">Getting Started</a>
+      <a href="../docs/language-reference.html">Language Reference</a>
+      <a href="../docs/stdlib.html">Standard Library</a>
+      <a href="../docs/installation.html">Installation</a>
+      <h4>Advanced</h4>
+      <a href="../docs/transpilation.html">Transpilation</a>
+      <a href="../docs/native-compilation.html">Native Compilation</a>
+      <h4>More</h4>
+      <a href="../examples/">Examples</a>
+      <a href="../community/">Community</a>
+      <a href="../community/roadmap.html" class="active">Roadmap</a>
+      <a href="../changelog.html">Changelog</a>
+    </div>
+  </aside>
+
+  <main class="docs-content prose" id="content">
+    <button class="sidebar-toggle" id="sidebarToggle">Menu</button>
+    <nav class="breadcrumbs">
+      <a href="../">Home</a><span class="sep">/</span><a href="../community/">Community</a><span class="sep">/</span><span>Roadmap</span>
+    </nav>
+
+    <h1>Roadmap</h1>
+    <p>This page tracks the status of major SUB features. Items are grouped by completion status.</p>
+
+    <h2>Completed</h2>
+
+    <h3>Classes <span class="status status-done">Done</span></h3>
+    <p>Class definitions with fields, <code>.new</code> construction, and dot-notation member access. Lowered idiomatically on every backend — structs in Rust, classes in Java/Python, interfaces in TypeScript.</p>
+    <pre><code class="lang-sb">class Point {
+    let x = 0
+    let y = 0
+}
+
+let p = Point.new
+p.x = 10
+p.y = 20</code></pre>
+
+    <h3>Pattern Matching / Switch <span class="status status-done">Done</span></h3>
+    <p><code>switch</code>/<code>case</code>/<code>default</code> over integers, strings, and floats. Multi-value clauses, no fall-through. Compiles to efficient branch tables on native targets.</p>
+    <pre><code class="lang-sb">switch value {
+    case 1, 2:
+        println("low")
+    case 3:
+        println("three")
+    default:
+        println("other")
+}</code></pre>
+
+    <h3>Try / Catch <span class="status status-done">Done</span></h3>
+    <p>Structured error handling with <code>try</code>/<code>catch</code>/<code>finally</code> and <code>throw</code>. Works across all backends including native compilation.</p>
+    <pre><code class="lang-sb">try {
+    let result = divide(10, 0)
+} catch err {
+    println("Error: " + err)
+} finally {
+    println("Cleanup")
+}</code></pre>
+
+    <h3>UI DSL <span class="status status-done">Done</span></h3>
+    <p>Declarative UI tree with <code>ui.window</code>, <code>ui.label</code>, <code>ui.button</code>, and other primitives. One tree, many renderers.</p>
+    <pre><code class="lang-sb">ui.window {
+    title: "My App"
+    ui.label { text: "Hello!" }
+    ui.button { text: "Click" }
+}</code></pre>
+
+    <h3>13-Target Transpiler <span class="status status-done">Done</span></h3>
+    <p>Python, JavaScript, TypeScript, C, C++, Rust, Go, Java, Kotlin, Swift, Ruby, x86-64 Assembly, and CSS — all from a single AST, verified in CI.</p>
+
+    <h3>Native x86-64 Compiler <span class="status status-done">Done</span></h3>
+    <p><code>subc</code> emits x86-64 machine code directly and writes the ELF binary itself. No assembler, no linker, no libc.</p>
+
+    <h3>Standard Library (9 modules) <span class="status status-done">Done</span></h3>
+    <p>math, arrays, strings, io, testing, format, path, encoding, collections — all written in SUB, verified through every backend.</p>
+
+    <hr>
+
+    <h2>Planned</h2>
+
+    <h3>Generics <span class="status status-planned">Planned</span></h3>
+    <p>Type-parameterized functions and classes. This would eliminate the need for <code>_int</code>/<code>_float</code> suffixed variants in the stdlib and enable more expressive code.</p>
+    <pre><code class="lang-sb"># Planned syntax
+fn first&lt;T&gt;(arr: [T]) -> T {
+    return arr[0]
+}</code></pre>
+    <div class="callout callout-info">
+      <p><strong>Note:</strong> Generics will need to work across all 13 backends, each of which has different generic/type-parameter syntax. This is a significant implementation effort.</p>
+    </div>
+
+    <h3>Async / Await <span class="status status-planned">Planned</span></h3>
+    <p>First-class async functions for non-blocking I/O. The networking builtins (<code>net_fetch</code>, <code>net_post</code>) are currently synchronous — async support would make them non-blocking.</p>
+    <pre><code class="lang-sb"># Planned syntax
+async fn fetch_data(url) {
+    let response = await net_fetch(url)
+    return response
+}</code></pre>
+
+    <h3>Foreign Function Interface (FFI) <span class="status status-planned">Planned</span></h3>
+    <p>Call C library functions directly from SUB. This would unlock access to system libraries, GPU compute, database drivers, and other native functionality.</p>
+    <pre><code class="lang-sb"># Planned syntax
+import ffi
+let lib = ffi.load("libm.so")
+let cos = lib.bind("cos", fn(float) -> float)
+println(cos(0.0))  # 1.0</code></pre>
+
+    <h3>File I/O Builtins <span class="status status-planned">Planned</span></h3>
+    <p>Native builtins for reading and writing files: <code>file_read</code>, <code>file_write</code>, <code>file_append</code>, <code>file_exists</code>, <code>file_delete</code>, <code>dir_list</code>. Currently possible through transpiled targets but not available in the interpreter or native compiler.</p>
+
+    <h3>Package Manager <span class="status status-planned">Planned</span></h3>
+    <p>A built-in package manager (<code>subpkg</code>) for discovering, installing, and managing third-party SUB libraries. Inspired by <code>cargo</code>, <code>npm</code>, and <code>pip</code>.</p>
+    <pre><code class="lang-sb"># Planned CLI
+$ subpkg init
+$ subpkg add json-parser
+$ subpkg build</code></pre>
+
+    <h3>Improved Error Messages <span class="status status-progress">In Progress</span></h3>
+    <p>Better parse errors with caret diagnostics showing exactly where the problem is, suggestions for common mistakes, and type error explanations.</p>
+
+    <h3>Source Maps for Transpiled Output <span class="status status-planned">Planned</span></h3>
+    <p>Generate source maps alongside transpiled output so debuggers can map back to the original <code>.sb</code> source.</p>
+
+    <h3>Incremental Compilation <span class="status status-planned">Planned</span></h3>
+    <p>Cache parsed ASTs and only recompile changed modules. Important for larger projects.</p>
+
+    <h2>How to Help</h2>
+    <p>Interested in working on a planned feature? Check the <a href="../community/">contributing guide</a> and open an issue to discuss your approach before starting.</p>
+    <ul>
+      <li><a href="../community/">Contributing Guide</a></li>
+      <li><a href="https://github.com/subhobhai943/sub-lang/issues" target="_blank" rel="noopener">Open Issues</a></li>
+      <li><a href="../changelog.html">Changelog</a> — see what shipped recently</li>
+    </ul>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
+      <div>
+        <strong>SUB Language</strong>
+        <span>Simple Universal Builder · <span id="footerVersion">v1.0.11</span> · MIT License</span>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="../community/">Contributing</a></li>
+      <li><a href="../security.html">Security</a></li>
+    </ul>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+  </div>
+</footer>
+<script src="../assets/highlight.js"></script>
+<script src="../assets/dl.js"></script>
+<script src="../assets/main.js"></script>
+<script>document.getElementById('sidebarToggle').onclick=function(){document.getElementById('docsSidebar').classList.toggle('open')}</script>
+</body>
+</html>

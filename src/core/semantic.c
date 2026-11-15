@@ -628,7 +628,8 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                     return TYPE_ARRAY;
                 }
                 /* Array mutation built-ins */
-                if (fn_name && (strcmp(fn_name, "push") == 0 || strcmp(fn_name, "pop") == 0)) {
+                if (fn_name && (strcmp(fn_name, "push") == 0 || strcmp(fn_name, "append") == 0 ||
+                                strcmp(fn_name, "pop") == 0)) {
                     for (int i = 0; i < node->child_count; i++)
                         check_expression_type(node->children[i], table);
                     node->data_type = TYPE_VOID;

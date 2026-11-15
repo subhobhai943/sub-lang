@@ -1,0 +1,92 @@
+# ============================================================
+# SUB Standard Library - format
+#
+#   import "format"
+#
+# String formatting helpers built on substring, replace, and split.
+# No builtins beyond what every backend already provides.
+# ============================================================
+
+import "strings"
+
+# Replace {0}, {1}, ... in `template` with the corresponding element from
+# `values`. Missing indices are left as-is. This is a poor man's format
+# string, but it covers the common case without a parser.
+fn fmt(template: string, values) {
+    let out = template
+    let i = 0
+    while i < len(values) {
+        let placeholder = "{" + str(i) + "}"
+        let at = find(out, placeholder)
+        if at >= 0 {
+            out = substring(out, 0, at) + str(values[i]) + substring(out, at + len(placeholder), len(out))
+        }
+        i = i + 1
+    }
+    return out
+}
+
+# `n` padded with leading zeros to `width` characters. Useful for dates,
+# IDs, and any fixed-column numeric output.
+fn pad_number(n: int, width: int): string {
+    let s = str(n)
+    if n < 0 {
+        s = str(0 - n)
+        let pad = ""
+        let need = width - 1 - len(s)
+        let i = 0
+        while i < need {
+            pad = pad + "0"
+            i = i + 1
+        }
+        return "-" + pad + s
+    }
+    let pad = ""
+    let need = width - len(s)
+    let i = 0
+    while i < need {
+        pad = pad + "0"
+        i = i + 1
+    }
+    return pad + s
+}
+
+# `ch` repeated `n` times. A thin wrapper over strings.repeat for when the
+# caller thinks in characters rather than strings.
+fn repeat_char(ch: string, n: int): string {
+    return repeat(ch, n)
+}
+
+# Format a single table row with explicit column widths. Each cell is
+# padded (or truncated) to match the corresponding width.
+fn table_row(cells, widths) {
+    let out = ""
+    let i = 0
+    while i < len(cells) {
+        if i > 0 {
+            out = out + " | "
+        }
+        let cell = str(cells[i])
+        let w = widths[i]
+        if len(cell) > w {
+            cell = substring(cell, 0, w)
+        }
+        out = out + pad_right(cell, w, " ")
+        i = i + 1
+    }
+    return out
+}
+
+# A horizontal rule of `width` dashes, matching the table_row layout.
+fn table_rule(widths) {
+    let out = ""
+    let i = 0
+    while i < len(widths) {
+        if i > 0 {
+            out = out + "-+-"
+        }
+        out = out + repeat("-", widths[i])
+        i = i + 1
+    }
+    return out
+}

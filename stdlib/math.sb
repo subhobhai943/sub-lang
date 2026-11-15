@@ -189,3 +189,56 @@ fn round_to(x: float, places: int): float {
     }
     return round(x * scale) / scale
 }
+
+# ---------- float variants ----------
+
+fn sign_float(x: float): int {
+    if x > 0.0 {
+        return 1
+    }
+    if x < 0.0 {
+        return 0 - 1
+    }
+    return 0
+}
+
+fn clamp_float(x: float, lo: float, hi: float): float {
+    if x < lo {
+        return lo
+    }
+    if x > hi {
+        return hi
+    }
+    return x
+}
+
+# Named modulo — the operator form `a % b` is preferred in source, but this
+# is handy when passing the operation as a value.
+fn modulo(a: int, b: int): int {
+    return a % b
+}
+
+# Cube root via Newton's method. Works for negative inputs.
+fn cbrt(x: float): float {
+    if x == 0.0 {
+        return 0.0
+    }
+    let neg = x < 0.0
+    let v = x
+    if neg {
+        v = 0.0 - x
+    }
+    let guess = v / 3.0
+    if guess == 0.0 {
+        guess = 1.0
+    }
+    let i = 0
+    while i < 40 {
+        guess = (2.0 * guess + v / (guess * guess)) / 3.0
+        i = i + 1
+    }
+    if neg {
+        return 0.0 - guess
+    }
+    return guess
+}

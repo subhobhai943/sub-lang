@@ -77,7 +77,7 @@
 
 - **A compiler, not a wrapper**: on x86-64 Linux `subc` goes from `.sb` straight to machine code in one process. Nothing is shelled out to, so the machine that compiles a SUB program needs no toolchain beyond `subc` itself.
 - **Dynamic & Static Flexibility**: SUB is dynamically typed, but a shared inference pass gives every function a concrete signature when targeting a statically typed language - so `fn add(a, b)` becomes `long add(long, long)` in C and `fn add(a: i64, b: i64) -> i64` in Rust without annotations.
-- **Standard Library**: four modules — `math`, `arrays`, `strings`, `io` — written in SUB and verified through every backend, loaded with `import`.
+- **Standard Library**: nine modules — `math`, `arrays`, `strings`, `io`, `path`, `format`, `testing`, `encoding`, `collections` — written in SUB and verified through every backend, loaded with `import`.
 - **Cross-Platform UI Tree**: First-class declarative syntax for UI windows, labels, buttons, and inputs.
 
 ---
@@ -559,8 +559,8 @@ is what holds them to it.
 
 ## Standard Library
 
-Four modules, written in SUB, in `stdlib/`. Every function in them produces
-identical output through all ten backends — the conformance suite checks the
+Nine modules, written in SUB, in `stdlib/`. Every function in them produces
+identical output through all the backends — the conformance suite checks the
 library the same way it checks the language.
 
 ```coffee
@@ -568,6 +568,8 @@ import "math"
 import "arrays"
 import "strings"
 import "io"
+import "path"
+import "format"
 
 heading("primes")
 let primes = []
@@ -581,18 +583,24 @@ println(primes)
 let scores = [72, 91, 68, 91, 55, 83]
 println(sorted_int(scores))
 println(pad_left(str(max_int(scores)), 5, " "))
+println(path_join(["build", "output", "bin"]))
 ok("done")
 ```
 
 | Module | What it has |
 |---|---|
-| `math` | `PI`, `E`, `TAU`, `gcd`, `lcm`, `factorial`, `fib`, `is_prime`, `ipow`, `clamp`, `sign`, `hypot`, `close_to`, `round_to` |
+| `math` | `PI`, `E`, `TAU`, `gcd`, `lcm`, `factorial`, `fib`, `is_prime`, `ipow`, `clamp`, `sign`, `hypot`, `close_to`, `round_to`, `sign_float`, `clamp_float`, `modulo`, `cbrt` |
 | `arrays` | `sum_int`/`sum_float`, `min_*`/`max_*`, `mean_float`, `index_of_int`, `sorted_int`, `unique_int`, `reverse_int`, `slice_int`, `concat_int` |
-| `strings` | `repeat`, `pad_left`, `pad_right`, `center`, `eq_ignore_case`, `is_empty`, `is_blank` |
-| `io` | ANSI colour, `info`/`ok`/`warn`/`fail`, `heading`, `row`, `rule` |
+| `strings` | `repeat`, `pad_left`, `pad_right`, `center`, `eq_ignore_case`, `is_empty`, `is_blank`, `is_alpha`, `is_digit`, `is_numeric`, `snake_case`, `camel_case`, `slugify`, `escape_html`, `indent` |
+| `io` | ANSI colour, `info`/`ok`/`warn`/`fail`, `heading`, `row`, `rule`, `progress`, `plain` |
+| `path` | `path_join`, `dirname`, `basename`, `extension`, `stem`, `is_absolute`, `normalize` |
+| `format` | `fmt`, `pad_number`, `repeat_char`, `table_row`, `table_rule` |
+| `testing` | `assert`, `assert_eq`, `assert_ne`, `assert_true`, `assert_false`, `test`, `summary` |
+| `encoding` | `hex_encode`, `hex_decode`, `url_encode` |
+| `collections` | `set_union`, `set_intersection`, `set_difference`, `set_has`, `peek`, `peek_front` |
 
-`examples/stdlib_tour.sb` exercises all four; `stdlib/README.md` documents
-every function, and is candid about what is missing and why.
+`examples/stdlib_tour.sb` exercises the core modules; `stdlib/README.md`
+documents every function, and is candid about what is missing and why.
 
 ### import
 

@@ -76,3 +76,65 @@ fn heading(title: string): void {
     println(bold(title))
     println(repeat("-", len(title)))
 }
+
+# ---------- progress ----------
+
+# A text progress bar: `[=========>        ] 45/100`
+# `width` is the total bar width in characters (not counting the label).
+fn progress(current: int, total: int, width: int): string {
+    if total <= 0 {
+        return ""
+    }
+    let filled = current * width / total
+    if filled > width {
+        filled = width
+    }
+    if filled < 0 {
+        filled = 0
+    }
+    let bar = ""
+    let i = 0
+    while i < filled {
+        bar = bar + "="
+        i = i + 1
+    }
+    if filled < width {
+        bar = bar + ">"
+        let j = filled + 1
+        while j < width {
+            bar = bar + " "
+            j = j + 1
+        }
+    }
+    return "[" + bar + "] " + str(current) + "/" + str(total)
+}
+
+# ---------- plain output ----------
+
+# Strip ANSI escape sequences from `s`, producing plain text suitable for
+# piping to a file or another program.
+fn plain(s: string): string {
+    let out = ""
+    let i = 0
+    while i < len(s) {
+        let c = char_at(s, i)
+        if c == "\x1b" {
+            if i + 1 < len(s) && char_at(s, i + 1) == "[" {
+                i = i + 2
+                while i < len(s) {
+                    let k = char_at(s, i)
+                    i = i + 1
+                    if (k >= "A" && k <= "Z") || (k >= "a" && k <= "z") {
+                        break
+                    }
+                }
+            } else {
+                i = i + 1
+            }
+        } else {
+            out = out + c
+            i = i + 1
+        }
+    }
+    return out
+}
