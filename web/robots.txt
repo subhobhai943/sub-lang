@@ -1,3 +1,3 @@
 User-agent: *
 Allow: /
-Sitemap: https://subhobhai943.github.io/sub-lang/sitemap.xml
+Sitemap: https://lang.subhobhai943.xyz/sitemap.xml
