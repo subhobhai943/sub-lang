@@ -5,10 +5,15 @@ import "math"
 import "arrays"
 import "strings"
 import "io"
+import "path"
+import "format"
+import "testing"
+import "encoding"
+import "collections"
 ```
 
-Four modules, written in SUB. Every function here produces identical output
-through all ten backends and the interpreter — `tests/conformance/19_stdlib.sb`
+Nine modules, written in SUB. Every function here produces identical output
+through all the backends and the interpreter — `tests/conformance/19_stdlib.sb`
 and `20_stdlib_tour.sb` check exactly that on every push, the same way the
 language itself is checked.
 
@@ -65,6 +70,9 @@ import "math"
 | `deg_to_rad(d)`, `rad_to_deg(r)` | angle conversion |
 | `close_to(a, b, tol)` | compare floats without `==` |
 | `round_to(x, places)` | round to a number of decimal places |
+| `sign_float(x)`, `clamp_float(x, lo, hi)` | float variants of `sign`/`clamp` |
+| `modulo(a, b)` | named modulo; `a % b` is preferred |
+| `cbrt(x)` | cube root; works for negative inputs |
 
 No trigonometry or logarithms: there are no `sin`/`log`/`exp` builtins to build
 them on, and a series expansion in SUB would risk producing a different last
@@ -123,6 +131,14 @@ import "strings"
 | `words(s)` | space-separated words, empties dropped |
 | `lines(s)` | split on newlines |
 | `replace_first(s, old, new)` | only the first occurrence |
+| `is_alpha(s)`, `is_digit(s)` | character classes |
+| `is_numeric(s)` | digits, dots and a leading minus |
+| `snake_case(s)`, `camel_case(s)` | case conversion |
+| `slugify(s)` | URL/file-safe slug |
+| `escape_html(s)` | `&amp;`, `&lt;`, `&gt;`, quotes |
+| `indent(s, n)` | indent every line |
+| `is_palindrome(s)` | reads the same backwards |
+| `common_prefix(a, b)`, `common_suffix(a, b)` | longest shared edges |
 
 This module used to stop at the padding functions. SUB's character-level
 builtins — `substring`, `char_at`, `contains`, `replace`, `split`, `join` —
@@ -144,10 +160,84 @@ import "io"
 | `heading(title)` | title with a rule under it |
 | `row(cells, width)` | one aligned table row |
 | `rule(columns, width)` | a rule the width of such a table |
+| `progress(current, total, width)` | text progress bar |
+| `plain(s)` | strip ANSI escape sequences |
 
 Printing itself is a builtin (`print`, `println`); this is the layer above.
 The colours are ANSI escapes — a terminal renders them, a pipe gets the bytes,
-so write plain output when something else will read it.
+so `plain(s)` strips them when something else will read the output.
+
+## path
+
+```coffee
+import "path"
+```
+
+| | |
+|---|---|
+| `path_join(parts)` | join with `/`, empty segments skipped |
+| `dirname(p)` | everything before the last `/` |
+| `basename(p)` | everything after the last `/` |
+| `extension(p)` | the extension including the dot |
+| `stem(p)` | the file name without its extension |
+| `is_absolute(p)` | starts with `/` |
+| `normalize(p)` | collapse `//`, drop `/./` and trailing slashes |
+
+## format
+
+```coffee
+import "format"
+```
+
+| | |
+|---|---|
+| `fmt(template, values)` | replace `{0}`, `{1}`, ... with `values[0]`, ... |
+| `pad_number(n, width)` | zero-pad an integer to a width |
+| `repeat_char(ch, n)` | a character repeated n times |
+| `table_row(cells, widths)` | one table row with per-column widths |
+| `table_rule(widths)` | a horizontal rule matching `table_row` |
+
+## testing
+
+```coffee
+import "testing"
+```
+
+| | |
+|---|---|
+| `assert(condition, msg)` | abort if falsy |
+| `assert_eq(a, b, msg)` | abort if `a != b` |
+| `assert_ne(a, b, msg)` | abort if `a == b` |
+| `assert_true(val, msg)`, `assert_false(val, msg)` | boolean asserts |
+| `test(name)` | print a test header |
+| `summary()` | print the pass/fail tally |
+
+A program that imports this module is its own test suite. An assertion failure
+aborts the program, so the exit code is the verdict — no external runner needed.
+
+## encoding
+
+```coffee
+import "encoding"
+```
+
+| | |
+|---|---|
+| `hex_encode(bytes)` | array of byte values → hex string |
+| `hex_decode(s)` | hex string → array of byte values |
+| `url_encode(s)` | percent-encode for a URL |
+
+## collections
+
+```coffee
+import "collections"
+```
+
+| | |
+|---|---|
+| `set_union(a, b)`, `set_intersection(a, b)` | set algebra on arrays |
+| `set_difference(a, b)`, `set_has(s, item)` | difference and membership |
+| `peek(arr)`, `peek_front(arr)` | look without removing |
 
 ---
 
@@ -162,6 +252,12 @@ each is why some obvious function is missing:
   no `file` or `system` module. The versions that used to sit here called
   `open()` and `exec()`, which have never existed.
 - **No higher-order functions**, so no `map`/`filter`/`reduce`.
+- **No object key iteration.** SUB cannot list the keys of an object —
+  `for k in obj` is a runtime error — so `collections` offers set algebra
+  and stack/queue helpers only, with no `keys`/`values`/`merge`.
+- **No char-from-code builtin**, so `encoding` offers `url_encode` but not
+  `url_decode`: a percent escape cannot be turned back into its character
+  in pure SUB.
 
 ## Writing your own module
 

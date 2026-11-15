@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Security Policy — SUB Language</title>
+<meta name="description" content="SUB Language security policy: how to report vulnerabilities, supported versions, and responsible disclosure.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/docs.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="./">
+      <img src="assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
+      <span>SUB</span>
+    </a>
+    <nav class="site-nav" id="siteNav">
+      <a href="docs/getting-started.html">Docs</a>
+      <a href="docs/stdlib.html">Stdlib</a>
+      <a href="examples/">Examples</a>
+      <a href="./#download">Download</a>
+      <a href="community/">Community</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar" id="docsSidebar">
+    <div class="docs-sidebar-inner">
+      <h4>Documentation</h4>
+      <a href="docs/getting-started.html">Getting Started</a>
+      <a href="docs/language-reference.html">Language Reference</a>
+      <a href="docs/stdlib.html">Standard Library</a>
+      <a href="docs/installation.html">Installation</a>
+      <h4>Advanced</h4>
+      <a href="docs/transpilation.html">Transpilation</a>
+      <a href="docs/native-compilation.html">Native Compilation</a>
+      <h4>More</h4>
+      <a href="examples/">Examples</a>
+      <a href="community/">Community</a>
+      <a href="community/roadmap.html">Roadmap</a>
+      <a href="changelog.html">Changelog</a>
+    </div>
+  </aside>
+
+  <main class="docs-content prose" id="content">
+    <button class="sidebar-toggle" id="sidebarToggle">Menu</button>
+    <nav class="breadcrumbs">
+      <a href="./">Home</a><span class="sep">/</span><span>Security</span>
+    </nav>
+
+    <h1>Security Policy</h1>
+    <p>The SUB project takes security seriously. This document describes how to report vulnerabilities and which versions receive security updates.</p>
+
+    <h2>Reporting a Vulnerability</h2>
+    <p><strong>Do not open a public GitHub issue for security vulnerabilities.</strong></p>
+    <p>If you discover a security vulnerability in SUB, please report it responsibly:</p>
+    <ol>
+      <li><strong>Email</strong> the project maintainer directly via <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">GitHub</a>.</li>
+      <li>Include a description of the vulnerability, steps to reproduce, and the affected version(s).</li>
+      <li>If possible, include a proof-of-concept or minimal reproducing example.</li>
+    </ol>
+
+    <div class="callout callout-warn">
+      <p><strong>Important:</strong> Please allow reasonable time for the vulnerability to be addressed before disclosing it publicly. We aim to acknowledge reports within 48 hours and provide a fix within 30 days for critical issues.</p>
+    </div>
+
+    <h2>What to Report</h2>
+    <p>The following are considered security vulnerabilities:</p>
+    <ul>
+      <li>Buffer overflows or memory corruption in <code>subc</code> or <code>subi</code></li>
+      <li>Arbitrary code execution through crafted <code>.sb</code> files</li>
+      <li>Path traversal in file operations</li>
+      <li>Command injection through builtins (e.g., <code>net_fetch</code>, <code>net_post</code>)</li>
+      <li>Denial of service through resource exhaustion (infinite loops in stdlib, unbounded allocation)</li>
+      <li>Supply chain attacks (compromised build artifacts, tampered releases)</li>
+    </ul>
+
+    <h3>Out of Scope</h3>
+    <p>The following are <strong>not</strong> considered security vulnerabilities:</p>
+    <ul>
+      <li>Bugs in transpiled output that don't affect the SUB toolchain itself</li>
+      <li>Denial of service from intentionally malicious SUB programs (the interpreter/compiler is not a sandbox)</li>
+      <li>Theoretical vulnerabilities without a proof of concept</li>
+    </ul>
+
+    <h2>Supported Versions</h2>
+    <p>Security patches are provided for the following versions:</p>
+    <table>
+      <tr><th>Version</th><th>Status</th><th>Security fixes</th></tr>
+      <tr><td>v1.0.11</td><td><span class="status status-done">Current</span></td><td>✓ Full support</td></tr>
+      <tr><td>v1.0.10</td><td><span class="status status-done">Supported</span></td><td>✓ Critical fixes only</td></tr>
+      <tr><td>v1.0.9</td><td><span class="status status-progress">Maintenance</span></td><td>✓ Critical fixes only</td></tr>
+      <tr><td>≤ v1.0.8</td><td><span class="status status-planned">EOL</span></td><td>✗ No longer supported</td></tr>
+    </table>
+
+    <div class="callout callout-info">
+      <p><strong>Recommendation:</strong> Always use the latest release. Security fixes are included in every patch release and are not backported to EOL versions.</p>
+    </div>
+
+    <h2>Verification</h2>
+    <p>All release artifacts are signed and checksummed. To verify your download:</p>
+    <pre><code># Download the checksums file
+wget https://github.com/subhobhai943/sub-lang/releases/latest/download/checksums-sha256.txt
+
+# Verify
+sha256sum -c checksums-sha256.txt --ignore-missing</code></pre>
+    <p>If you suspect a release has been tampered with, report it immediately as a security vulnerability.</p>
+
+    <h2>Disclosure Policy</h2>
+    <p>We follow a coordinated disclosure process:</p>
+    <ol>
+      <li><strong>Report received</strong> — acknowledged within 48 hours</li>
+      <li><strong>Investigation</strong> — we confirm the vulnerability and assess severity</li>
+      <li><strong>Fix developed</strong> — a patch is prepared and tested</li>
+      <li><strong>Release</strong> — the fix is published in a new release</li>
+      <li><strong>Disclosure</strong> — the vulnerability is publicly disclosed with credit to the reporter (unless they prefer anonymity)</li>
+    </ol>
+
+    <div class="callout callout-tip">
+      <p><strong>Thank you:</strong> We greatly appreciate responsible disclosure. Reporters will be credited in the release notes (with permission) and added to a security hall of fame.</p>
+    </div>
+
+    <h2>Contact</h2>
+    <p>For security inquiries, contact the maintainer via <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">GitHub</a>. For non-security questions, use <a href="https://github.com/subhobhai943/sub-lang/discussions" target="_blank" rel="noopener">GitHub Discussions</a> or open a regular issue.</p>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
+      <div>
+        <strong>SUB Language</strong>
+        <span>Simple Universal Builder · <span id="footerVersion">v1.0.11</span> · MIT License</span>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="community/">Contributing</a></li>
+      <li><a href="security.html">Security</a></li>
+    </ul>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+  </div>
+</footer>
+<script src="assets/highlight.js"></script>
+<script src="assets/dl.js"></script>
+<script src="assets/main.js"></script>
+<script>document.getElementById('sidebarToggle').onclick=function(){document.getElementById('docsSidebar').classList.toggle('open')}</script>
+</body>
+</html>

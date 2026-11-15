@@ -1893,6 +1893,8 @@ ASTNode* parser_parse(Token *tokens, int token_count) {
 
     if (state.had_error) {
         fprintf(stderr, "Parser completed with errors\n");
+        parser_free_ast(root);
+        return NULL;
     }
 
     return root;

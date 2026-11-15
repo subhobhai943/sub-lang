@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Changelog — SUB Language</title>
+<meta name="description" content="Release notes for SUB Language. See docs/RELEASE_NOTES.md in the repository for the full, authoritative notes.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/docs.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="./">
+      <img src="assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
+      <span>SUB</span>
+    </a>
+    <nav class="site-nav" id="siteNav">
+      <a href="docs/getting-started.html">Docs</a>
+      <a href="docs/stdlib.html">Stdlib</a>
+      <a href="examples/">Examples</a>
+      <a href="./#download">Download</a>
+      <a href="community/">Community</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar" id="docsSidebar">
+    <div class="docs-sidebar-inner">
+      <h4>Documentation</h4>
+      <a href="docs/getting-started.html">Getting Started</a>
+      <a href="docs/language-reference.html">Language Reference</a>
+      <a href="docs/stdlib.html">Standard Library</a>
+      <a href="docs/installation.html">Installation</a>
+      <h4>Advanced</h4>
+      <a href="docs/transpilation.html">Transpilation</a>
+      <a href="docs/native-compilation.html">Native Compilation</a>
+      <h4>More</h4>
+      <a href="examples/">Examples</a>
+      <a href="community/">Community</a>
+      <a href="community/roadmap.html">Roadmap</a>
+      <a href="changelog.html" class="active">Changelog</a>
+    </div>
+  </aside>
+
+  <main class="docs-content prose" id="content">
+    <button class="sidebar-toggle" id="sidebarToggle">Menu</button>
+    <nav class="breadcrumbs">
+      <a href="./">Home</a><span class="sep">/</span><span>Changelog</span>
+    </nav>
+
+    <h1>Changelog</h1>
+    <p>Release notes for SUB. This page mirrors <code>docs/RELEASE_NOTES.md</code> in the repository — that file is the authoritative source. Each release includes all three tools: <code>subi</code> (interpreter), <code>subc</code> (native compiler), and <code>sub</code> (transpiler).</p>
+
+    <!-- Unreleased -->
+    <div class="changelog-entry">
+      <span class="changelog-version">Unreleased</span>
+
+      <h3>Added</h3>
+      <ul>
+        <li>New stdlib modules: <code>path</code> (path_join, dirname, basename, extension, stem, is_absolute, normalize), <code>format</code> (fmt, pad_number, repeat_char, table_row, table_rule), <code>testing</code> (assert, assert_eq, assert_ne, assert_true, assert_false, test, summary), <code>encoding</code> (hex_encode, hex_decode, url_encode), <code>collections</code> (set_union, set_intersection, set_difference, set_has, peek, peek_front)</li>
+        <li><code>math</code>: <code>sign_float</code>, <code>clamp_float</code>, <code>modulo</code>, <code>cbrt</code></li>
+        <li><code>strings</code>: <code>is_alpha</code>, <code>is_digit</code>, <code>is_numeric</code>, <code>snake_case</code>, <code>camel_case</code>, <code>slugify</code>, <code>escape_html</code>, <code>indent</code>, <code>is_palindrome</code>, <code>common_prefix</code>, <code>common_suffix</code></li>
+        <li><code>io</code>: <code>progress</code>, <code>plain</code></li>
+      </ul>
+
+      <h3>Fixed</h3>
+      <ul>
+        <li>Parser now returns NULL on syntax errors; <code>sub</code>/<code>subc</code>/<code>subi</code> abort with a non-zero exit instead of generating output</li>
+        <li><code>append()</code> is now recognized by semantic analysis (an undocumented alias for <code>push()</code>)</li>
+      </ul>
+    </div>
+
+    <!-- v1.0.11 -->
+    <div class="changelog-entry">
+      <span class="changelog-version">v1.0.11</span>
+
+      <p>Fixes the Windows regression-test failures (the C backend and the net checks disagreed with Windows' C type model).</p>
+
+      <h3>C backend on LLP64</h3>
+      <p>Windows' C compiler is LLP64: <code>long</code> is 32-bit there, while Linux and macOS are LP64 where <code>long</code> is 64-bit. The C backend used <code>long</code> everywhere, so <code>subc --via-c</code> silently truncated 64-bit integers on Windows. The emitted C now uses <code>long long</code> for every SUB integer, which is 64-bit on all three platforms.</p>
+
+      <h3>Networking checks on Windows</h3>
+      <p><code>net_fetch</code>/<code>net_post</code> are POSIX-socket builtins; the Windows build compiles them to the documented runtime-error stub. The test suite now asserts the stub's behaviour on Windows (and skips, with a reason, the loopback flow the hosted macOS runners' firewall blocks) instead of failing checks that were never meant to run there.</p>
+    </div>
+
+    <!-- v1.0.10 -->
+    <div class="changelog-entry">
+      <span class="changelog-version">v1.0.10</span>
+
+      <p>FreeBSD is now a first-class release platform.</p>
+      <ul>
+        <li><strong>pkg(8) package</strong> (<code>installer/bsd/build-txz.sh</code>): <code>sub-lang-&lt;version&gt;-amd64.pkg</code>, installed with <code>sudo pkg install ./sub-lang-*-amd64.pkg</code>. Native manifest with file digests, tools in <code>/usr/local/bin</code>, stdlib in <code>/usr/local/lib/sub/stdlib</code> where import looks for it, and man pages.</li>
+        <li>The release workflow builds it on a real FreeBSD 14 VM (vmactions) with base clang (<code>gmake CC=cc</code>), and verifies the package layout after packing.</li>
+        <li><code>subc</code> on FreeBSD compiles through the C backend (<code>subc --via-c</code>); the direct machine-code emitter is x86-64 Linux ELF only. <code>subi</code> and <code>sub</code> work everywhere.</li>
+        <li>The universal <code>installer/install.sh</code> now detects FreeBSD and pulls the <code>sub-freebsd-x86_64</code> archive from the latest release.</li>
+      </ul>
+    </div>
+
+    <!-- v1.0.9 -->
+    <div class="changelog-entry">
+      <span class="changelog-version">v1.0.9</span>
+
+      <p>Installers. Every supported platform now has a package that installs the toolchain properly instead of an archive to unpack by hand, and each one is built, inspected and installed by CI on every push.</p>
+
+      <h3>Windows</h3>
+      <p>The <code>.msi</code> carries the project's own artwork: the dragon on the welcome and finish pages, the logo in the banner across every other page. <code>.sb</code> files get an icon — the association pointed at <code>subi.exe</code> for its icon, and MinGW links the executables with no resource section, so Explorer drew the blank generic document. The installer now ships <code>sub-lang.ico</code> and points the association at that.</p>
+
+      <h3>Linux Packages &amp; Formats</h3>
+      <ul>
+        <li><strong>.deb</strong> for Debian, Ubuntu, Mint and derivatives, on x86-64 and arm64.</li>
+        <li><strong>.rpm</strong> for Fedora, RHEL, CentOS Stream, openSUSE and derivatives, on x86-64 and aarch64, with the matching .src.rpm.</li>
+        <li><strong>Arch Linux PKGBUILD</strong> (<code>installer/arch/PKGBUILD</code>) — build with <code>makepkg -si</code>.</li>
+        <li><strong>Alpine Linux APKBUILD</strong> (<code>installer/alpine/APKBUILD</code>) — build with <code>abuild -r</code>.</li>
+        <li><strong>AppImage</strong> (<code>installer/appimage/build-appimage.sh</code>) — standalone universal Linux binary.</li>
+        <li><strong>Universal Shell Installer</strong> (<code>installer/install.sh</code>):
+          <div class="code-block"><pre class="code-body"><code class="lang-sh">curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh</code></pre></div>
+        </li>
+      </ul>
+      <p>All Linux packages install <code>sub</code>, <code>subc</code> and <code>subi</code>, the standard library, man pages for all three tools, and desktop entry and MIME types with logos so <code>.sb</code> files show the SUB icon in file managers and offer the interpreter to open them.</p>
+      <p><strong>The .deb was installing into <code>/usr/local</code></strong>, which Debian policy reserves for the local administrator. It installs into <code>/usr</code> now, with stripped binaries and clean lintian validation.</p>
+
+      <h3>macOS</h3>
+      <p>A <code>.pkg</code> installer, with the welcome page, licence agreement and summary that productbuild gives you, over the project's artwork. It installs into <code>/usr/local</code>, which is on the default <code>PATH</code>. It declares itself Apple Silicon only, so an Intel Mac refuses it with an explanation rather than installing three programs that cannot run.</p>
+
+      <h3>One recipe for the file layout</h3>
+      <p><code>make install</code> is now what every Unix package is built from — the <code>.deb</code>, the <code>.rpm</code> and the <code>.pkg</code> all stage through it. New targets: <code>make install-tools</code>, <code>install-doc</code> and <code>install-desktop</code> for the three parts separately, and <code>PREFIX</code>, <code>BINDIR</code>, <code>LIBDIR</code>, <code>DATADIR</code>, <code>MANDIR</code>, <code>DOCDIR</code> and <code>ICONDIR</code> to place them.</p>
+
+      <h3>Packaging is tested now</h3>
+      <p>A reusable workflow builds the <code>.deb</code> and the <code>.rpm</code> on both architectures on every push. It runs lintian at error and warning level, then installs the <code>.deb</code> for real, runs a program that imports from the standard library from outside the source tree, transpiles and compiles it, checks the manual pages and icons arrived, removes the package and checks nothing was left behind. The macOS job installs the <code>.pkg</code> with <code>installer -pkg</code> and does the same.</p>
+      <p>Everything the installers draw is generated from the logo in the README by <code>installer/assets/make-assets.py</code>, so the artwork cannot drift.</p>
+
+      <h3>Also</h3>
+      <ul>
+        <li>The MIT licence text shipped in every release said <strong>AUTHORDRS</strong>. Fixed in <code>LICENSE</code> and in the copy the Windows installer shows.</li>
+        <li><code>sub</code>, <code>subc</code> and <code>subi</code> are clean under AddressSanitizer and UndefinedBehaviorSanitizer across the whole conformance suite and every example.</li>
+      </ul>
+    </div>
+
+    <!-- v1.0.8 -->
+    <div class="changelog-entry">
+      <span class="changelog-version">v1.0.8</span>
+
+      <p>The stable release of the v1.0.8 line. Most of the work since the betas is in making one SUB program mean the same thing however you run it.</p>
+
+      <h3>subc compiles to machine code itself</h3>
+      <p>On x86-64 Linux <code>subc</code> no longer needs a C compiler. It encodes x86-64 instructions, emits its own runtime and writes a static ELF64 executable, in one process — no assembler, no linker, no libc. <code>examples/fibonacci.sb</code> becomes a 3.6 KB static binary instead of a 16 KB dynamically linked one.</p>
+      <p>Programs using something the machine-code backend does not implement yet (objects, classes, <code>input()</code>, string slicing, <code>try</code>/<code>catch</code>, <code>switch</code>, <code>do</code>/<code>while</code>) still build through the C backend, and <code>subc</code> names the construct that forced the fallback. <code>--native</code> refuses to fall back; <code>--via-c</code> forces the old path.</p>
+
+      <h3>Arrays work everywhere</h3>
+      <p>Literals, indexing, indexed assignment, <code>len</code>, <code>push</code>/<code>append</code>, <code>pop</code> and <code>for x in a</code> now behave the same in all eleven executed backends. Before this, arrays were broken in every one of them, each differently.</p>
+
+      <h3>One answer per question</h3>
+      <ul>
+        <li><strong>Division by zero</strong> is a runtime error with exit status 70, for integers and floats alike.</li>
+        <li><strong>Integer division</strong> truncates toward zero and <strong>float remainder</strong> follows <code>fmod</code>, everywhere.</li>
+        <li><strong>Floats print with six significant digits</strong> (printf's <code>%g</code>).</li>
+        <li><strong>Array indices</strong> count from the end when negative, and going out of range is an error rather than a silent <code>null</code>.</li>
+      </ul>
+
+      <h3>Fixed</h3>
+      <ul>
+        <li>The interpreter segfaulted on <code>let b = a</code> followed by <code>push(b, x)</code> — two bindings shared one array and both freed it.</li>
+        <li>The Windows build had never worked. <code>&lt;windows.h&gt;</code> declares a <code>TokenType</code> that collides with SUB's.</li>
+        <li><code>subc</code> refused every absolute path on Windows, because it built a shell command string and rejected the colon in a drive letter. It spawns the compiler directly now, so paths with spaces work too.</li>
+        <li>Java declared SUB's 64-bit integers as <code>int</code>, and <code>for x in &lt;collection&gt;</code> had no case at all — the loop silently ran ten times over nothing.</li>
+      </ul>
+    </div>
+
+    <h2> Older Releases</h2>
+    <p>For releases before v1.0.8, see the <a href="https://github.com/subhobhai943/sub-lang/releases" target="_blank" rel="noopener">GitHub Releases</a> page.</p>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
+      <div>
+        <strong>SUB Language</strong>
+        <span>Simple Universal Builder · <span id="footerVersion">v1.0.11</span> · MIT License</span>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="community/">Contributing</a></li>
+      <li><a href="security.html">Security</a></li>
+    </ul>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+  </div>
+</footer>
+<script src="assets/highlight.js"></script>
+<script src="assets/dl.js"></script>
+<script src="assets/main.js"></script>
+<script>document.getElementById('sidebarToggle').onclick=function(){document.getElementById('docsSidebar').classList.toggle('open')}</script>
+</body>
+</html>

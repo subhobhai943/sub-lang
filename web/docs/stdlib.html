@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Standard Library — SUB Language</title>
+<meta name="description" content="Complete reference for all 9 SUB standard library modules: math, arrays, strings, io, testing, format, path, encoding, and collections.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="../">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
+      <span>SUB</span>
+    </a>
+    <nav class="site-nav" id="siteNav">
+      <a href="../docs/getting-started.html">Docs</a>
+      <a href="../docs/stdlib.html">Stdlib</a>
+      <a href="../examples/">Examples</a>
+      <a href="../#download">Download</a>
+      <a href="../community/">Community</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar" id="docsSidebar">
+    <div class="docs-sidebar-inner">
+      <h4>Documentation</h4>
+      <a href="getting-started.html">Getting Started</a>
+      <a href="language-reference.html">Language Reference</a>
+      <a href="stdlib.html" class="active">Standard Library</a>
+      <a href="installation.html">Installation</a>
+      <h4>Advanced</h4>
+      <a href="transpilation.html">Transpilation</a>
+      <a href="native-compilation.html">Native Compilation</a>
+      <h4>More</h4>
+      <a href="../examples/">Examples</a>
+      <a href="../community/">Community</a>
+      <a href="../community/roadmap.html">Roadmap</a>
+      <a href="../changelog.html">Changelog</a>
+    </div>
+  </aside>
+
+  <main class="docs-content prose" id="content">
+    <button class="sidebar-toggle" id="sidebarToggle">Menu</button>
+    <nav class="breadcrumbs">
+      <a href="../">Home</a><span class="sep">/</span><a href="getting-started.html">Docs</a><span class="sep">/</span><span>Standard Library</span>
+    </nav>
+
+    <h1>Standard Library</h1>
+    <p>The SUB standard library ships as nine modules written in SUB itself. Import any module with <code>import</code> and call its functions by name. Every function is verified through every backend in CI.</p>
+    <pre><code class="lang-sb">import "math"
+import "arrays"
+import "strings"
+import "io"
+import "path"
+import "format"
+import "testing"
+import "encoding"
+import "collections"</code></pre>
+
+    <!-- ═══════════════ math ═══════════════ -->
+    <h2 id="math">math</h2>
+    <p>Arithmetic and floating-point helpers. Int and float variants are kept apart because the static backends infer one signature per function.</p>
+    <div class="api-fn">
+      <h3>math.PI</h3>
+      <p>The constant pi (3.141592653589793).</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.E</h3>
+      <p>Euler's number (2.718281828459045).</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.TAU</h3>
+      <p>2 * pi.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.sign(x)</h3>
+      <p>Return -1, 0 or 1 according to the sign of integer x.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.sign_float(x)</h3>
+      <p>Float variant of sign.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.clamp(x, lo, hi)</h3>
+      <p>Confine integer x to [lo, hi].</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.clamp_float(x, lo, hi)</h3>
+      <p>Float variant of clamp.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.is_even(n)</h3>
+      <p>Return true if integer n is even.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.is_odd(n)</h3>
+      <p>Return true if integer n is odd.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.gcd(a, b)</h3>
+      <p>Greatest common divisor (Euclid).</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.lcm(a, b)</h3>
+      <p>Least common multiple.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.factorial(n)</h3>
+      <p>n! for n >= 0.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.fib(n)</h3>
+      <p>The nth Fibonacci number.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.is_prime(n)</h3>
+      <p>Trial-division primality test.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.ipow(base, exp)</h3>
+      <p>Integer power via repeated squaring.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.hypot(a, b)</h3>
+      <p>Hypotenuse of a and b.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.deg_to_rad(d)</h3>
+      <p>Degrees to radians.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.rad_to_deg(r)</h3>
+      <p>Radians to degrees.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.close_to(a, b, tol)</h3>
+      <p>True if floats a and b differ by at most tol.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.round_to(x, places)</h3>
+      <p>Round x to the given number of decimal places.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.modulo(a, b)</h3>
+      <p>Named modulo; the operator form <code>a % b</code> is preferred.</p>
+    </div>
+    <div class="api-fn">
+      <h3>math.cbrt(x)</h3>
+      <p>Cube root via Newton's method; works for negative inputs.</p>
+    </div>
+    <h2 id="arrays">arrays</h2>
+    <p>Array manipulation utilities for integer arrays.</p>
+    <div class="api-fn">
+      <h3>arrays.sum_int(a)</h3>
+      <p>Sum of an integer array.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.sum_float(a)</h3>
+      <p>Sum of a float array.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.product_int(a)</h3>
+      <p>Product of an integer array.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.mean_float(a)</h3>
+      <p>Arithmetic mean of a float array (0.0 for empty).</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.min_int(a)</h3>
+      <p>Smallest integer.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.max_int(a)</h3>
+      <p>Largest integer.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.min_float(a)</h3>
+      <p>Smallest float.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.max_float(a)</h3>
+      <p>Largest float.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.index_of_int(a, want)</h3>
+      <p>Index of the first equal element, or -1.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.has_int(a, want)</h3>
+      <p>True if the array contains the value.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.count_int(a, want)</h3>
+      <p>Number of occurrences of the value.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.reverse_int(a)</h3>
+      <p>New array with the elements reversed.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.slice_int(a, start, stop)</h3>
+      <p>Sub-array over the half-open range [start, stop), clipped.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.concat_int(a, b)</h3>
+      <p>Concatenate two integer arrays.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.repeat_int(value, times)</h3>
+      <p>New array containing value repeated times.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.sorted_int(a)</h3>
+      <p>New ascending sorted copy (insertion sort).</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.unique_int(a)</h3>
+      <p>New array with duplicates removed, first-appearance order.</p>
+    </div>
+    <div class="api-fn">
+      <h3>arrays.is_sorted_int(a)</h3>
+      <p>True if the array is ascending.</p>
+    </div>
+    <h2 id="strings">strings</h2>
+    <p>String manipulation and inspection utilities.</p>
+    <div class="api-fn">
+      <h3>strings.is_empty(s)</h3>
+      <p>True if s has zero length.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.is_blank(s)</h3>
+      <p>True if s is empty or all whitespace.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.repeat(s, times)</h3>
+      <p>s written times times.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.eq_ignore_case(a, b)</h3>
+      <p>Case-insensitive equality.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.pad_left(s, width, pad)</h3>
+      <p>Pad on the left to width (never truncates).</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.pad_right(s, width, pad)</h3>
+      <p>Pad on the right to width (never truncates).</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.center(s, width, pad)</h3>
+      <p>Center s in width using pad.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.line(s, n)</h3>
+      <p>n copies of s; what a report separator wants.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.find(s, needle)</h3>
+      <p>Index of the first occurrence of needle, or -1.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.starts_with(s, prefix)</h3>
+      <p>True if s starts with prefix.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.ends_with(s, suffix)</h3>
+      <p>True if s ends with suffix.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.count_of(s, needle)</h3>
+      <p>Number of non-overlapping occurrences.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.strip_prefix(s, prefix)</h3>
+      <p>Remove a leading prefix if present.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.strip_suffix(s, suffix)</h3>
+      <p>Remove a trailing suffix if present.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.truncate(s, width, ellipsis)</h3>
+      <p>Cut s to width, ending with ellipsis if truncated.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.reverse(s)</h3>
+      <p>The string backwards.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.capitalize(s)</h3>
+      <p>First letter uppercased, rest lowercased.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.title(s)</h3>
+      <p>Every space-separated word capitalized.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.words(s)</h3>
+      <p>Words of s, empty fields dropped.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.lines(s)</h3>
+      <p>Split s on newlines.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.replace_first(s, old, repl)</h3>
+      <p>Replace only the first occurrence.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.is_alpha(s)</h3>
+      <p>True if every character is a letter.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.is_digit(s)</h3>
+      <p>True if every character is a digit.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.is_numeric(s)</h3>
+      <p>True if s looks like a number (digits, dots, minus).</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.snake_case(s)</h3>
+      <p>Convert to snake_case.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.camel_case(s)</h3>
+      <p>Convert to camelCase.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.slugify(s)</h3>
+      <p>URL/file-safe slug: lowercase, spaces to hyphens.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.escape_html(s)</h3>
+      <p>Escape &amp;, &lt;, &gt; and quotes.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.indent(s, n)</h3>
+      <p>Indent every line by n spaces.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.is_palindrome(s)</h3>
+      <p>True if s reads the same forwards and backwards.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.common_prefix(a, b)</h3>
+      <p>Longest common prefix.</p>
+    </div>
+    <div class="api-fn">
+      <h3>strings.common_suffix(a, b)</h3>
+      <p>Longest common suffix.</p>
+    </div>
+    <h2 id="io">io</h2>
+    <p>Terminal colour, labelled lines and tables. ANSI escapes render on a terminal; they are bytes in a file.</p>
+    <div class="api-fn">
+      <h3>io.red(s)</h3>
+      <p>Wrap s in red ANSI colour.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.green(s)</h3>
+      <p>Wrap s in green ANSI colour.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.yellow(s)</h3>
+      <p>Wrap s in yellow ANSI colour.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.blue(s)</h3>
+      <p>Wrap s in blue ANSI colour.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.magenta(s)</h3>
+      <p>Wrap s in magenta ANSI colour.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.cyan(s)</h3>
+      <p>Wrap s in cyan ANSI colour.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.bold(s)</h3>
+      <p>Wrap s in bold ANSI style.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.dim(s)</h3>
+      <p>Wrap s in dim ANSI style.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.info(message)</h3>
+      <p>Print an info-labelled line.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.ok(message)</h3>
+      <p>Print an ok-labelled line.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.warn(message)</h3>
+      <p>Print a warn-labelled line.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.fail(message)</h3>
+      <p>Print a fail-labelled line.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.row(cells, width)</h3>
+      <p>One row of a table; each cell padded to width.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.rule(columns, width)</h3>
+      <p>A rule the width of a table.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.heading(title)</h3>
+      <p>Print a bold title and a rule under it.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.progress(current, total, width)</h3>
+      <p>Text progress bar for current/total.</p>
+    </div>
+    <div class="api-fn">
+      <h3>io.plain(s)</h3>
+      <p>Strip ANSI escape sequences.</p>
+    </div>
+    <h2 id="path">path</h2>
+    <p>Path manipulation with pure string operations.</p>
+    <div class="api-fn">
+      <h3>path.path_join(parts)</h3>
+      <p>Join path segments with "/", skipping empty segments.</p>
+    </div>
+    <div class="api-fn">
+      <h3>path.dirname(p)</h3>
+      <p>Everything before the last "/" ("." if none).</p>
+    </div>
+    <div class="api-fn">
+      <h3>path.basename(p)</h3>
+      <p>Everything after the last "/".</p>
+    </div>
+    <div class="api-fn">
+      <h3>path.extension(p)</h3>
+      <p>The file extension including the dot.</p>
+    </div>
+    <div class="api-fn">
+      <h3>path.stem(p)</h3>
+      <p>The file name without its extension.</p>
+    </div>
+    <div class="api-fn">
+      <h3>path.is_absolute(p)</h3>
+      <p>True if p starts with "/".</p>
+    </div>
+    <div class="api-fn">
+      <h3>path.normalize(p)</h3>
+      <p>Collapse //, drop /./ and trailing slashes.</p>
+    </div>
+    <h2 id="format">format</h2>
+    <p>String formatting helpers.</p>
+    <div class="api-fn">
+      <h3>format.fmt(template, values)</h3>
+      <p>Replace {0}, {1}, ... in template with values.</p>
+    </div>
+    <div class="api-fn">
+      <h3>format.pad_number(n, width)</h3>
+      <p>Zero-pad an integer to width characters.</p>
+    </div>
+    <div class="api-fn">
+      <h3>format.repeat_char(ch, n)</h3>
+      <p>Character repeated n times.</p>
+    </div>
+    <div class="api-fn">
+      <h3>format.table_row(cells, widths)</h3>
+      <p>Format a single table row with column widths.</p>
+    </div>
+    <div class="api-fn">
+      <h3>format.table_rule(widths)</h3>
+      <p>A horizontal rule for table_row's columns.</p>
+    </div>
+    <h2 id="testing">testing</h2>
+    <p>Self-checking programs; an assertion failure aborts through every backend.</p>
+    <div class="api-fn">
+      <h3>testing.assert(condition, msg)</h3>
+      <p>Abort if condition is false.</p>
+    </div>
+    <div class="api-fn">
+      <h3>testing.assert_eq(a, b, msg)</h3>
+      <p>Abort if a != b.</p>
+    </div>
+    <div class="api-fn">
+      <h3>testing.assert_ne(a, b, msg)</h3>
+      <p>Abort if a == b.</p>
+    </div>
+    <div class="api-fn">
+      <h3>testing.assert_true(val, msg)</h3>
+      <p>Abort if val is falsy.</p>
+    </div>
+    <div class="api-fn">
+      <h3>testing.assert_false(val, msg)</h3>
+      <p>Abort if val is truthy.</p>
+    </div>
+    <div class="api-fn">
+      <h3>testing.test(name)</h3>
+      <p>Print a test header.</p>
+    </div>
+    <div class="api-fn">
+      <h3>testing.summary()</h3>
+      <p>Print the pass/fail tally.</p>
+    </div>
+    <h2 id="encoding">encoding</h2>
+    <p>Encoding and decoding helpers.</p>
+    <div class="api-fn">
+      <h3>encoding.hex_encode(bytes)</h3>
+      <p>Array of byte values to a hex string.</p>
+    </div>
+    <div class="api-fn">
+      <h3>encoding.hex_decode(s)</h3>
+      <p>Hex string to an array of byte values.</p>
+    </div>
+    <div class="api-fn">
+      <h3>encoding.url_encode(s)</h3>
+      <p>Percent-encode a string for use in a URL.</p>
+    </div>
+    <h2 id="collections">collections</h2>
+    <p>Set operations and object helpers.</p>
+    <div class="api-fn">
+      <h3>collections.set_union(a, b)</h3>
+      <p>Elements in either array, deduplicated.</p>
+    </div>
+    <div class="api-fn">
+      <h3>collections.set_intersection(a, b)</h3>
+      <p>Elements in both arrays.</p>
+    </div>
+    <div class="api-fn">
+      <h3>collections.set_difference(a, b)</h3>
+      <p>Elements in a but not in b.</p>
+    </div>
+    <div class="api-fn">
+      <h3>collections.set_has(s, item)</h3>
+      <p>True if item is in the set.</p>
+    </div>
+    <div class="api-fn">
+      <h3>collections.peek(arr)</h3>
+      <p>Last element without popping it (null if empty).</p>
+    </div>
+    <div class="api-fn">
+      <h3>collections.peek_front(arr)</h3>
+      <p>First element without removing it (null if empty).</p>
+    </div>
+
+    <h2>Next Steps</h2>
+    <ul>
+      <li><a href="language-reference.html">Language Reference</a> — core syntax and builtins</li>
+      <li><a href="../examples/index.html">Examples</a> — real programs using the stdlib</li>
+    </ul>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
+      <div>
+        <strong>SUB Language</strong>
+        <span>Simple Universal Builder · <span id="footerVersion">v1.0.11</span> · MIT License</span>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="../community/">Contributing</a></li>
+      <li><a href="../security.html">Security</a></li>
+    </ul>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+  </div>
+</footer>
+<script src="../assets/highlight.js"></script>
+<script src="../assets/dl.js"></script>
+<script src="../assets/main.js"></script>
+<script>document.getElementById('sidebarToggle').onclick=function(){document.getElementById('docsSidebar').classList.toggle('open')}</script>
+</body>
+</html>

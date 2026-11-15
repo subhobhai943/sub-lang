@@ -201,3 +201,202 @@ fn replace_first(s: string, old: string, repl: string): string {
     }
     return substring(s, 0, at) + repl + substring(s, at + len(old), len(s))
 }
+
+# ---------- character class tests ----------
+
+let _alpha = "abcdefghijklmnopqrstuvwxyz"
+let _digits = "0123456789"
+
+# True when every character is a letter (a-z, A-Z). Empty string is false.
+fn is_alpha(s: string): bool {
+    if len(s) == 0 {
+        return false
+    }
+    let low = lower(s)
+    let i = 0
+    while i < len(s) {
+        let c = char_at(low, i)
+        if find(_alpha, c) < 0 {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+# True when every character is a digit (0-9). Empty string is false.
+fn is_digit(s: string): bool {
+    if len(s) == 0 {
+        return false
+    }
+    let i = 0
+    while i < len(s) {
+        let c = char_at(s, i)
+        if find(_digits, c) < 0 {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+# True when every character is a digit, dot, or minus sign — a rough
+# numeric check that accepts things like "3.14" and "-7".
+fn is_numeric(s: string): bool {
+    if len(s) == 0 {
+        return false
+    }
+    let i = 0
+    let dots = 0
+    while i < len(s) {
+        let c = char_at(s, i)
+        if find(_digits, c) >= 0 {
+            i = i + 1
+        } else if c == "." {
+            dots = dots + 1
+            if dots > 1 {
+                return false
+            }
+            i = i + 1
+        } else if c == "-" && i == 0 {
+            i = i + 1
+        } else {
+            return false
+        }
+    }
+    return true
+}
+
+# ---------- case conversion ----------
+
+let _upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+# "Hello World" → "hello_world"
+fn snake_case(s: string): string {
+    let out = ""
+    let i = 0
+    while i < len(s) {
+        let c = char_at(s, i)
+        if c == " " || c == "-" {
+            out = out + "_"
+        } else if find(_upper, c) >= 0 {
+            if i > 0 {
+                let prev = char_at(s, i - 1)
+                if prev != " " && prev != "-" && prev != "_" {
+                    out = out + "_"
+                }
+            }
+            out = out + lower(c)
+        } else {
+            out = out + c
+        }
+        i = i + 1
+    }
+    return out
+}
+
+# "hello world" → "helloWorld"
+fn camel_case(s: string): string {
+    let parts = split(lower(s), " ")
+    let out = str(parts[0])
+    let i = 1
+    while i < len(parts) {
+        let w = str(parts[i])
+        if len(w) > 0 {
+            out = out + capitalize(w)
+        }
+        i = i + 1
+    }
+    return out
+}
+
+# Make a URL/file-safe string: lowercase, spaces to hyphens, strip non-alnum.
+fn slugify(s: string): string {
+    let low = lower(s)
+    let out = ""
+    let i = 0
+    while i < len(low) {
+        let c = char_at(low, i)
+        if is_alpha(c) {
+            out = out + c
+        }
+        if is_digit(c) {
+            out = out + c
+        }
+        if c == " " {
+            out = out + "-"
+        }
+        i = i + 1
+    }
+    return out
+}
+
+# ---------- HTML ----------
+
+# Replace the five characters that are special in HTML with their entity
+# equivalents. Enough for interpolating user text into HTML attributes and
+# element bodies; not a full sanitiser.
+fn escape_html(s: string): string {
+    let out = replace(s, "&", "&amp;")
+    out = replace(out, "<", "&lt;")
+    out = replace(out, ">", "&gt;")
+    out = replace(out, "\"", "&quot;")
+    return out
+}
+
+# ---------- text layout ----------
+
+# Indent every line of `s` by `n` spaces.
+fn indent(s: string, n: int): string {
+    let pad = ""
+    let i = 0
+    while i < n {
+        pad = pad + " "
+        i = i + 1
+    }
+    let ls = lines(s)
+    let out = ""
+    let j = 0
+    while j < len(ls) {
+        if j > 0 {
+            out = out + "\n"
+        }
+        if len(ls[j]) > 0 {
+            out = out + pad + ls[j]
+        }
+        j = j + 1
+    }
+    return out
+}
+
+# ---------- palindrome ----------
+
+fn is_palindrome(s: string): bool {
+    let rev = reverse(lower(s))
+    return lower(s) == rev
+}
+
+# ---------- common prefix / suffix ----------
+
+# The longest string that both `a` and `b` start with.
+fn common_prefix(a: string, b: string): string {
+    let n = len(a)
+    if len(b) < n {
+        n = len(b)
+    }
+    let i = 1
+    while i <= n {
+        if substring(a, 0, i) != substring(b, 0, i) {
+            return substring(a, 0, i - 1)
+        }
+        i = i + 1
+    }
+    return substring(a, 0, n)
+}
+
+# The longest string that both `a` and `b` end with.
+fn common_suffix(a: string, b: string): string {
+    let ra = reverse(a)
+    let rb = reverse(b)
+    return reverse(common_prefix(ra, rb))
+}

@@ -32,9 +32,24 @@ INTERP_SRC = src/compilers/subi.c src/core/interpreter.c src/core/lexer.c src/co
 INTERP_OBJ = $(INTERP_SRC:.c=.o)
 INTERP_TARGET = subi
 
-# Platform detection
+# Platform detection. Checks the compiler target first, not `uname`, so a
+# cross build (e.g. x86_64-w64-mingw32-gcc on Linux) picks up the right
+# define and .exe names instead of inheriting the host's Linux settings.
 UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
+CC_TARGET := $(shell $(CC) -dumpmachine 2>/dev/null)
+ifneq (,$(findstring mingw,$(CC_TARGET)))
+    CFLAGS += -DWINDOWS
+    LDFLAGS += -static
+    COMPILER_TARGET = sub.exe
+    NATIVE_COMPILER_TARGET = subc.exe
+    INTERP_TARGET = subi.exe
+else ifneq (,$(findstring msvc,$(CC_TARGET)))
+    CFLAGS += -DWINDOWS
+    LDFLAGS += -static
+    COMPILER_TARGET = sub.exe
+    NATIVE_COMPILER_TARGET = subc.exe
+    INTERP_TARGET = subi.exe
+else ifeq ($(UNAME_S),Darwin)
     # macOS
     CFLAGS += -DMACOS
 else ifeq ($(UNAME_S),Linux)
@@ -47,12 +62,8 @@ else ifeq ($(UNAME_S),FreeBSD)
     # link needs the flag to pull libpthread in.
     LDFLAGS += -pthread
 else
-    # Windows (MinGW/Cygwin/MSYS2)
-    CFLAGS += -DWINDOWS
-    LDFLAGS += -static
-    COMPILER_TARGET = sub.exe
-    NATIVE_COMPILER_TARGET = subc.exe
-    INTERP_TARGET = subi.exe
+    # Unknown host fall back to the compiler target when it says Windows.
+    CFLAGS += -DLINUX
 endif
 
 .PHONY: all clean compiler native_compiler interpreter install install-tools \

@@ -52,6 +52,9 @@ a.out
 .DS_Store
 Thumbs.db
 
+# Local tool/AI assistant state
+.commandcode/
+
 # Build directories
 build/
 dist/

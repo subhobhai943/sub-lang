@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Community — SUB Language</title>
+<meta name="description" content="How to contribute to SUB: building from source, running tests, adding backends, code of conduct, and reporting issues.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="../">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
+      <span>SUB</span>
+    </a>
+    <nav class="site-nav" id="siteNav">
+      <a href="../docs/getting-started.html">Docs</a>
+      <a href="../docs/stdlib.html">Stdlib</a>
+      <a href="../examples/">Examples</a>
+      <a href="../#download">Download</a>
+      <a href="../community/">Community</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar" id="docsSidebar">
+    <div class="docs-sidebar-inner">
+      <h4>Documentation</h4>
+      <a href="../docs/getting-started.html">Getting Started</a>
+      <a href="../docs/language-reference.html">Language Reference</a>
+      <a href="../docs/stdlib.html">Standard Library</a>
+      <a href="../docs/installation.html">Installation</a>
+      <h4>Advanced</h4>
+      <a href="../docs/transpilation.html">Transpilation</a>
+      <a href="../docs/native-compilation.html">Native Compilation</a>
+      <h4>More</h4>
+      <a href="../examples/">Examples</a>
+      <a href="../community/" class="active">Community</a>
+      <a href="../community/roadmap.html">Roadmap</a>
+      <a href="../changelog.html">Changelog</a>
+    </div>
+  </aside>
+
+  <main class="docs-content prose" id="content">
+    <button class="sidebar-toggle" id="sidebarToggle">Menu</button>
+    <nav class="breadcrumbs">
+      <a href="../">Home</a><span class="sep">/</span><span>Community</span>
+    </nav>
+
+    <h1>Community &amp; Contributing</h1>
+    <p>SUB is open source (MIT License) and welcomes contributions of all kinds — bug reports, documentation, new features, and new backends. This guide covers everything you need to get started.</p>
+
+    <h2>How to Contribute</h2>
+    <p>There are many ways to contribute, regardless of your experience level:</p>
+    <ul>
+      <li><strong>Report bugs</strong> — Found something wrong? <a href="https://github.com/subhobhai943/sub-lang/issues" target="_blank" rel="noopener">Open an issue</a>.</li>
+      <li><strong>Improve documentation</strong> — Typos, unclear explanations, missing examples. All welcome.</li>
+      <li><strong>Add examples</strong> — Share interesting programs you've written in SUB.</li>
+      <li><strong>Fix bugs</strong> — Look for issues labeled <code>good first issue</code> to get started.</li>
+      <li><strong>Add features</strong> — Discuss your idea in an issue first, then submit a PR.</li>
+      <li><strong>Add a backend</strong> — See <a href="#adding-new-backends">Adding New Backends</a> below.</li>
+      <li><strong>Package SUB</strong> — Help with packaging for new platforms or distros.</li>
+    </ul>
+
+    <h2>Building from Source</h2>
+    <p>The build process is simple — one command, no dependencies beyond a C compiler.</p>
+    <pre><code># Clone the repository
+git clone https://github.com/subhobhai943/sub-lang.git
+cd sub-lang
+
+# Build all three tools (subi, subc, sub)
+make
+
+# Run the test suite
+make test
+
+# Install locally
+sudo make install</code></pre>
+
+    <h3>Requirements</h3>
+    <ul>
+      <li><strong>C compiler</strong> — GCC or Clang</li>
+      <li><strong>GNU Make</strong> — <code>make</code> (or <code>gmake</code> on FreeBSD)</li>
+      <li><strong>Git</strong> — for cloning the repository</li>
+    </ul>
+    <p>That's it. No build system generators, no package managers, no configuration.</p>
+
+    <div class="callout callout-tip">
+      <p><strong>Tip:</strong> Set <code>CC=clang</code> or <code>CC=gcc</code> to choose your compiler. Set <code>PREFIX</code> to change the install location.</p>
+    </div>
+
+    <h2>Running Tests</h2>
+    <p>SUB ships with a comprehensive conformance test suite that verifies every backend produces identical output.</p>
+    <pre><code># Run all tests
+make test
+
+# Run only interpreter tests
+make test-interp
+
+# Run only transpiler tests
+make test-transpile</code></pre>
+
+    <h3>How the conformance suite works</h3>
+    <ol>
+      <li>Each test is a <code>.sb</code> program in the <code>tests/</code> directory</li>
+      <li>The program is run through <code>subi</code> (the interpreter) to capture reference output</li>
+      <li>The same program is transpiled to each target language and run</li>
+      <li>Outputs are diffed — any difference is a test failure</li>
+    </ol>
+    <p>This ensures that all 13 backends agree with the interpreter on every program.</p>
+
+    <div class="callout callout-info">
+      <p><strong>Note:</strong> When adding a new feature, always add a conformance test. This is how we guarantee cross-backend consistency.</p>
+    </div>
+
+    <h2>Adding New Backends</h2>
+    <p>Adding a new transpilation target is the most impactful contribution you can make. Here's the process:</p>
+
+    <h3>1. Understand the AST</h3>
+    <p>All backends walk the same AST. The node types are defined in <code>src/ast.h</code>. Each node has a type tag and type-specific fields. Your backend needs a <code>walk</code> function that handles every node type.</p>
+
+    <h3>2. Create the backend file</h3>
+    <p>Add a new file <code>src/codegen_&lt;target&gt;.c</code> following the pattern of existing backends. The key functions are:</p>
+    <ul>
+      <li><code>codegen_&lt;target&gt;_init()</code> — initialize state</li>
+      <li><code>codegen_&lt;target&gt;_emit(ast)</code> — walk the AST and emit output</li>
+      <li><code>codegen_&lt;target&gt;_finish()</code> — finalize and write output</li>
+    </ul>
+
+    <h3>3. Register the target</h3>
+    <p>Add your target to the dispatch table in <code>src/main.c</code> so <code>sub program.sb &lt;your-target&gt;</code> works.</p>
+
+    <h3>4. Add conformance tests</h3>
+    <p>Add your backend to the CI test matrix. Every existing test program must pass through your backend.</p>
+
+    <h3>5. Update documentation</h3>
+    <p>Add your target to the <a href="../docs/transpilation.html">transpilation docs</a> and the type mapping table.</p>
+
+    <h2>Project Structure</h2>
+    <pre><code>sub-lang/
+├── src/               # C source code
+│   ├── main.c         # Entry point, tool dispatch
+│   ├── lexer.c/h      # Tokenizer
+│   ├── parser.c/h     # AST builder
+│   ├── interpreter.c  # subi — direct AST interpreter
+│   ├── codegen_*.c    # One file per transpilation target
+│   ├── codegen_infer.c # Type inference
+│   ├── elf_emit.c     # ELF64 binary writer (subc)
+│   └── stdlib_*.c     # Standard library runtime
+├── stdlib/            # Standard library (.sb files)
+│   ├── math.sb
+│   ├── arrays.sb
+│   ├── strings.sb
+│   └── ...
+├── tests/             # Conformance test suite
+├── packaging/         # Platform packages (deb, rpm, arch, etc.)
+├── installer/         # Universal install script
+├── Makefile
+└── README.md</code></pre>
+
+    <h2>Code of Conduct</h2>
+    <p>We are committed to providing a friendly, safe, and welcoming environment for all, regardless of level of experience, gender identity, sexual orientation, disability, neurotype, ethnicity, religion, or similar personal characteristic.</p>
+    <ul>
+      <li>Be respectful and inclusive in all interactions.</li>
+      <li>Give constructive feedback — critique code, not people.</li>
+      <li>Assume good intent. Ask clarifying questions before reacting.</li>
+      <li>Don't engage in personal attacks, trolling, or harassment.</li>
+    </ul>
+    <p>Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the project maintainer at <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">GitHub</a>. All complaints will be reviewed and investigated.</p>
+
+    <h2>Reporting Issues</h2>
+    <p>Use <a href="https://github.com/subhobhai943/sub-lang/issues" target="_blank" rel="noopener">GitHub Issues</a> to report bugs, request features, or ask questions.</p>
+
+    <h3>Before reporting</h3>
+    <ul>
+      <li>Check if the issue already exists (search open and closed issues).</li>
+      <li>Make sure you're using the latest version of SUB.</li>
+      <li>Try to reproduce the issue with a minimal example.</li>
+    </ul>
+
+    <h3>Writing a good bug report</h3>
+    <ul>
+      <li><strong>Title</strong> — a short, descriptive summary</li>
+      <li><strong>Steps to reproduce</strong> — the exact commands and code</li>
+      <li><strong>Expected behavior</strong> — what should happen</li>
+      <li><strong>Actual behavior</strong> — what actually happens</li>
+      <li><strong>Environment</strong> — OS, SUB version, compiler version</li>
+    </ul>
+
+    <div class="callout callout-warn">
+      <p><strong>Security issues:</strong> Do not report security vulnerabilities in public issues. See the <a href="../security.html">Security Policy</a> for the responsible disclosure process.</p>
+    </div>
+
+    <h2>Getting Help</h2>
+    <ul>
+      <li><a href="https://github.com/subhobhai943/sub-lang/discussions" target="_blank" rel="noopener">GitHub Discussions</a> — ask questions, share ideas</li>
+      <li><a href="https://github.com/subhobhai943/sub-lang/issues" target="_blank" rel="noopener">GitHub Issues</a> — report bugs and request features</li>
+      <li><a href="../docs/getting-started.html">Getting Started</a> — if you're new to SUB</li>
+    </ul>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
+      <div>
+        <strong>SUB Language</strong>
+        <span>Simple Universal Builder · <span id="footerVersion">v1.0.11</span> · MIT License</span>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="../community/">Contributing</a></li>
+      <li><a href="../security.html">Security</a></li>
+    </ul>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+  </div>
+</footer>
+<script src="../assets/highlight.js"></script>
+<script src="../assets/dl.js"></script>
+<script src="../assets/main.js"></script>
+<script>document.getElementById('sidebarToggle').onclick=function(){document.getElementById('docsSidebar').classList.toggle('open')}</script>
+</body>
+</html>

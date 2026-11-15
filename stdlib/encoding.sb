@@ -1,0 +1,98 @@
+# ============================================================
+# SUB Standard Library - encoding
+#
+#   import "encoding"
+#
+# Encoding helpers built on string operations. SUB has no char-from-code
+# builtin, so url_decode is not offered: a percent escape cannot be turned
+# back into the character it names in pure SUB, and the previous attempt
+# emitted the byte value as decimal digits instead.
+# ============================================================
+
+import "strings"
+
+# ---------- hex encoding ----------
+
+let _hex_lower = "0123456789abcdef"
+let _hex_all = "0123456789abcdefABCDEF"
+
+# Convert an array of integer byte values to a hex string.
+fn hex_encode(bytes) {
+    let out = ""
+    let i = 0
+    while i < len(bytes) {
+        let v = bytes[i]
+        let hi = v / 16
+        let lo = v % 16
+        out = out + char_at(_hex_lower, hi) + char_at(_hex_lower, lo)
+        i = i + 1
+    }
+    return out
+}
+
+# Convert a hex string to an array of integer byte values.
+# An odd number of digits ignores a trailing unpaired one.
+fn hex_decode(s: string) {
+    let out = []
+    let i = 0
+    while i + 1 < len(s) {
+        let h1 = char_at(s, i)
+        let h2 = char_at(s, i + 1)
+        let d1 = find(_hex_all, h1)
+        let d2 = find(_hex_all, h2)
+        if d1 > 15 {
+            d1 = d1 - 6
+        }
+        if d2 > 15 {
+            d2 = d2 - 6
+        }
+        push(out, d1 * 16 + d2)
+        i = i + 2
+    }
+    return out
+}
+
+# ---------- URL encoding ----------
+
+let _url_safe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~"
+
+# Get the byte value of a single ASCII character. Uses a lookup table since
+# SUB has no char-to-int builtin.
+let _ascii_chars = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+
+fn _char_code(c: string): int {
+    let at = find(_ascii_chars, c)
+    if at >= 0 {
+        return at + 32
+    }
+    return 0
+}
+
+# Percent-encode a string for use in a URL. Unreserved characters pass
+# through; spaces become '+'; everything else becomes %HH.
+fn url_encode(s: string): string {
+    let hex = "0123456789ABCDEF"
+    let out = ""
+    let i = 0
+    while i < len(s) {
+        let c = char_at(s, i)
+        if c == " " {
+            out = out + "+"
+        }
+        if find(_url_safe, c) >= 0 {
+            if c != " " {
+                out = out + c
+            }
+        }
+        if find(_url_safe, c) < 0 {
+            if c != " " {
+                let code = _char_code(c)
+                let hi = code / 16
+                let lo = code % 16
+                out = out + "%" + char_at(hex, hi) + char_at(hex, lo)
+            }
+        }
+        i = i + 1
+    }
+    return out
+}

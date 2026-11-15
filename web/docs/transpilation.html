@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transpilation — SUB Language</title>
+<meta name="description" content="How the SUB transpiler works: shared AST, type inference, 13 target languages, and backend-specific notes.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="../">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
+      <span>SUB</span>
+    </a>
+    <nav class="site-nav" id="siteNav">
+      <a href="../docs/getting-started.html">Docs</a>
+      <a href="../docs/stdlib.html">Stdlib</a>
+      <a href="../examples/">Examples</a>
+      <a href="../#download">Download</a>
+      <a href="../community/">Community</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar" id="docsSidebar">
+    <div class="docs-sidebar-inner">
+      <h4>Documentation</h4>
+      <a href="getting-started.html">Getting Started</a>
+      <a href="language-reference.html">Language Reference</a>
+      <a href="stdlib.html">Standard Library</a>
+      <a href="installation.html">Installation</a>
+      <h4>Advanced</h4>
+      <a href="transpilation.html" class="active">Transpilation</a>
+      <a href="native-compilation.html">Native Compilation</a>
+      <h4>More</h4>
+      <a href="../examples/">Examples</a>
+      <a href="../community/">Community</a>
+      <a href="../community/roadmap.html">Roadmap</a>
+      <a href="../changelog.html">Changelog</a>
+    </div>
+  </aside>
+
+  <main class="docs-content prose" id="content">
+    <button class="sidebar-toggle" id="sidebarToggle">Menu</button>
+    <nav class="breadcrumbs">
+      <a href="../">Home</a><span class="sep">/</span><a href="getting-started.html">Docs</a><span class="sep">/</span><span>Transpilation</span>
+    </nav>
+
+    <h1>Transpilation</h1>
+    <p>The <code>sub</code> command transpiles a single <code>.sb</code> source file into idiomatic code in any of 13 target languages. All backends share one AST, so the output is consistent and verifiable.</p>
+
+    <h2>The <code>sub</code> Command</h2>
+    <pre><code>$ sub program.sb &lt;target&gt;    # → program.&lt;ext&gt;</code></pre>
+    <p>The target is a required positional argument. The output file is written to the same directory with the appropriate extension.</p>
+
+    <h3>Available targets</h3>
+    <table>
+      <tr><th>Target</th><th>Output extension</th><th>CI-verified</th></tr>
+      <tr><td><code>python</code></td><td><code>.py</code></td><td>✓</td></tr>
+      <tr><td><code>javascript</code></td><td><code>.js</code></td><td>✓</td></tr>
+      <tr><td><code>typescript</code></td><td><code>.ts</code></td><td>✓</td></tr>
+      <tr><td><code>c</code></td><td><code>.c</code></td><td>✓</td></tr>
+      <tr><td><code>cpp</code></td><td><code>.cpp</code></td><td>✓</td></tr>
+      <tr><td><code>rust</code></td><td><code>.rs</code></td><td>✓</td></tr>
+      <tr><td><code>go</code></td><td><code>.go</code></td><td>✓</td></tr>
+      <tr><td><code>java</code></td><td><code>.java</code></td><td>✓</td></tr>
+      <tr><td><code>kotlin</code></td><td><code>.kt</code></td><td>✓</td></tr>
+      <tr><td><code>swift</code></td><td><code>.swift</code></td><td>✓</td></tr>
+      <tr><td><code>ruby</code></td><td><code>.rb</code></td><td>✓</td></tr>
+      <tr><td><code>asm</code></td><td><code>.s</code></td><td>generated</td></tr>
+      <tr><td><code>css</code></td><td><code>.css</code></td><td>generated</td></tr>
+    </table>
+
+    <h2>Shared AST</h2>
+    <p>All backends — transpiler, interpreter, and native compiler — operate on the same abstract syntax tree. The pipeline is:</p>
+    <ol>
+      <li><strong>Lexer</strong> — tokenize the <code>.sb</code> source into tokens</li>
+      <li><strong>Parser</strong> — build the AST from the token stream</li>
+      <li><strong>Backend</strong> — walk the AST and emit output in the target format</li>
+    </ol>
+    <p>Because every backend sees the same tree, behavior is consistent. The CI suite runs each program through the interpreter and every transpiler backend, then diffs the output.</p>
+
+    <h2>Type Inference</h2>
+    <p>SUB has no type annotations. The <code>codegen_infer.c</code> module performs lightweight type inference by tracking the types of values as they flow through the program. This information is used by backends that need static types (Rust, Go, C, C++, TypeScript, Java, Kotlin, Swift) to emit correct declarations.</p>
+    <div class="callout callout-info">
+      <p><strong>Note:</strong> Type inference is best-effort. For dynamic targets (Python, JavaScript, Ruby), types are erased and the runtime handles everything natively.</p>
+    </div>
+
+    <h2>Type Mapping</h2>
+    <p>Here is how SUB types map to each target language:</p>
+    <table>
+      <tr><th>SUB</th><th>Python</th><th>JavaScript</th><th>Rust</th><th>Go</th><th>C</th><th>Java</th></tr>
+      <tr><td><code>int</code></td><td><code>int</code></td><td><code>number</code></td><td><code>i64</code></td><td><code>int64</code></td><td><code>long long</code></td><td><code>long</code></td></tr>
+      <tr><td><code>float</code></td><td><code>float</code></td><td><code>number</code></td><td><code>f64</code></td><td><code>float64</code></td><td><code>double</code></td><td><code>double</code></td></tr>
+      <tr><td><code>string</code></td><td><code>str</code></td><td><code>string</code></td><td><code>String</code></td><td><code>string</code></td><td><code>char*</code></td><td><code>String</code></td></tr>
+      <tr><td><code>bool</code></td><td><code>bool</code></td><td><code>boolean</code></td><td><code>bool</code></td><td><code>bool</code></td><td><code>int</code></td><td><code>boolean</code></td></tr>
+      <tr><td><code>null</code></td><td><code>None</code></td><td><code>null</code></td><td><code>Option</code></td><td><code>nil</code></td><td><code>NULL</code></td><td><code>null</code></td></tr>
+      <tr><td><code>array</code></td><td><code>list</code></td><td><code>Array</code></td><td><code>Vec</code></td><td><code>[]T</code></td><td><code>array</code></td><td><code>ArrayList</code></td></tr>
+      <tr><td><code>object</code></td><td><code>dict</code></td><td><code>Object</code></td><td><code>HashMap</code></td><td><code>map</code></td><td><code>struct</code></td><td><code>HashMap</code></td></tr>
+    </table>
+
+    <h2>Backend-Specific Notes</h2>
+
+    <h3>Python</h3>
+    <p>Output is clean Python 3. Stdlib modules are translated to Python equivalents. Run with <code>python3 program.py</code>.</p>
+
+    <h3>JavaScript</h3>
+    <p>Outputs ES6+ JavaScript. Uses <code>let</code>/<code>const</code>, arrow functions where possible. Run with <code>node program.js</code>.</p>
+
+    <h3>TypeScript</h3>
+    <p>Full type annotations are inferred and emitted. Compile with <code>tsc program.ts</code> or run with <code>ts-node program.ts</code>.</p>
+
+    <h3>C</h3>
+    <p>Outputs a single <code>.c</code> file with a <code>main()</code> function. Compile with <code>cc program.c -o program</code>. The C backend includes a small runtime header for string and array operations.</p>
+
+    <h3>C++</h3>
+    <p>Uses <code>std::string</code>, <code>std::vector</code>, and <code>std::cout</code>. Compile with <code>c++ program.cpp -o program -std=c++17</code>.</p>
+
+    <h3>Rust</h3>
+    <p>Outputs idiomatic Rust with proper ownership. Types are fully inferred. Compile with <code>rustc program.rs</code>.</p>
+    <div class="callout callout-warn">
+      <p><strong>Limitation:</strong> The Rust backend does not yet handle all string mutation patterns. Some programs may need minor adjustments for borrow-checker compliance.</p>
+    </div>
+
+    <h3>Go</h3>
+    <p>Outputs a single <code>.go</code> file with a <code>main</code> package. Build with <code>go build program.go</code>.</p>
+
+    <h3>Java</h3>
+    <p>Outputs a single class with a <code>main</code> method. Compile with <code>javac Program.java</code> and run with <code>java Program</code>.</p>
+
+    <h3>Kotlin</h3>
+    <p>Outputs idiomatic Kotlin with a <code>main</code> function. Compile with <code>kotlinc program.kt -include-runtime -d program.jar</code>.</p>
+
+    <h3>Swift</h3>
+    <p>Outputs Swift 5+ code. Compile with <code>swiftc program.swift</code>.</p>
+
+    <h3>Ruby</h3>
+    <p>Outputs clean Ruby. Run with <code>ruby program.rb</code>.</p>
+
+    <h3>x86-64 Assembly</h3>
+    <p>Outputs NASM-syntax x86-64 assembly. This is a code-generation target — the assembly is not executed in CI.</p>
+
+    <h3>CSS</h3>
+    <p>The CSS backend is specialized for the UI DSL. It translates <code>ui.*</code> declarations into CSS rules. Not a general-purpose backend.</p>
+
+    <h2>Running Transpiled Output</h2>
+    <p>Each target produces a file you can run with the standard toolchain for that language:</p>
+    <pre><code># Transpile
+$ sub hello.sb python      # → hello.py
+$ sub hello.sb rust        # → hello.rs
+$ sub hello.sb go          # → hello.go
+
+# Run
+$ python3 hello.py
+$ rustc hello.rs && ./hello
+$ go run hello.go</code></pre>
+
+    <div class="callout callout-tip">
+      <p><strong>Tip:</strong> Use the interpreter as the reference. If a transpiled program produces different output than <code>subi</code>, that's a bug — please <a href="../community/">report it</a>.</p>
+    </div>
+
+    <h2>Next Steps</h2>
+    <ul>
+      <li><a href="native-compilation.html">Native Compilation</a> — learn about the <code>subc</code> compiler</li>
+      <li><a href="../community/">Contributing</a> — add a new backend</li>
+    </ul>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
+      <div>
+        <strong>SUB Language</strong>
+        <span>Simple Universal Builder · <span id="footerVersion">v1.0.11</span> · MIT License</span>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="../community/">Contributing</a></li>
+      <li><a href="../security.html">Security</a></li>
+    </ul>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+  </div>
+</footer>
+<script src="../assets/highlight.js"></script>
+<script src="../assets/dl.js"></script>
+<script src="../assets/main.js"></script>
+<script>document.getElementById('sidebarToggle').onclick=function(){document.getElementById('docsSidebar').classList.toggle('open')}</script>
+</body>
+</html>

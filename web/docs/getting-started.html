@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Getting Started — SUB Language</title>
+<meta name="description" content="Install SUB and write your first program in under 5 minutes.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="../">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="26" height="26">
+      <span>SUB</span>
+    </a>
+    <nav class="site-nav" id="siteNav">
+      <a href="../docs/getting-started.html">Docs</a>
+      <a href="../docs/stdlib.html">Stdlib</a>
+      <a href="../examples/">Examples</a>
+      <a href="../#download">Download</a>
+      <a href="../community/">Community</a>
+      <a class="nav-gh" href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="siteNav">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<div class="docs-layout">
+  <aside class="docs-sidebar" id="docsSidebar">
+    <div class="docs-sidebar-inner">
+      <h4>Documentation</h4>
+      <a href="getting-started.html" class="active">Getting Started</a>
+      <a href="language-reference.html">Language Reference</a>
+      <a href="stdlib.html">Standard Library</a>
+      <a href="installation.html">Installation</a>
+      <h4>Advanced</h4>
+      <a href="transpilation.html">Transpilation</a>
+      <a href="native-compilation.html">Native Compilation</a>
+      <h4>More</h4>
+      <a href="../examples/">Examples</a>
+      <a href="../community/">Community</a>
+      <a href="../community/roadmap.html">Roadmap</a>
+      <a href="../changelog.html">Changelog</a>
+    </div>
+  </aside>
+
+  <main class="docs-content prose" id="content">
+    <button class="sidebar-toggle" id="sidebarToggle">Menu</button>
+    <nav class="breadcrumbs">
+      <a href="../">Home</a><span class="sep">/</span><span>Getting Started</span>
+    </nav>
+
+    <h1>Getting Started</h1>
+    <p>Get up and running with SUB in under five minutes. This guide covers installation, your first program, and the three tools in the toolchain.</p>
+
+    <h2>Installation</h2>
+    <p>The fastest way to install is the universal installer:</p>
+    <pre><code>curl -fsSL https://raw.githubusercontent.com/subhobhai943/sub-lang/main/installer/install.sh | sh</code></pre>
+    <p>Or grab a platform package from the <a href="../#download">download section</a>.</p>
+
+    <h2>Your first program</h2>
+    <p>Create a file called <code>hello.sb</code>:</p>
+    <pre><code class="lang-sb">let name = "World"
+println("Hello, " + name + "!")</code></pre>
+
+    <h3>Run with the interpreter</h3>
+    <pre><code>$ subi hello.sb
+Hello, World!</code></pre>
+
+    <h3>Compile to native machine code</h3>
+    <pre><code>$ subc hello.sb -o hello
+$ ./hello
+Hello, World!</code></pre>
+    <p>The resulting binary is a self-contained static ELF executable — no libc, no runtime dependencies.</p>
+
+    <h3>Transpile to another language</h3>
+    <pre><code>$ sub hello.sb python    # → hello.py
+$ sub hello.sb rust      # → hello.rs
+$ sub hello.sb go        # → hello.go</code></pre>
+
+    <h2>The three tools</h2>
+    <table>
+      <tr><th>Tool</th><th>Purpose</th></tr>
+      <tr><td><code>subi</code></td><td>Interpreter + REPL. Runs <code>.sb</code> files directly. The reference every backend agrees with.</td></tr>
+      <tr><td><code>subc</code></td><td>Native compiler. Emits x86-64 machine code and writes the ELF binary itself.</td></tr>
+      <tr><td><code>sub</code></td><td>Transpiler. Generates idiomatic code in 13 target languages.</td></tr>
+    </table>
+
+    <h2>The REPL</h2>
+    <p>Run <code>subi</code> with no arguments to enter the interactive REPL:</p>
+    <pre><code>$ subi
+sub> let x = 42
+sub> println(x * 2)
+84
+sub> :quit</code></pre>
+
+    <h2>Next steps</h2>
+    <ul>
+      <li><a href="language-reference.html">Language Reference</a> — full syntax guide</li>
+      <li><a href="stdlib.html">Standard Library</a> — math, arrays, strings, io, and more</li>
+      <li><a href="../examples/index.html">Examples</a> — real programs to learn from</li>
+    </ul>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src="../assets/sub-lang-logo-mark.png" alt="" width="32" height="32">
+      <div>
+        <strong>SUB Language</strong>
+        <span>Simple Universal Builder · <span id="footerVersion">v1.0.11</span> · MIT License</span>
+      </div>
+    </div>
+    <ul class="footer-links">
+      <li><a href="https://github.com/subhobhai943/sub-lang" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="../community/">Contributing</a></li>
+      <li><a href="../security.html">Security</a></li>
+    </ul>
+    <p class="footer-note">© 2026 <a href="https://github.com/subhobhai943" target="_blank" rel="noopener">Subhadip Sarkar</a></p>
+  </div>
+</footer>
+<script src="../assets/highlight.js"></script>
+<script src="../assets/dl.js"></script>
+<script src="../assets/main.js"></script>
+<script>document.getElementById('sidebarToggle').onclick=function(){document.getElementById('docsSidebar').classList.toggle('open')}</script>
+</body>
+</html>

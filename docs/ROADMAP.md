@@ -107,25 +107,19 @@ end
 
 ## Known bugs tracked here (not roadmap items, but adjacent)
 
-- The parser does not treat parse errors as fatal: a file with syntax
-  errors (e.g. `class` usage) can still report "Compilation successful"
-  and produce output. This should eventually cause a non-zero exit.
-- Several `stdlib/*.sb` modules (`io.sb`, `math.sb`, `string.sb`,
-  `collections.sb`, `file.sb`, `system.sb`) currently fail semantic
-  analysis when run through `sub`/`subc` directly (undefined functions,
-  type errors) — see the `non_blocking` exclusion in
-  `.github/workflows/code-quality-bot.yml`.
+- ~~The parser does not treat parse errors as fatal~~ — fixed: `parser_parse()`
+  now returns NULL when it recorded errors, so `sub`/`subc`/`subi` abort with
+  a non-zero exit instead of generating output.
+- ~~`show()` documented as an alias for `print()` is rejected by semantic
+  analysis~~ — fixed: `show` was already in the semantic whitelist, in
+  `codegen_infer.h` and in `codegen_multilang.c`; the roadmap note was stale.
+  `append()` (an undocumented alias for `push()`) was likewise missing from
+  the semantic whitelist and is now recognized.
+- Several `stdlib/*.sb` modules currently fail semantic analysis when run
+  through `sub`/`subc` directly (undefined functions, type errors) — see the
+  `non_blocking` exclusion in `.github/workflows/code-quality-bot.yml`.
 - ~~The `cpp`/`c++` transpile target produced invalid, non-compiling
   output~~ — fixed: `sub.c`/`sub_native.c` now dispatch to
   `codegen_cpp_generate()` (`src/codegen/codegen_cpp.c`), a real C++
   backend, instead of the old `codegen_generate_cpp()` in `codegen.c`,
   which reused the C code generator inside a C++ file wrapper.
-- `show()`, documented in the README as an alias for `print()`, is
-  rejected outright by semantic analysis (`src/core/semantic.c`'s builtin
-  whitelist only recognizes `print`/`println`) — it never reaches codegen.
-  Even if the semantic check were relaxed, every codegen backend
-  (`codegen.c`, `codegen_multilang.c`, `codegen_cpp.c`) special-cases the
-  literal string `"print"` only, so `show(...)` would transpile to a
-  call to an undefined `show` function in every target language. Fixing
-  this requires touching the builtin whitelist plus every codegen
-  backend's print-detection branch. Until fixed, use `print()`.

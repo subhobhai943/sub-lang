@@ -1,0 +1,75 @@
+# ============================================================
+# SUB Standard Library - collections
+#
+#   import "collections"
+#
+# Set algebra over arrays. SUB has no way to iterate an object's keys, so
+# the object helpers that would live here do not exist -- there is no
+# `keys()`, no `values()` and no `merge()`. Use the member syntax for
+# objects directly.
+# ============================================================
+
+import "arrays"
+
+# ---------- set operations ----------
+
+# Elements in either `a` or `b`, without duplicates.
+fn set_union(a, b) {
+    let out = []
+    for v in a {
+        if index_of_int(out, v) < 0 {
+            push(out, v)
+        }
+    }
+    for v in b {
+        if index_of_int(out, v) < 0 {
+            push(out, v)
+        }
+    }
+    return out
+}
+
+# Elements in both `a` and `b`.
+fn set_intersection(a, b) {
+    let out = []
+    for v in a {
+        if has_int(b, v) && index_of_int(out, v) < 0 {
+            push(out, v)
+        }
+    }
+    return out
+}
+
+# Elements in `a` but not in `b`.
+fn set_difference(a, b) {
+    let out = []
+    for v in a {
+        if !has_int(b, v) && index_of_int(out, v) < 0 {
+            push(out, v)
+        }
+    }
+    return out
+}
+
+# Whether `item` is in the set `s`.
+fn set_has(s, item: int): bool {
+    return has_int(s, item)
+}
+
+# ---------- stack / queue ----------
+
+# Last element without removing it. Null when empty.
+fn peek(arr) {
+    if len(arr) == 0 {
+        return null
+    }
+    return arr[len(arr) - 1]
+}
+
+# First element without removing it. Null when empty.
+fn peek_front(arr) {
+    if len(arr) == 0 {
+        return null
+    }
+    return arr[0]
+}
