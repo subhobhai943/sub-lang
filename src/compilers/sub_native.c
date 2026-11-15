@@ -306,6 +306,7 @@ static const TargetDescriptor* lookup_target_native(const char *name) {
 
 extern char* codegen_python(ASTNode *ast, const char *source);
 extern char* codegen_javascript(ASTNode *ast, const char *source);
+extern char* codegen_typescript(ASTNode *ast, const char *source);
 extern char* codegen_java(ASTNode *ast, const char *source);
 extern char* codegen_swift(ASTNode *ast, const char *source);
 extern char* codegen_kotlin(ASTNode *ast, const char *source);
@@ -366,7 +367,7 @@ static char* generate_language_code_native(const char *name, ASTNode *ast, const
     infer_function_signatures(ast);
     if (strcasecmp(name, "c") == 0) return codegen_generate(ast, sub_host_platform());
     if (strcasecmp(name, "cpp") == 0 || strcasecmp(name, "c++") == 0) return codegen_cpp_generate(ast, source);
-    if (strcasecmp(name, "typescript") == 0 || strcasecmp(name, "ts") == 0) return codegen_javascript(ast, source);
+    if (strcasecmp(name, "typescript") == 0 || strcasecmp(name, "ts") == 0) return codegen_typescript(ast, source);
     if (strcasecmp(name, "python") == 0     || strcasecmp(name, "py") == 0)     return codegen_python(ast, source);
     if (strcasecmp(name, "javascript") == 0 || strcasecmp(name, "js") == 0)     return codegen_javascript(ast, source);
     if (strcasecmp(name, "java") == 0)                                          return codegen_java(ast, source);

@@ -114,6 +114,12 @@ __pycache__/
 # gcc -MMD dependency files
 *.d
 
+# Test binaries and generated assembly from development
+test_*_bin
+test_*.o
+test_*.asm
+test_*.ts
+
 # compiled output of calculator.sb
 cal
 

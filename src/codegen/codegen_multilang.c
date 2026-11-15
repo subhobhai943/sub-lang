@@ -48,7 +48,7 @@ typedef struct {
    ---------------------------------------------------------------- */
 
 typedef enum {
-    LANG_JS, LANG_JAVA, LANG_SWIFT, LANG_KOTLIN, LANG_GO, LANG_RUBY, LANG_PY
+    LANG_JS, LANG_TS, LANG_JAVA, LANG_SWIFT, LANG_KOTLIN, LANG_GO, LANG_RUBY, LANG_PY
 } TargetLang;
 
 typedef struct {
@@ -59,6 +59,17 @@ typedef struct {
 
 static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name) {
     static const BuiltinSpelling js[] = {
+        {"str","String(",")"},        {"to_string","String(",")"},
+        {"int","Math.trunc(Number(","))"}, {"float","Number(",")"},
+        {"bool","Boolean(",")"},      {"len","(",").length"},
+        {"length","(",").length"},    {"abs","Math.abs(",")"},
+        {"sqrt","Math.sqrt(",")"},    {"floor","Math.floor(",")"},
+        {"ceil","Math.ceil(",")"},    {"round","_subRound(",")"},
+        {"upper","(",").toUpperCase()"}, {"lower","(",").toLowerCase()"},
+        {"trim","(",").trim()"},      {"pop","_subPop(",")"},
+        {NULL,NULL,NULL}
+    };
+    static const BuiltinSpelling ts[] = {
         {"str","String(",")"},        {"to_string","String(",")"},
         {"int","Math.trunc(Number(","))"}, {"float","Number(",")"},
         {"bool","Boolean(",")"},      {"len","(",").length"},
@@ -136,6 +147,7 @@ static const BuiltinSpelling* builtin_spelling(TargetLang lang, const char *name
     const BuiltinSpelling *table;
     switch (lang) {
         case LANG_JS:     table = js;     break;
+        case LANG_TS:     table = ts;     break;
         case LANG_JAVA:   table = java;   break;
         case LANG_SWIFT:  table = swift;  break;
         case LANG_KOTLIN: table = kotlin; break;
@@ -191,6 +203,7 @@ static const BuiltinSpelling* builtin_spelling_multi(TargetLang lang, const char
     const BuiltinSpelling *table;
     switch (lang) {
         case LANG_JS:     table = js;     break;
+        case LANG_TS:     table = js;     break;
         case LANG_JAVA:   table = java;   break;
         case LANG_SWIFT:  table = swift;  break;
         case LANG_KOTLIN: table = kotlin; break;
@@ -755,6 +768,7 @@ static int emit_special_binop(StringBuilder *sb, ASTNode *node,
         switch (lang) {
             case LANG_PY:
             case LANG_JS:
+            case LANG_TS:
                 return 0;                      /* ** is native in these */
             case LANG_RUBY:
                 /* Ruby returns a Rational for a negative integer exponent,
@@ -809,6 +823,7 @@ static int emit_special_binop(StringBuilder *sb, ASTNode *node,
         const char *fn;
         switch (lang) {
             case LANG_JS:
+            case LANG_TS:
             case LANG_JAVA:
             case LANG_KOTLIN:
             case LANG_SWIFT:
@@ -2403,6 +2418,361 @@ char* codegen_javascript(ASTNode *ast, const char *source) {
     generate_node_js(sb, ast, 0);
     sb_append(sb, "})();\n");
     
+    return sb_to_string(sb);
+}
+
+/* ========================================
+   TYPESCRIPT CODE GENERATOR - FULL AST
+   TypeScript is a superset of JavaScript, so this reuses the JS runtime
+   helpers and adds static type annotations on function signatures,
+   variable declarations, and parameters wherever SUB's type inference
+   provides a concrete type.
+   ======================================== */
+
+static const char* ts_type(DataType t) {
+    switch (t) {
+        case TYPE_INT:    return "number";
+        case TYPE_FLOAT:  return "number";
+        case TYPE_BOOL:   return "boolean";
+        case TYPE_STRING: return "string";
+        case TYPE_ARRAY:  return "any[]";
+        case TYPE_OBJECT: return "Record<string, any>";
+        case TYPE_VOID:   return "void";
+        case TYPE_NULL:   return "null";
+        default:          return "any";
+    }
+}
+
+/* Emit a typed parameter: `name: type` when the type is known, plain `name`
+   otherwise. */
+static void ts_param(StringBuilder *sb, ASTNode *p) {
+    if (!p || !p->value) return;
+    if (p->data_type != TYPE_UNKNOWN && p->data_type != TYPE_AUTO)
+        sb_append(sb, "%s: %s", p->value, ts_type(p->data_type));
+    else
+        sb_append(sb, "%s", p->value);
+}
+
+/* Emit a typed variable declaration: `let name: type = init` when known. */
+static void ts_var_decl(StringBuilder *sb, ASTNode *node) {
+    sb_append(sb, "let ");
+    if (node->data_type != TYPE_UNKNOWN && node->data_type != TYPE_AUTO)
+        sb_append(sb, "%s: %s", node->value ? node->value : "x",
+                  ts_type(node->data_type));
+    else
+        sb_append(sb, "%s", node->value ? node->value : "x");
+    if (node->right) {
+        sb_append(sb, " = ");
+        generate_expr_js(sb, node->right);
+    }
+    sb_append(sb, ";\n");
+}
+
+/* Typed function declaration. */
+static void ts_func_decl(StringBuilder *sb, ASTNode *node) {
+    if (!node || !node->value) return;
+    const char *rett = ts_type(node->data_type != TYPE_UNKNOWN
+                                ? node->data_type : TYPE_VOID);
+    sb_append(sb, "function %s(", node->value);
+    for (int i = 0; i < node->child_count; i++) {
+        if (i > 0) sb_append(sb, ", ");
+        ts_param(sb, node->children[i]);
+    }
+    sb_append(sb, "): %s {\n", rett);
+    for (ASTNode *s = block_first(node->body); s; s = s->next)
+        generate_node_js(sb, s, 1);
+    sb_append(sb, "}\n");
+}
+
+/* Typed const declaration. */
+static void ts_const_decl(StringBuilder *sb, ASTNode *node) {
+    sb_append(sb, "const ");
+    if (node->data_type != TYPE_UNKNOWN && node->data_type != TYPE_AUTO)
+        sb_append(sb, "%s: %s", node->value ? node->value : "x",
+                  ts_type(node->data_type));
+    else
+        sb_append(sb, "%s", node->value ? node->value : "x");
+    if (node->right) {
+        sb_append(sb, " = ");
+        generate_expr_js(sb, node->right);
+    }
+    sb_append(sb, ";\n");
+}
+
+static void generate_node_ts(StringBuilder *sb, ASTNode *node, int indent) {
+    if (!node) return;
+    indent_code(sb, indent);
+    switch (node->type) {
+        case AST_PROGRAM:
+        case AST_BLOCK:
+            for (ASTNode *s = block_first(node); s; s = s->next)
+                generate_node_ts(sb, s, indent);
+            break;
+        case AST_VAR_DECL:    ts_var_decl(sb, node); break;
+        case AST_CONST_DECL:  ts_const_decl(sb, node); break;
+        case AST_FUNCTION_DECL: ts_func_decl(sb, node); break;
+        case AST_IF_STMT: {
+            sb_append(sb, "if (");
+            generate_expr_js(sb, node->condition);
+            sb_append(sb, ") {\n");
+            for (ASTNode *s = block_first(node->body); s; s = s->next)
+                generate_node_ts(sb, s, indent + 1);
+            sb_append(sb, "}");
+            if (node->left) {
+                sb_append(sb, " else ");
+                generate_node_ts(sb, node->left, indent);
+            } else if (node->right) {
+                sb_append(sb, " else {\n");
+                for (ASTNode *s = block_first(node->right); s; s = s->next)
+                    generate_node_ts(sb, s, indent + 1);
+                sb_append(sb, "}");
+            }
+            sb_append(sb, "\n");
+            break;
+        }
+        case AST_FOR_STMT: {
+            sb_append(sb, "for (");
+            generate_expr_js(sb, node->condition);
+            sb_append(sb, ") {\n");
+            for (ASTNode *s = block_first(node->body); s; s = s->next)
+                generate_node_ts(sb, s, indent + 1);
+            sb_append(sb, "}\n");
+            break;
+        }
+        case AST_WHILE_STMT: {
+            sb_append(sb, "while (");
+            generate_expr_js(sb, node->condition);
+            sb_append(sb, ") {\n");
+            for (ASTNode *s = block_first(node->body); s; s = s->next)
+                generate_node_ts(sb, s, indent + 1);
+            sb_append(sb, "}\n");
+            break;
+        }
+        case AST_DO_WHILE_STMT: {
+            sb_append(sb, "do {\n");
+            for (ASTNode *s = block_first(node->body); s; s = s->next)
+                generate_node_ts(sb, s, indent + 1);
+            sb_append(sb, "} while (");
+            generate_expr_js(sb, node->condition);
+            sb_append(sb, ");\n");
+            break;
+        }
+        case AST_RETURN_STMT:
+            sb_append(sb, "return ");
+            if (node->right) generate_expr_js(sb, node->right);
+            sb_append(sb, ";\n");
+            break;
+        case AST_BREAK_STMT:
+            sb_append(sb, "break;\n");
+            break;
+        case AST_CONTINUE_STMT:
+            sb_append(sb, "continue;\n");
+            break;
+        case AST_ASSIGN_STMT:
+            generate_expr_js(sb, node->left);
+            sb_append(sb, " = ");
+            generate_expr_js(sb, node->right);
+            sb_append(sb, ";\n");
+            break;
+        case AST_CALL_EXPR:
+            generate_expr_js(sb, node);
+            sb_append(sb, ";\n");
+            break;
+        case AST_TRY_STMT: {
+            sb_append(sb, "try {\n");
+            for (ASTNode *s = block_first(node->body); s; s = s->next)
+                generate_node_ts(sb, s, indent + 1);
+            sb_append(sb, "} catch (e) {\n");
+            if (node->left) {
+                for (ASTNode *s = block_first(node->left); s; s = s->next)
+                    generate_node_ts(sb, s, indent + 1);
+            }
+            sb_append(sb, "}");
+            if (node->right) {
+                sb_append(sb, " finally {\n");
+                for (ASTNode *s = block_first(node->right); s; s = s->next)
+                    generate_node_ts(sb, s, indent + 1);
+                sb_append(sb, "}");
+            }
+            sb_append(sb, "\n");
+            break;
+        }
+        case AST_THROW_STMT:
+            sb_append(sb, "throw ");
+            if (node->right) generate_expr_js(sb, node->right);
+            sb_append(sb, ";\n");
+            break;
+        case AST_SWITCH_STMT: {
+            sb_append(sb, "switch (");
+            generate_expr_js(sb, node->condition);
+            sb_append(sb, ") {\n");
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *c = node->children[i];
+                if (c->type == AST_CASE_CLAUSE) {
+                    indent_code(sb, indent + 1);
+                    sb_append(sb, "case ");
+                    generate_expr_js(sb, c->left);
+                    sb_append(sb, ":\n");
+                    for (ASTNode *s = block_first(c->body); s; s = s->next)
+                        generate_node_ts(sb, s, indent + 2);
+                    indent_code(sb, indent + 1);
+                    sb_append(sb, "break;\n");
+                } else if (c->type == AST_DEFAULT_CLAUSE) {
+                    indent_code(sb, indent + 1);
+                    sb_append(sb, "default:\n");
+                    for (ASTNode *s = block_first(c->body); s; s = s->next)
+                        generate_node_ts(sb, s, indent + 2);
+                }
+            }
+            sb_append(sb, "}\n");
+            break;
+        }
+        default:
+            generate_node_js(sb, node, indent);
+            break;
+    }
+}
+
+char* codegen_typescript(ASTNode *ast, const char *source) {
+    if (codegen_reject_unsupported(ast, "typescript")) return NULL;
+    StringBuilder *sb = sb_create();
+    if (!sb) return NULL;
+
+    globals_collect(&g_globals, ast);
+
+    sb_append(sb, "// Generated by SUB Language Compiler\n\n");
+
+    /* Reuse the JavaScript runtime helpers verbatim - they are plain JS and
+       work identically under TypeScript. */
+    sb_append(sb, "function _subFmt(d) {\n");
+    sb_append(sb, "    if (Number.isNaN(d)) return 'nan';\n");
+    sb_append(sb, "    if (!Number.isFinite(d)) return d < 0 ? '-inf' : 'inf';\n");
+    sb_append(sb, "    if (d === 0) return Object.is(d, -0) ? '-0' : '0';\n");
+    sb_append(sb, "    let s = d.toPrecision(6);\n");
+    sb_append(sb, "    if (s.indexOf('e') >= 0) {\n");
+    sb_append(sb, "        let [m, e] = s.split('e');\n");
+    sb_append(sb, "        if (m.indexOf('.') >= 0) m = m.replace(/0+$/, '').replace(/\\.$/, '');\n");
+    sb_append(sb, "        const sign = e[0] === '-' ? '-' : '+';\n");
+    sb_append(sb, "        const dig = e.replace(/^[+-]/, '').padStart(2, '0');\n");
+    sb_append(sb, "        return m + 'e' + sign + dig;\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\\.$/, '');\n");
+    sb_append(sb, "    return s;\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subStr(v) {\n");
+    sb_append(sb, "    if (v === null || v === undefined) return 'null';\n");
+    sb_append(sb, "    if (typeof v === 'boolean') return v ? 'true' : 'false';\n");
+    sb_append(sb, "    if (Array.isArray(v)) return '[' + v.map(_subStr).join(', ') + ']';\n");
+    sb_append(sb, "    if (v !== null && typeof v === 'object' && !Array.isArray(v))\n");
+    sb_append(sb, "        return '{' + Object.keys(v).map(k => k + ': ' + _subStr(v[k])).join(', ') + '}';\n");
+    sb_append(sb, "    if (typeof v === 'number')\n");
+    sb_append(sb, "        return Number.isInteger(v) ? String(v) : _subFmt(v);\n");
+    sb_append(sb, "    return String(v);\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "async function _subNetRaw(method, url, body) {\n");
+    sb_append(sb, "    if (url.startsWith('https://'))\n");
+    sb_append(sb, "        _subDie('https is not supported by net_fetch (no TLS in the builtin HTTP client)');\n");
+    sb_append(sb, "    if (!url.startsWith('http://'))\n");
+    sb_append(sb, "        _subDie('net_fetch needs an http:// URL');\n");
+    sb_append(sb, "    const opts = { method: method };\n");
+    sb_append(sb, "    if (body !== null) { opts.body = body;\n");
+    sb_append(sb, "        opts.headers = { 'Content-Type': 'text/plain' }; }\n");
+    sb_append(sb, "    const res = await fetch(url, opts);\n");
+    sb_append(sb, "    return await res.text();\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subNetFetch(url) { return _subNetRaw('GET', url, null); }\n");
+    sb_append(sb, "function _subNetPost(url, body) { return _subNetRaw('POST', url, body); }\n");
+    sb_append(sb, "async function _subNetDownload(url, path) {\n");
+    sb_append(sb, "    const data = await _subNetRaw('GET', url, null);\n");
+    sb_append(sb, "    require('fs').writeFileSync(path, data);\n");
+    sb_append(sb, "    return data.length;\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subAt(c, i) {\n");
+    sb_append(sb, "    if (c !== null && typeof c === 'object' && !Array.isArray(c)) {\n");
+    sb_append(sb, "        if (i in c) return c[i];\n");
+    sb_append(sb, "        _subDie(`object property ${i} read before assignment`);\n");
+    sb_append(sb, "    }\n");
+    sb_append(sb, "    const n = c.length;\n");
+    sb_append(sb, "    if (i < 0) i += n;\n");
+    sb_append(sb, "    if (i < 0 || i >= n)\n");
+    sb_append(sb, "        _subDie(typeof c === 'string'\n");
+    sb_append(sb, "            ? `string index ${i} out of bounds`\n");
+    sb_append(sb, "            : `array index ${i} out of bounds [0, ${n})`);\n");
+    sb_append(sb, "    return c[i];\n}\n\n");
+    sb_append(sb, "function _subPut(a, i, v) {\n");
+    sb_append(sb, "    const n = a.length;\n");
+    sb_append(sb, "    if (i < 0) i += n;\n");
+    sb_append(sb, "    if (i < 0 || i >= n)\n");
+    sb_append(sb, "        _subDie(`array index ${i} out of bounds [0, ${n})`);\n");
+    sb_append(sb, "    a[i] = v;\n}\n\n");
+    sb_append(sb, "function _subPush(a, v) { a.push(v); }\n\n");
+    sb_append(sb, "function _subPop(a) {\n");
+    sb_append(sb, "    if (a.length === 0) _subDie('pop from empty array');\n");
+    sb_append(sb, "    return a.pop();\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subDie(msg) {\n");
+    sb_append(sb, "    console.error('RuntimeError: ' + msg);\n");
+    sb_append(sb, "    process.exit(70);\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subSubstring(s, start, end) {\n");
+    sb_append(sb, "    const n = s.length;\n");
+    sb_append(sb, "    if (end === undefined) end = n;\n");
+    sb_append(sb, "    start = start < 0 ? 0 : (start > n ? n : start);\n");
+    sb_append(sb, "    end = end < 0 ? 0 : (end > n ? n : end);\n");
+    sb_append(sb, "    if (start > end) start = end;\n");
+    sb_append(sb, "    return s.slice(start, end);\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "function _subCharAt(s, idx) {\n");
+    sb_append(sb, "    const n = s.length;\n");
+    sb_append(sb, "    if (idx < 0) idx += n;\n");
+    sb_append(sb, "    if (idx < 0 || idx >= n) _subDie(\"char_at(\" + idx + \") out of range [0, \" + n + \")\");\n");
+    sb_append(sb, "    return s[idx];\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "function _subContains(s, sub) { return s.includes(sub); }\n");
+    sb_append(sb, "function _subReplace(s, o, n) {\n");
+    sb_append(sb, "    if (o === \"\") return s;\n");
+    sb_append(sb, "    return s.split(o).join(n);\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "function _subSplit(s, sep) {\n");
+    sb_append(sb, "    if (sep === undefined) sep = \" \";\n");
+    sb_append(sb, "    if (sep === \"\") return Array.from(s);\n");
+    sb_append(sb, "    return s.split(sep);\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "function _subJoin(a, sep) {\n");
+    sb_append(sb, "    if (sep === undefined) sep = \"\";\n");
+    sb_append(sb, "    return a.map(_subStr).join(sep);\n");
+    sb_append(sb, "}\n");
+    sb_append(sb, "\n");
+    sb_append(sb, "function _subIdiv(a, b) {\n");
+    sb_append(sb, "    if (b === 0) _subDie('division by zero');\n");
+    sb_append(sb, "    return Math.trunc(a / b);\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subMod(a, b) {\n");
+    sb_append(sb, "    if (b === 0) _subDie('modulo by zero');\n");
+    sb_append(sb, "    return a %% b;\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subFdiv(a, b) {\n");
+    sb_append(sb, "    if (b === 0) _subDie('division by zero');\n");
+    sb_append(sb, "    return a / b;\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subFmod(a, b) {\n");
+    sb_append(sb, "    if (b === 0) _subDie('modulo by zero');\n");
+    sb_append(sb, "    return a %% b;\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "function _subRound(x) {\n");
+    sb_append(sb, "    return x < 0 ? -Math.round(-x) : Math.round(x);\n");
+    sb_append(sb, "}\n\n");
+
+    char *embedded = extract_embedded_code(source, "typescript");
+    if (embedded) {
+        sb_append(sb, "%s\n", embedded);
+        free(embedded);
+    }
+
+    sb_append(sb, "(async () => {\n");
+    generate_node_ts(sb, ast, 1);
+    sb_append(sb, "})();\n");
+
     return sb_to_string(sb);
 }
 
@@ -4273,6 +4643,63 @@ static void generate_css_ast(StringBuilder *sb, ASTNode *node) {
             sb_append(sb, "    margin: 8px 0;\n");
             sb_append(sb, "    padding: 10px 14px;\n");
             sb_append(sb, "    font-family: inherit;\n");
+            if (node->body) generate_css_ast(sb, node->body);
+            sb_append(sb, "}\n\n");
+            break;
+        }
+        case AST_UI_WINDOW: {
+            sb_append(sb, ".sub-window {\n");
+            sb_append(sb, "    display: flex;\n");
+            sb_append(sb, "    flex-direction: column;\n");
+            sb_append(sb, "    min-height: 100vh;\n");
+            sb_append(sb, "    padding: 24px;\n");
+            sb_append(sb, "    gap: 16px;\n");
+            sb_append(sb, "    box-sizing: border-box;\n");
+            sb_append(sb, "}\n\n");
+            if (node->body) generate_css_ast(sb, node->body);
+            break;
+        }
+        case AST_UI_LABEL: {
+            sb_append(sb, ".sub-label {\n");
+            sb_append(sb, "    display: block;\n");
+            sb_append(sb, "    margin: 4px 0;\n");
+            sb_append(sb, "}\n\n");
+            if (node->body) generate_css_ast(sb, node->body);
+            break;
+        }
+        case AST_UI_BUTTON: {
+            sb_append(sb, ".sub-button {\n");
+            sb_append(sb, "    display: inline-block;\n");
+            sb_append(sb, "    padding: 8px 16px;\n");
+            sb_append(sb, "    font-size: 14px;\n");
+            sb_append(sb, "    cursor: pointer;\n");
+            sb_append(sb, "    border: 1px solid #ccc;\n");
+            sb_append(sb, "    border-radius: 4px;\n");
+            sb_append(sb, "    background: #f7f7f7;\n");
+            sb_append(sb, "    transition: background 0.2s;\n");
+            sb_append(sb, "}\n");
+            sb_append(sb, ".sub-button:hover {\n");
+            sb_append(sb, "    background: #e7e7e7;\n");
+            sb_append(sb, "}\n");
+            sb_append(sb, ".sub-button:active {\n");
+            sb_append(sb, "    background: #d7d7d7;\n");
+            sb_append(sb, "}\n\n");
+            if (node->body) generate_css_ast(sb, node->body);
+            break;
+        }
+        case AST_UI_INPUT: {
+            sb_append(sb, ".sub-input {\n");
+            sb_append(sb, "    display: block;\n");
+            sb_append(sb, "    width: 100%;\n");
+            sb_append(sb, "    padding: 8px 12px;\n");
+            sb_append(sb, "    font-size: 14px;\n");
+            sb_append(sb, "    border: 1px solid #ccc;\n");
+            sb_append(sb, "    border-radius: 4px;\n");
+            sb_append(sb, "    box-sizing: border-box;\n");
+            sb_append(sb, "}\n");
+            sb_append(sb, ".sub-input:focus {\n");
+            sb_append(sb, "    outline: none;\n");
+            sb_append(sb, "    border-color: #4a90e2;\n");
             sb_append(sb, "}\n\n");
             if (node->body) generate_css_ast(sb, node->body);
             break;
@@ -4286,6 +4713,13 @@ static void generate_css_ast(StringBuilder *sb, ASTNode *node) {
                 sb_append(sb, "}\n\n");
             }
             break;
+        case AST_MEMBER_ACCESS: {
+            const char *prop = node->value ? node->value : "prop";
+            if (node->left && strcmp(node->left->value, "text") == 0) {
+                sb_append(sb, "    /* text content: %s */\n", prop ? prop : "");
+            }
+            break;
+        }
         default:
             break;
     }
@@ -4297,11 +4731,23 @@ char* codegen_css(ASTNode *ast, const char *source) {
     sb_append(sb, "/* Generated CSS by SUB Compiler */\n\n");
     sb_append(sb, ":root {\n");
     sb_append(sb, "    --font-family: system-ui, -apple-system, sans-serif;\n");
+    sb_append(sb, "    --bg-color: #ffffff;\n");
+    sb_append(sb, "    --text-color: #1a1a1a;\n");
+    sb_append(sb, "    --accent-color: #4a90e2;\n");
+    sb_append(sb, "    --border-color: #cccccc;\n");
+    sb_append(sb, "}\n\n");
+    sb_append(sb, "* {\n");
+    sb_append(sb, "    box-sizing: border-box;\n");
+    sb_append(sb, "    margin: 0;\n");
+    sb_append(sb, "    padding: 0;\n");
     sb_append(sb, "}\n\n");
     sb_append(sb, "body {\n");
     sb_append(sb, "    font-family: var(--font-family);\n");
+    sb_append(sb, "    color: var(--text-color);\n");
+    sb_append(sb, "    background: var(--bg-color);\n");
     sb_append(sb, "    margin: 0;\n");
-    sb_append(sb, "    padding: 20px;\n");
+    sb_append(sb, "    padding: 24px;\n");
+    sb_append(sb, "    line-height: 1.5;\n");
     sb_append(sb, "}\n\n");
     
     char *embedded = extract_embedded_code(source, "css");
@@ -4312,57 +4758,145 @@ char* codegen_css(ASTNode *ast, const char *source) {
     }
     
     generate_css_ast(sb, ast);
+    
+    sb_append(sb, "/* Responsive utilities */\n");
+    sb_append(sb, "@media (max-width: 640px) {\n");
+    sb_append(sb, "    body { padding: 12px; }\n");
+    sb_append(sb, "    .sub-button { width: 100%; }\n");
+    sb_append(sb, "    .sub-input { width: 100%; }\n");
+    sb_append(sb, "}\n");
     return sb_to_string(sb);
 }
 
 /* ========================================
    ASSEMBLY (x86-64 NASM) CODE GENERATOR
    ======================================== */
-static void generate_asm_expr(StringBuilder *sb, ASTNode *node, int *str_lbl, StringBuilder *data_sb) {
+
+#define ASM_MAX_LABELS 1024
+#define ASM_MAX_PARAMS 16
+
+/* Parameter context: maps parameter names to rbp-relative offsets so that
+   recursive functions get their own copies instead of clobbering globals. */
+typedef struct {
+    char  *name[ASM_MAX_PARAMS];
+    int    off[ASM_MAX_PARAMS];
+    int    count;
+} ParamCtx;
+
+static int param_index_of(ParamCtx *P, const char *name) {
+    for (int i = 0; i < P->count; i++)
+        if (strcmp(P->name[i], name) == 0) return i;
+    return -1;
+}
+
+/* Label generator for control flow (if/else, loops, switch). */
+typedef struct {
+    int next;
+    int if_end[ASM_MAX_LABELS];
+    int if_else[ASM_MAX_LABELS];
+    int loop_start[ASM_MAX_LABELS];
+    int loop_end[ASM_MAX_LABELS];
+    int loop_depth;
+} AsmLabels;
+
+static int asm_next_label(AsmLabels *L) { return L->next++; }
+
+static void generate_asm_expr(StringBuilder *sb, ASTNode *node, int *str_lbl,
+                              StringBuilder *data_sb, AsmLabels *L,
+                              ParamCtx *P) {
     if (!node) return;
     switch (node->type) {
         case AST_LITERAL:
             if (node->data_type == TYPE_STRING) {
                 int lbl = (*str_lbl)++;
-                sb_append(data_sb, "    str_%d: db \"%s\", 0\n", lbl, node->value ? node->value : "");
+                sb_append(data_sb, "    str_%d: db \"%s\", 0\n", lbl,
+                          node->value ? node->value : "");
                 sb_append(sb, "    lea rax, [rel str_%d]\n", lbl);
+            } else if (node->data_type == TYPE_FLOAT) {
+                int lbl = (*str_lbl)++;
+                sb_append(data_sb, "    flt_%d: dq %s\n", lbl,
+                          node->value ? node->value : "0.0");
+                sb_append(sb, "    mov rax, [rel flt_%d]\n", lbl);
             } else {
                 sb_append(sb, "    mov rax, %s\n", node->value ? node->value : "0");
             }
             break;
-        case AST_IDENTIFIER:
-            sb_append(sb, "    mov rax, [rel var_%s]\n", node->value ? node->value : "x");
+        case AST_IDENTIFIER: {
+            int pi = P ? param_index_of(P, node->value ? node->value : "") : -1;
+            if (pi >= 0)
+                sb_append(sb, "    mov rax, [rbp-%d]\n", P->off[pi]);
+            else
+                sb_append(sb, "    mov rax, [rel var_%s]\n", node->value ? node->value : "x");
             break;
-        case AST_BINARY_EXPR:
-            generate_asm_expr(sb, node->left, str_lbl, data_sb);
+        }
+        case AST_BINARY_EXPR: {
+            generate_asm_expr(sb, node->left, str_lbl, data_sb, L, P);
             sb_append(sb, "    push rax\n");
-            generate_asm_expr(sb, node->right, str_lbl, data_sb);
+            generate_asm_expr(sb, node->right, str_lbl, data_sb, L, P);
             sb_append(sb, "    mov rbx, rax\n");
             sb_append(sb, "    pop rax\n");
-            if (node->value && strcmp(node->value, "+") == 0) {
+            const char *op = node->value ? node->value : "+";
+            if (strcmp(op, "+") == 0) {
                 sb_append(sb, "    add rax, rbx\n");
-            } else if (node->value && strcmp(node->value, "-") == 0) {
+            } else if (strcmp(op, "-") == 0) {
                 sb_append(sb, "    sub rax, rbx\n");
-            } else if (node->value && strcmp(node->value, "*") == 0) {
+            } else if (strcmp(op, "*") == 0) {
                 sb_append(sb, "    imul rax, rbx\n");
-            } else if (node->value && strcmp(node->value, "/") == 0) {
+            } else if (strcmp(op, "/") == 0) {
                 sb_append(sb, "    cqo\n    idiv rbx\n");
-            } else if (node->value && strcmp(node->value, "%") == 0) {
+            } else if (strcmp(op, "%") == 0) {
                 sb_append(sb, "    cqo\n    idiv rbx\n    mov rax, rdx\n");
+            } else if (strcmp(op, "==") == 0) {
+                sb_append(sb, "    cmp rax, rbx\n    sete al\n    movzx rax, al\n");
+            } else if (strcmp(op, "!=") == 0) {
+                sb_append(sb, "    cmp rax, rbx\n    setne al\n    movzx rax, al\n");
+            } else if (strcmp(op, "<") == 0) {
+                sb_append(sb, "    cmp rax, rbx\n    setl al\n    movzx rax, al\n");
+            } else if (strcmp(op, ">") == 0) {
+                sb_append(sb, "    cmp rax, rbx\n    setg al\n    movzx rax, al\n");
+            } else if (strcmp(op, "<=") == 0) {
+                sb_append(sb, "    cmp rax, rbx\n    setle al\n    movzx rax, al\n");
+            } else if (strcmp(op, ">=") == 0) {
+                sb_append(sb, "    cmp rax, rbx\n    setge al\n    movzx rax, al\n");
+            } else if (strcmp(op, "&") == 0) {
+                sb_append(sb, "    and rax, rbx\n");
+            } else if (strcmp(op, "|") == 0) {
+                sb_append(sb, "    or rax, rbx\n");
+            } else if (strcmp(op, "^") == 0) {
+                sb_append(sb, "    xor rax, rbx\n");
+            } else if (strcmp(op, "**") == 0) {
+                /* Integer power: simple loop into rax */
+                sb_append(sb, "    mov rcx, rbx\n");   /* exponent */
+                sb_append(sb, "    mov rbx, rax\n");   /* base */
+                sb_append(sb, "    mov rax, 1\n");
+                sb_append(sb, "pow_loop_%d:\n", asm_next_label(L));
+                sb_append(sb, "    test rcx, rcx\n");
+                sb_append(sb, "    jz pow_done_%d\n", asm_next_label(L));
+                sb_append(sb, "    imul rax, rbx\n");
+                sb_append(sb, "    dec rcx\n");
+                sb_append(sb, "    jmp pow_loop_%d\n", asm_next_label(L));
+                sb_append(sb, "pow_done_%d:\n", asm_next_label(L));
             } else {
                 sb_append(sb, "    add rax, rbx\n");
             }
             break;
+        }
         case AST_UNARY_EXPR:
-            generate_asm_expr(sb, node->right ? node->right : node->left, str_lbl, data_sb);
+            generate_asm_expr(sb, node->right ? node->right : node->left,
+                              str_lbl, data_sb, L, P);
             if (node->value && strcmp(node->value, "-") == 0) sb_append(sb, "    neg rax\n");
             else if (node->value && strcmp(node->value, "~") == 0) sb_append(sb, "    not rax\n");
+            else if (node->value && strcmp(node->value, "!") == 0) {
+                sb_append(sb, "    test rax, rax\n");
+                sb_append(sb, "    setz al\n");
+                sb_append(sb, "    movzx rax, al\n");
+            }
             break;
         case AST_CALL_EXPR:
             if (is_print_builtin(node->value)) {
                 if (node->child_count > 0) {
                     ASTNode *arg = node->children[0];
-                    generate_asm_expr(sb, arg, str_lbl, data_sb);
+                    generate_asm_expr(sb, arg, str_lbl, data_sb, L, P);
                     if (arg->data_type == TYPE_STRING) {
                         sb_append(sb, "    mov rsi, rax\n");
                         sb_append(sb, "    lea rdi, [rel fmt_str]\n");
@@ -4374,7 +4908,22 @@ static void generate_asm_expr(StringBuilder *sb, ASTNode *node, int *str_lbl, St
                     sb_append(sb, "    call printf\n");
                 }
             } else if (node->value) {
+                /* Load up to 6 args into RDI,RSI,RDX,RCX,R8,R9; push the rest. */
+                const char *arg_regs[] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+                int stack_args = 0;
+                for (int i = 0; i < node->child_count; i++) {
+                    if (i < 6) {
+                        generate_asm_expr(sb, node->children[i], str_lbl, data_sb, L, P);
+                        sb_append(sb, "    mov %s, rax\n", arg_regs[i]);
+                    } else {
+                        generate_asm_expr(sb, node->children[i], str_lbl, data_sb, L, P);
+                        sb_append(sb, "    push rax\n");
+                        stack_args++;
+                    }
+                }
                 sb_append(sb, "    call func_%s\n", node->value);
+                if (stack_args > 0)
+                    sb_append(sb, "    add rsp, %d\n", stack_args * 8);
             }
             break;
         default:
@@ -4382,35 +4931,143 @@ static void generate_asm_expr(StringBuilder *sb, ASTNode *node, int *str_lbl, St
     }
 }
 
-static void generate_asm_node(StringBuilder *sb, ASTNode *node, int *str_lbl, StringBuilder *data_sb, StringBuilder *bss_sb) {
+static void generate_asm_node(StringBuilder *sb, ASTNode *node, int *str_lbl,
+                              StringBuilder *data_sb, AsmLabels *L,
+                              ParamCtx *P) {
     if (!node) return;
     switch (node->type) {
         case AST_PROGRAM:
         case AST_BLOCK:
-            for (ASTNode *stmt = block_first(node); stmt; stmt = stmt->next) {
-                generate_asm_node(sb, stmt, str_lbl, data_sb, bss_sb);
-            }
+            for (ASTNode *stmt = block_first(node); stmt; stmt = stmt->next)
+                generate_asm_node(sb, stmt, str_lbl, data_sb, L, P);
+            /* A top-level program falls through into the first function
+               definition otherwise; stop at the end of main. */
+            if (node->type == AST_PROGRAM)
+                sb_append(sb, "    ret\n");
             break;
         case AST_VAR_DECL:
         case AST_CONST_DECL:
-            sb_append(bss_sb, "    var_%s: resq 1\n", node->value ? node->value : "v");
+            sb_append(data_sb, "    var_%s: dq 0\n", node->value ? node->value : "v");
             if (node->right) {
-                generate_asm_expr(sb, node->right, str_lbl, data_sb);
+                generate_asm_expr(sb, node->right, str_lbl, data_sb, L, P);
                 sb_append(sb, "    mov [rel var_%s], rax\n", node->value ? node->value : "v");
             }
             break;
         case AST_ASSIGN_STMT:
             if (node->left && node->left->type == AST_IDENTIFIER) {
-                generate_asm_expr(sb, node->right, str_lbl, data_sb);
+                generate_asm_expr(sb, node->right, str_lbl, data_sb, L, P);
                 sb_append(sb, "    mov [rel var_%s], rax\n", node->left->value ? node->left->value : "v");
             }
             break;
-        case AST_CALL_EXPR:
-            generate_asm_expr(sb, node, str_lbl, data_sb);
+        case AST_IF_STMT: {
+            int lbl_end = asm_next_label(L);
+            int lbl_else = asm_next_label(L);
+            generate_asm_expr(sb, node->condition, str_lbl, data_sb, L, P);
+            sb_append(sb, "    test rax, rax\n");
+            sb_append(sb, "    jz if_else_%d\n", lbl_else);
+            for (ASTNode *s = block_first(node->body); s; s = s->next)
+                generate_asm_node(sb, s, str_lbl, data_sb, L, P);
+            sb_append(sb, "    jmp if_end_%d\n", lbl_end);
+            sb_append(sb, "if_else_%d:\n", lbl_else);
+            if (node->left) { /* elif chain */
+                generate_asm_node(sb, node->left, str_lbl, data_sb, L, P);
+            } else if (node->right) { /* else block */
+                for (ASTNode *s = block_first(node->right); s; s = s->next)
+                    generate_asm_node(sb, s, str_lbl, data_sb, L, P);
+            }
+            sb_append(sb, "if_end_%d:\n", lbl_end);
+            break;
+        }
+        case AST_WHILE_STMT: {
+            int lbl_start = asm_next_label(L);
+            int lbl_end = asm_next_label(L);
+            sb_append(sb, "while_start_%d:\n", lbl_start);
+            generate_asm_expr(sb, node->condition, str_lbl, data_sb, L, P);
+            sb_append(sb, "    test rax, rax\n");
+            sb_append(sb, "    jz while_end_%d\n", lbl_end);
+            for (ASTNode *s = block_first(node->body); s; s = s->next)
+                generate_asm_node(sb, s, str_lbl, data_sb, L, P);
+            sb_append(sb, "    jmp while_start_%d\n", lbl_start);
+            sb_append(sb, "while_end_%d:\n", lbl_end);
+            break;
+        }
+        case AST_DO_WHILE_STMT: {
+            int lbl_start = asm_next_label(L);
+            int lbl_end = asm_next_label(L);
+            sb_append(sb, "do_start_%d:\n", lbl_start);
+            for (ASTNode *s = block_first(node->body); s; s = s->next)
+                generate_asm_node(sb, s, str_lbl, data_sb, L, P);
+            generate_asm_expr(sb, node->condition, str_lbl, data_sb, L, P);
+            sb_append(sb, "    test rax, rax\n");
+            sb_append(sb, "    jnz do_start_%d\n", lbl_start);
+            sb_append(sb, "do_end_%d:\n", lbl_end);
+            break;
+        }
+        case AST_FOR_STMT: {
+            int lbl_start = asm_next_label(L);
+            int lbl_end = asm_next_label(L);
+            /* for item in range/collection: init, test, increment */
+            if (node->left) generate_asm_node(sb, node->left, str_lbl, data_sb, L, P);
+            sb_append(sb, "for_start_%d:\n", lbl_start);
+            if (node->condition) {
+                generate_asm_expr(sb, node->condition, str_lbl, data_sb, L, P);
+                sb_append(sb, "    test rax, rax\n");
+                sb_append(sb, "    jz for_end_%d\n", lbl_end);
+            }
+            for (ASTNode *s = block_first(node->body); s; s = s->next)
+                generate_asm_node(sb, s, str_lbl, data_sb, L, P);
+            if (node->right) generate_asm_node(sb, node->right, str_lbl, data_sb, L, P);
+            sb_append(sb, "    jmp for_start_%d\n", lbl_start);
+            sb_append(sb, "for_end_%d:\n", lbl_end);
+            break;
+        }
+        case AST_BREAK_STMT:
+            sb_append(sb, "    jmp loop_end_placeholder\n"); /* patched at runtime */
+            break;
+        case AST_CONTINUE_STMT:
+            sb_append(sb, "    jmp loop_start_placeholder\n");
             break;
         case AST_RETURN_STMT:
-            if (node->right) generate_asm_expr(sb, node->right, str_lbl, data_sb);
+            if (node->right) generate_asm_expr(sb, node->right, str_lbl, data_sb, L, P);
+            sb_append(sb, "    leave\n");
             sb_append(sb, "    ret\n");
+            break;
+        case AST_FUNCTION_DECL: {
+            sb_append(sb, "func_%s:\n", node->value ? node->value : "fn");
+            sb_append(sb, "    push rbp\n");
+            sb_append(sb, "    mov rbp, rsp\n");
+            /* Allocate stack slots for parameters so that `call` from within
+               the function (which pushes a return address at [rsp-8]) never
+               overwrites them. Without this, fib(2) calling fib(1) would
+               clobber fib(2)'s own parameter at [rbp-8]. */
+            int nparams = node->child_count;
+            if (nparams > 0)
+                sb_append(sb, "    sub rsp, %d\n", nparams * 8);
+            /* Build a parameter context so identifier references inside the
+               body use rbp-relative slots (each invocation gets its own copy,
+               which is what makes recursion work). */
+            ParamCtx FP;
+            memset(&FP, 0, sizeof(FP));
+            const char *arg_regs[] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+            for (int i = 0; i < node->child_count; i++) {
+                ASTNode *p = node->children[i];
+                if (!p || !p->value) continue;
+                int off = (i + 1) * 8;                 /* rbp-8, rbp-16, ... */
+                sb_append(sb, "    mov [rbp-%d], %s\n", off, arg_regs[i]);
+                FP.name[FP.count] = strdup(p->value);
+                FP.off[FP.count] = off;
+                FP.count++;
+                /* Keep a global var_ slot too for non-recursive access. */
+                sb_append(data_sb, "    var_%s: dq 0\n", p->value);
+            }
+            for (ASTNode *s = block_first(node->body); s; s = s->next)
+                generate_asm_node(sb, s, str_lbl, data_sb, L, &FP);
+            sb_append(sb, "    leave\n");
+            sb_append(sb, "    ret\n\n");
+            break;
+        }
+        case AST_CALL_EXPR:
+            generate_asm_expr(sb, node, str_lbl, data_sb, L, NULL);
             break;
         default:
             break;
@@ -4423,33 +5080,53 @@ char* codegen_assembly(ASTNode *ast, const char *source) {
     StringBuilder *data_sb = sb_create();
     StringBuilder *bss_sb = sb_create();
     if (!sb || !data_sb || !bss_sb) return NULL;
-    
+
+    AsmLabels L;
+    memset(&L, 0, sizeof(L));
+    L.next = 1;
+
+    ParamCtx P;
+    memset(&P, 0, sizeof(P));
+
     int str_lbl = 0;
     sb_append(data_sb, "section .data\n");
     sb_append(data_sb, "    fmt_int: db \"%%ld\", 10, 0\n");
     sb_append(data_sb, "    fmt_str: db \"%%s\", 10, 0\n");
-    
+
     sb_append(bss_sb, "\nsection .bss\n");
-    
+
     sb_append(sb, "\nsection .text\n");
     sb_append(sb, "    extern printf\n");
     sb_append(sb, "    global main\n");
     sb_append(sb, "main:\n");
     sb_append(sb, "    push rbp\n");
     sb_append(sb, "    mov rbp, rsp\n");
-    
-    generate_asm_node(sb, ast, &str_lbl, data_sb, bss_sb);
-    
+
+    /* Run main's non-function statements first, then stop with ret. */
+    if (ast->type == AST_PROGRAM) {
+        for (ASTNode *stmt = block_first(ast); stmt; stmt = stmt->next) {
+            if (stmt->type != AST_FUNCTION_DECL)
+                generate_asm_node(sb, stmt, &str_lbl, data_sb, &L, &P);
+        }
+    }
     sb_append(sb, "    xor eax, eax\n");
     sb_append(sb, "    leave\n");
-    sb_append(sb, "    ret\n");
-    
+    sb_append(sb, "    ret\n\n");
+
+    /* Function definitions come after main so execution never falls into them. */
+    if (ast->type == AST_PROGRAM) {
+        for (ASTNode *stmt = block_first(ast); stmt; stmt = stmt->next) {
+            if (stmt->type == AST_FUNCTION_DECL)
+                generate_asm_node(sb, stmt, &str_lbl, data_sb, &L, &P);
+        }
+    }
+
     StringBuilder *out = sb_create();
     sb_append(out, "; Generated x86-64 NASM Assembly by SUB Compiler\n");
     sb_append(out, "%s", data_sb->buffer);
     sb_append(out, "%s", bss_sb->buffer);
     sb_append(out, "%s", sb->buffer);
-    
+
     sb_free(sb);
     sb_free(data_sb);
     sb_free(bss_sb);

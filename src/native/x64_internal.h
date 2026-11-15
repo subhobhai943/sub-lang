@@ -62,6 +62,14 @@ typedef enum {
     RT_ARR_STR,    /* rdi=array                   -> rax=ptr        */
     RT_ARR_COPY,   /* rdi=array                   -> rax=new array  */
 
+    /* Performance-critical additions. RT_MEMCPY copies n bytes without the
+       per-byte loop overhead of the C backend's memcpy; RT_STRTOL parses a
+       decimal integer from a NUL-terminated string (used by int()); and
+       RT_ARR_CONTAINS linearly scans an array for a value. */
+    RT_MEMCPY,     /* rdi=dst, rsi=src, rdx=n                    */
+    RT_STRTOL,     /* rdi=ptr                    -> rax=i64      */
+    RT_ARR_CONTAINS, /* rdi=array, rsi=value        -> rax=0/1    */
+
     /* Objects: the same shape the C backend emits - a fixed header with
        count/capacity and a separate block of {key, val, kind} slots.
        Values are tagged 64-bit slots like array elements. */

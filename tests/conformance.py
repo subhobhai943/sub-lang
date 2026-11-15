@@ -69,6 +69,8 @@ TARGETS = {
     NATIVE_C:     dict(ext=None,    need="gcc",     build=[], run=[]),
     "python":     dict(ext="py",    need="python3", build=[], run=["python3", "{src}"]),
     "javascript": dict(ext="js",    need="node",    build=[], run=["node", "{src}"]),
+    "typescript": dict(ext="ts",    need="tsc",     build=[["tsc", "{src}"]],
+                       run=["node", "{src}.js"]),
     "ruby":       dict(ext="rb",    need="ruby",    build=[], run=["ruby", "{src}"]),
     "c":          dict(ext="c",     need="gcc",
                        build=[["gcc", "-o", "{exe}", "{src}", "-lm"]],

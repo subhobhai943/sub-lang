@@ -1712,6 +1712,136 @@ static void emit_arr_str(NCtx *c) {
 }
 
 /* ----------------------------------------------------------------
+   RT_MEMCPY - bulk memory copy.
+   Copies rdx bytes from rsi to rdi using 64-bit moves where possible, then
+   byte moves for the tail. This beats calling out to libc memcpy because the
+   routine is already resident and no PLT indirection is involved.
+   ---------------------------------------------------------------- */
+
+static void emit_memcpy(NCtx *c) {
+    e_push(T, RCX); e_push(T, R8); e_push(T, R9);
+    e_mov_r_r(T, R8, RDI);   /* dst */
+    e_mov_r_r(T, R9, RSI);   /* src */
+    e_mov_r_r(T, RCX, RDX);   /* count */
+
+    /* Copy 8 bytes at a time while count >= 8. */
+    e_cmp_r_imm(T, RCX, 8);
+    size_t done8 = e_jcc(T, CC_L);
+    size_t loop8 = T->len;
+    e_mov_r_mem(T, RAX, R9, 0);
+    e_mov_mem_r(T, R8, 0, RAX);
+    e_add_r_imm(T, R8, 8);
+    e_add_r_imm(T, R9, 8);
+    e_sub_r_imm(T, RCX, 8);
+    size_t again8 = e_jcc(T, CC_GE);
+    e_patch_rel32(T, again8, loop8);
+    here(c, done8);
+
+    /* Tail: byte-at-a-time. */
+    e_test_r_r(T, RCX, RCX);
+    size_t done1 = e_jcc(T, CC_E);
+    size_t loop1 = T->len;
+    e_movzx_r_mem8(T, RAX, R9, 0);
+    e_mov_mem8_r(T, R8, 0, RAX);
+    e_add_r_imm(T, R8, 1);
+    e_add_r_imm(T, R9, 1);
+    e_sub_r_imm(T, RCX, 1);
+    size_t again1 = e_jcc(T, CC_NE);
+    e_patch_rel32(T, again1, loop1);
+    here(c, done1);
+
+    e_pop(T, R9); e_pop(T, R8); e_pop(T, RCX);
+    e_ret(T);
+}
+
+/* ----------------------------------------------------------------
+   RT_STRTOL - parse a decimal integer from a NUL-terminated string.
+   Returns the value in RAX. Stops at the first non-digit (like atoi),
+   which is what int("42abc") should do in SUB: 42.
+   ---------------------------------------------------------------- */
+
+static void emit_strtol(NCtx *c) {
+    e_push(T, RBX); e_push(T, RCX);
+    e_xor_r_r(T, RAX, RAX);       /* accumulator */
+    e_mov_r_r(T, RBX, RDI);       /* cursor */
+    e_xor_r_r(T, RCX, RCX);       /* negative flag */
+
+    /* Optional leading sign. */
+    e_movzx_r_mem8(T, RDX, RBX, 0);
+    e_cmp_r_imm(T, RDX, '-');
+    size_t has_minus = e_jcc(T, CC_E);
+    e_cmp_r_imm(T, RDX, '+');
+    size_t has_plus = e_jcc(T, CC_E);
+    size_t no_sign = e_jmp(T);
+    here(c, has_minus); here(c, has_plus);
+    e_mov_r_imm64(T, RCX, 1);
+    e_add_r_imm(T, RBX, 1);
+    here(c, no_sign);
+
+    size_t loop = T->len;
+    e_movzx_r_mem8(T, RDX, RBX, 0);
+    e_cmp_r_imm(T, RDX, '0');
+    size_t nd1 = e_jcc(T, CC_L);
+    e_cmp_r_imm(T, RDX, '9');
+    size_t nd2 = e_jcc(T, CC_G);
+    e_sub_r_imm(T, RDX, '0');
+    e_mov_r_imm64(T, RCX, 10);
+    e_imul_r_r(T, RAX, RCX);
+    e_add_r_r(T, RAX, RDX);
+    e_add_r_imm(T, RBX, 1);
+    size_t again = e_jmp(T); e_patch_rel32(T, again, loop);
+    here(c, nd1);
+    here(c, nd2);
+
+    e_test_r_r(T, RCX, RCX);
+    size_t pos_done = e_jcc(T, CC_E);
+    e_neg_r(T, RAX);
+    here(c, pos_done);
+
+    e_pop(T, RCX); e_pop(T, RBX);
+    e_ret(T);
+}
+
+/* ----------------------------------------------------------------
+   RT_ARR_CONTAINS - linear search for a value in an array.
+   rdi=array, rsi=value -> rax=0/1. Uses the same tagged-slot representation
+   as the rest of the array runtime, so an int compares as an int and a
+   pointer as a pointer.
+   ---------------------------------------------------------------- */
+
+static void emit_arr_contains(NCtx *c) {
+    e_push(T, R12); e_push(T, R13); e_push(T, R14);
+    e_mov_r_r(T, R12, RDI);   /* array */
+    e_mov_r_r(T, R13, RSI);   /* value to find */
+    e_xor_r_r(T, R14, R14);   /* index */
+
+    e_mov_r_mem(T, RCX, R12, ARR_COUNT);
+    e_cmp_r_r(T, R14, RCX);
+    size_t not_found = e_jcc(T, CC_GE);
+
+    size_t loop = T->len;
+    e_mov_r_mem(T, RCX, R12, ARR_DATA);
+    e_mov_r_r(T, RDX, R14);
+    e_shl_r_imm8(T, RDX, 3);
+    e_add_r_r(T, RCX, RDX);
+    e_mov_r_mem(T, RDX, RCX, 0);
+    e_cmp_r_r(T, RDX, R13);
+    size_t found = e_jcc(T, CC_E);
+    e_add_r_imm(T, R14, 1);
+    size_t again = e_jmp(T); e_patch_rel32(T, again, loop);
+
+    here(c, found);
+    e_mov_r_imm64(T, RAX, 1);
+    size_t out = e_jmp(T);
+    here(c, not_found);
+    e_xor_r_r(T, RAX, RAX);
+    here(c, out);
+
+    e_pop(T, R14); e_pop(T, R13); e_pop(T, R12);
+    e_ret(T);
+}
+
+/* ----------------------------------------------------------------
    Objects: RT_OBJ_NEW / RT_OBJ_SET / RT_OBJ_GET / RT_OBJ_LEN
    Header: count, capacity, slots pointer. Slot: key ptr, value, kind.
    Same shape the C backend emits, so both backends mean the same thing.
@@ -2127,6 +2257,9 @@ void nc_emit_runtime(NCtx *c) {
         { RT_ARR_POP,  emit_arr_pop  },
         { RT_ARR_STR,  emit_arr_str  },
         { RT_ARR_COPY, emit_arr_copy },
+        { RT_MEMCPY,   emit_memcpy   },
+        { RT_STRTOL,   emit_strtol   },
+        { RT_ARR_CONTAINS, emit_arr_contains },
         { RT_OBJ_NEW,  emit_obj_new  },
         { RT_OBJ_SET,  emit_obj_set  },
         { RT_OBJ_GET,  emit_obj_get  },

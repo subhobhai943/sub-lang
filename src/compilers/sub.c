@@ -19,6 +19,7 @@
 /* External codegen functions (from codegen_multilang.c) */
 extern char* codegen_python(ASTNode *ast, const char *source);
 extern char* codegen_javascript(ASTNode *ast, const char *source);
+extern char* codegen_typescript(ASTNode *ast, const char *source);
 extern char* codegen_java(ASTNode *ast, const char *source);
 extern char* codegen_swift(ASTNode *ast, const char *source);
 extern char* codegen_kotlin(ASTNode *ast, const char *source);
@@ -196,9 +197,9 @@ static char* generate_language_code(const char *name, ASTNode *ast, const char *
         return codegen_cpp_generate(ast, source);
     }
 
-    /* TypeScript → same codegen as JavaScript */
+    /* TypeScript → dedicated TypeScript codegen */
     if (strcasecmp(name, "typescript") == 0 || strcasecmp(name, "ts") == 0) {
-        return codegen_javascript(ast, source);
+        return codegen_typescript(ast, source);
     }
 
     /* Dispatch to the matching codegen function */
