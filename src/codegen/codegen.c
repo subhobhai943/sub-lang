@@ -821,17 +821,26 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                 } else {
                     const char *fn = node->value;
                     if (strcmp(fn, "float") == 0) {
-                        if (node->child_count > 0 && node->children[0]->data_type == TYPE_STRING) sb_append(sb, "sub_float_from_str(");
+                        DataType at = node->child_count > 0 ? infer_expr_type(node->children[0]) : TYPE_UNKNOWN;
+                        if (node->child_count > 0 && (at == TYPE_UNKNOWN || at == TYPE_AUTO))
+                            at = node->children[0]->data_type;
+                        if (node->child_count > 0 && at == TYPE_STRING) sb_append(sb, "sub_float_from_str(");
                         else sb_append(sb, "(double)(");
                     }
                     else if (strcmp(fn, "int") == 0) {
-                        if (node->child_count > 0 && node->children[0]->data_type == TYPE_STRING) sb_append(sb, "sub_int_from_str(");
+                        DataType at = node->child_count > 0 ? infer_expr_type(node->children[0]) : TYPE_UNKNOWN;
+                        if (node->child_count > 0 && (at == TYPE_UNKNOWN || at == TYPE_AUTO))
+                            at = node->children[0]->data_type;
+                        if (node->child_count > 0 && at == TYPE_STRING) sb_append(sb, "sub_int_from_str(");
                         else sb_append(sb, "(long long)(");
                     }
                     else if (strcmp(fn, "str") == 0) {
                         if (node->child_count > 0) {
-                            if (node->children[0]->data_type == TYPE_FLOAT) sb_append(sb, "sub_str_from_double(");
-                            else if (node->children[0]->data_type == TYPE_STRING) sb_append(sb, "sub_strdup(");
+                            DataType at = infer_expr_type(node->children[0]);
+                            if (at == TYPE_UNKNOWN || at == TYPE_AUTO)
+                                at = node->children[0]->data_type;
+                            if (at == TYPE_FLOAT) sb_append(sb, "sub_str_from_double(");
+                            else if (at == TYPE_STRING) sb_append(sb, "sub_strdup(");
                             else sb_append(sb, "sub_str_from_long(");
                         } else {
                             sb_append(sb, "sub_strdup(\"\")");
@@ -913,8 +922,11 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                     }
                     else if (strcmp(fn, "to_string") == 0) {
                         if (node->child_count > 0) {
-                            if (node->children[0]->data_type == TYPE_FLOAT) sb_append(sb, "sub_str_from_double(");
-                            else if (node->children[0]->data_type == TYPE_STRING) sb_append(sb, "sub_strdup(");
+                            DataType at = infer_expr_type(node->children[0]);
+                            if (at == TYPE_UNKNOWN || at == TYPE_AUTO)
+                                at = node->children[0]->data_type;
+                            if (at == TYPE_FLOAT) sb_append(sb, "sub_str_from_double(");
+                            else if (at == TYPE_STRING) sb_append(sb, "sub_strdup(");
                             else sb_append(sb, "sub_str_from_long(");
                         } else sb_append(sb, "sub_strdup(\"\")");
                     }
