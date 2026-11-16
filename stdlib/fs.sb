@@ -1,0 +1,94 @@
+# ============================================================
+# SUB Standard Library - fs
+#
+# Filesystem helpers built on the system builtins. remove_tree is deliberately
+# conservative: it rejects "/", "..", and any path containing a parent segment.
+# ============================================================
+
+import "path"
+
+fn read_lines(file_path: string) {
+    let text = read_file(file_path)
+    if len(text) == 0 {
+        return []
+    }
+    return split(text, "\n")
+}
+
+fn write_lines(file_path: string, lines) {
+    return write_file(file_path, join(lines, "\n"))
+}
+
+fn copy_file(source: string, destination: string): int {
+    return write_file(destination, read_file(source))
+}
+
+fn ensure_dir(directory: string): bool {
+    if is_dir(directory) {
+        return true
+    }
+    return mkdir(directory)
+}
+
+fn _safe_tree_path(p: string): bool {
+    if p == "/" || p == "\\" || p == "." || p == ".." {
+        return false
+    }
+    if starts_with(p, "/") || starts_with(p, "\\") {
+        return false
+    }
+    let parts = split(replace(p, "\\", "/"), "/")
+    for part in parts {
+        if part == ".." {
+            return false
+        }
+    }
+    return true
+}
+
+fn remove_tree(target: string): bool {
+    if !_safe_tree_path(target) {
+        println("remove_tree: refusing unsafe path '" + target + "'")
+        exit(70)
+    }
+    if !file_exists(target) {
+        return false
+    }
+    if !is_dir(target) {
+        return remove(target)
+    }
+    let names = list_dir(target)
+    for name in names {
+        let child = path_join([target, name])
+        if is_dir(child) {
+            remove_tree(child)
+        } else {
+            remove(child)
+        }
+    }
+    return remove(target)
+}
+
+fn walk(root: string) {
+    let out = []
+    if !file_exists(root) {
+        return out
+    }
+    if !is_dir(root) {
+        push(out, root)
+        return out
+    }
+    let names = list_dir(root)
+    for name in names {
+        let child = path_join([root, name])
+        if is_dir(child) {
+            let nested = walk(child)
+            for item in nested {
+                push(out, item)
+            }
+        } else {
+            push(out, child)
+        }
+    }
+    return out
+}

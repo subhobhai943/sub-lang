@@ -422,6 +422,8 @@ int main(int argc, char *argv[]) {
         if (strcasecmp(target_str, "interpret") == 0 || strcasecmp(target_str, "run") == 0) {
             printf("Interpreting %s...\n\n", input_file);
             extern int interpret_file(const char *path);
+            extern void interp_set_args(int argc, char **argv);
+            interp_set_args(argc - 1, argv + 1);
             return interpret_file(input_file);
         }
         

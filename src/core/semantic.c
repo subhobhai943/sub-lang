@@ -540,7 +540,9 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                 }
                 if (fn_name && (strcmp(fn_name, "len") == 0 || strcmp(fn_name, "int") == 0 ||
                                 strcmp(fn_name, "sizeof") == 0 ||
-                                strcmp(fn_name, "net_download") == 0)) {
+                                strcmp(fn_name, "net_download") == 0 ||
+                                strcmp(fn_name, "write_file") == 0 ||
+                                strcmp(fn_name, "append_file") == 0)) {
                     for (int i = 0; i < node->child_count; i++)
                         check_expression_type(node->children[i], table);
                     node->data_type = TYPE_INT;
@@ -551,6 +553,62 @@ static DataType check_expression_type(ASTNode *node, LocalSymbolTable *table) {
                         check_expression_type(node->children[i], table);
                     node->data_type = TYPE_STRING;
                     return TYPE_STRING;
+                }
+                if (fn_name && strcmp(fn_name, "read_file") == 0) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_STRING;
+                    return TYPE_STRING;
+                }
+                if (fn_name && strcmp(fn_name, "sha256") == 0) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_STRING;
+                    return TYPE_STRING;
+                }
+                if (fn_name && (strcmp(fn_name, "file_exists") == 0 ||
+                                strcmp(fn_name, "is_dir") == 0 ||
+                                strcmp(fn_name, "mkdir") == 0 ||
+                                strcmp(fn_name, "remove") == 0 ||
+                                strcmp(fn_name, "rename") == 0)) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_BOOL;
+                    return TYPE_BOOL;
+                }
+                if (fn_name && strcmp(fn_name, "list_dir") == 0) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_ARRAY;
+                    return TYPE_ARRAY;
+                }
+                if (fn_name && strcmp(fn_name, "env") == 0) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_STRING;
+                    return TYPE_STRING;
+                }
+                if (fn_name && strcmp(fn_name, "args") == 0) {
+                    node->data_type = TYPE_ARRAY;
+                    return TYPE_ARRAY;
+                }
+                if (fn_name && strcmp(fn_name, "object_keys") == 0) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_ARRAY;
+                    return TYPE_ARRAY;
+                }
+                if (fn_name && strcmp(fn_name, "exec") == 0) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_OBJECT;
+                    return TYPE_OBJECT;
+                }
+                if (fn_name && strcmp(fn_name, "exit") == 0) {
+                    for (int i = 0; i < node->child_count; i++)
+                        check_expression_type(node->children[i], table);
+                    node->data_type = TYPE_VOID;
+                    return TYPE_VOID;
                 }
                 if (fn_name && strcmp(fn_name, "float") == 0) {
                     for (int i = 0; i < node->child_count; i++)

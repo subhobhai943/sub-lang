@@ -31,6 +31,21 @@
 #include <math.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <errno.h>
+#include <limits.h>
+#include <sys/stat.h>
+#ifndef _WIN32
+#include <dirent.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#else
+#include <direct.h>
+#include <io.h>
+#define mkdir(path, mode) _mkdir(path)
+#define rmdir _rmdir
+#define stat _stat
+#define S_ISDIR(mode) (((mode) & _S_IFDIR) != 0)
+#endif
 /* Networking builtins (net_fetch / net_post / net_download) speak plain
    HTTP over POSIX sockets. Windows gets a stub that reports the same
    runtime error the interpreter reports for other unsupported things. */
@@ -200,6 +215,13 @@ static int    g_exception_thrown = 0;
    modes rather than behaving differently depending on how you ran the code. */
 static int g_repl_mode       = 0;
 static int g_runtime_aborted = 0;
+static int g_argc = 0;
+static char **g_argv = NULL;
+
+void interp_set_args(int argc, char **argv) {
+    g_argc = argc;
+    g_argv = argv;
+}
 
 void interp_set_repl_mode(int enabled) { g_repl_mode = enabled ? 1 : 0; }
 void interp_clear_abort(void)          { g_runtime_aborted = 0; }
@@ -476,6 +498,139 @@ static SubVal object_get(SubObject *obj, const char *key) {
     }
     runtime_error("undefined object property '%s'", key);
     return NULL_VAL;
+}
+
+static char *read_file_bytes(const char *path, size_t *out_len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        runtime_error("read_file: cannot read '%s': %s", path, strerror(errno));
+        return NULL;
+    }
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        runtime_error("read_file: cannot seek '%s'", path);
+        return NULL;
+    }
+    long end = ftell(f);
+    if (end < 0 || (unsigned long long)end > (unsigned long long)SIZE_MAX - 1) {
+        fclose(f);
+        runtime_error("read_file: size overflow for '%s'", path);
+        return NULL;
+    }
+    rewind(f);
+    size_t len = (size_t)end;
+    char *data = malloc(len + 1);
+    if (!data) {
+        fclose(f);
+        runtime_error("read_file: out of memory for '%s'", path);
+        return NULL;
+    }
+    if (len && fread(data, 1, len, f) != len) {
+        free(data);
+        fclose(f);
+        runtime_error("read_file: cannot read '%s'", path);
+        return NULL;
+    }
+    fclose(f);
+    data[len] = '\0';
+    if (out_len) *out_len = len;
+    return data;
+}
+
+static uint32_t sha256_rotr(uint32_t x, uint32_t n) {
+    return (x >> n) | (x << (32 - n));
+}
+
+static char *sha256_string(const char *input) {
+    static const uint32_t k[64] = {
+        0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,
+        0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,
+        0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,
+        0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+        0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,
+        0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,
+        0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,
+        0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+        0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,
+        0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,
+        0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+    };
+    uint32_t h[8] = {0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                     0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    size_t len = strlen(input ? input : "");
+    if (len > (SIZE_MAX - 72) / 8) {
+        runtime_error("sha256: input is too large");
+        return NULL;
+    }
+    size_t total = ((len + 9 + 63) / 64) * 64;
+    unsigned char *msg = calloc(total, 1);
+    if (!msg) {
+        runtime_error("sha256: out of memory");
+        return NULL;
+    }
+    memcpy(msg, input ? input : "", len);
+    msg[len] = 0x80;
+    uint64_t bits = (uint64_t)len * 8;
+    for (int i = 0; i < 8; i++) msg[total - 1 - i] = (unsigned char)(bits >> (i * 8));
+    for (size_t off = 0; off < total; off += 64) {
+        uint32_t w[64];
+        for (int i = 0; i < 16; i++)
+            w[i] = ((uint32_t)msg[off+i*4] << 24) | ((uint32_t)msg[off+i*4+1] << 16) |
+                   ((uint32_t)msg[off+i*4+2] << 8) | msg[off+i*4+3];
+        for (int i = 16; i < 64; i++) {
+            uint32_t s0 = sha256_rotr(w[i-15],7) ^ sha256_rotr(w[i-15],18) ^ (w[i-15] >> 3);
+            uint32_t s1 = sha256_rotr(w[i-2],17) ^ sha256_rotr(w[i-2],19) ^ (w[i-2] >> 10);
+            w[i] = w[i-16] + s0 + w[i-7] + s1;
+        }
+        uint32_t a=h[0], b=h[1], c=h[2], d=h[3], e=h[4], f=h[5], g=h[6], q=h[7];
+        for (int i = 0; i < 64; i++) {
+            uint32_t s1 = sha256_rotr(e,6) ^ sha256_rotr(e,11) ^ sha256_rotr(e,25);
+            uint32_t ch = (e & f) ^ (~e & g);
+            uint32_t t1 = q + s1 + ch + k[i] + w[i];
+            uint32_t s0 = sha256_rotr(a,2) ^ sha256_rotr(a,13) ^ sha256_rotr(a,22);
+            uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+            uint32_t t2 = s0 + maj;
+            q=g; g=f; f=e; e=d+t1; d=c; c=b; b=a; a=t1+t2;
+        }
+        h[0]+=a; h[1]+=b; h[2]+=c; h[3]+=d; h[4]+=e; h[5]+=f; h[6]+=g; h[7]+=q;
+    }
+    free(msg);
+    char *out = malloc(65);
+    if (!out) {
+        runtime_error("sha256: out of memory");
+        return NULL;
+    }
+    for (int i = 0; i < 8; i++)
+        snprintf(out + i * 8, 9, "%08x", h[i]);
+    return out;
+}
+
+static int mkdir_parents(const char *path) {
+    char *tmp = strdup(path ? path : "");
+    if (!tmp) return -1;
+    size_t n = strlen(tmp);
+    while (n > 1 && (tmp[n - 1] == '/' || tmp[n - 1] == '\\')) tmp[--n] = '\0';
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p != '/' && *p != '\\') continue;
+        char save = *p;
+        *p = '\0';
+        if (tmp[0] && mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+            *p = save; free(tmp); return -1;
+        }
+        *p = save;
+    }
+    int rc = mkdir(tmp, 0777);
+    if (rc != 0 && errno != EEXIST) { free(tmp); return -1; }
+    free(tmp);
+    return 0;
+}
+
+static SubVal builtin_args(void) {
+    SubVal result = make_array_val();
+    int start = g_argc > 1 ? 1 : g_argc;
+    for (int i = start; i < g_argc; i++)
+        array_push(result.arr, make_str(g_argv[i]));
+    return result;
 }
 
 /* ================================================================
@@ -2240,6 +2395,226 @@ SubVal eval(ASTNode *node, Env *env) {
             snprintf(label, sizeof(label), "input() = %s", buf);
             provenance_attach(&input, node, label, NULL, NULL, 1);
             return input;
+        }
+
+        if (fn && strcmp(fn, "read_file") == 0) {
+            if (node->child_count < 1) runtime_error("read_file needs a path");
+            SubVal pv = eval(node->children[0], env);
+            const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
+            size_t len = 0;
+            char *data = read_file_bytes(path, &len);
+            if (!data) return NULL_VAL;
+            (void)len;
+            return (SubVal){VAL_STRING, {.sv = data}, NULL};
+        }
+
+        if (fn && strcmp(fn, "sha256") == 0) {
+            if (node->child_count < 1) runtime_error("sha256 needs a string");
+            SubVal input = eval(node->children[0], env);
+            const char *text = input.type == VAL_STRING && input.sv ? input.sv : "";
+            char *digest = sha256_string(text);
+            if (!digest) return NULL_VAL;
+            return (SubVal){VAL_STRING, {.sv = digest}, NULL};
+        }
+
+        if (fn && (strcmp(fn, "write_file") == 0 ||
+                   strcmp(fn, "append_file") == 0)) {
+            if (node->child_count < 2)
+                runtime_error("%s needs a path and content", fn);
+            SubVal pv = eval(node->children[0], env);
+            SubVal cv = eval(node->children[1], env);
+            const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
+            const char *content = cv.type == VAL_STRING && cv.sv ? cv.sv : "";
+            FILE *f = fopen(path, strcmp(fn, "write_file") == 0 ? "wb" : "ab");
+            if (!f) {
+                runtime_error("%s: cannot open '%s': %s", fn, path, strerror(errno));
+                return NULL_VAL;
+            }
+            size_t len = strlen(content);
+            size_t wrote = len ? fwrite(content, 1, len, f) : 0;
+            int failed = ferror(f);
+            fclose(f);
+            if (failed || wrote != len) {
+                runtime_error("%s: cannot write '%s'", fn, path);
+                return NULL_VAL;
+            }
+            return make_int((long long)wrote);
+        }
+
+        if (fn && (strcmp(fn, "file_exists") == 0 || strcmp(fn, "is_dir") == 0)) {
+            if (node->child_count < 1)
+                runtime_error("%s needs a path", fn);
+            SubVal pv = eval(node->children[0], env);
+            const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
+            struct stat st;
+            int exists = stat(path, &st) == 0;
+            if (strcmp(fn, "is_dir") == 0) exists = exists && S_ISDIR(st.st_mode);
+            return make_bool(exists);
+        }
+
+        if (fn && strcmp(fn, "mkdir") == 0) {
+            if (node->child_count < 1) runtime_error("mkdir needs a path");
+            SubVal pv = eval(node->children[0], env);
+            const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
+            if (mkdir_parents(path) != 0) {
+                runtime_error("mkdir: cannot create '%s': %s", path, strerror(errno));
+                return NULL_VAL;
+            }
+            return make_bool(1);
+        }
+
+        if (fn && strcmp(fn, "list_dir") == 0) {
+            if (node->child_count < 1) runtime_error("list_dir needs a path");
+            SubVal pv = eval(node->children[0], env);
+            const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
+            SubVal result = make_array_val();
+#ifdef _WIN32
+            char pattern[4096];
+            if (snprintf(pattern, sizeof(pattern), "%s\\*", path) >= (int)sizeof(pattern))
+                runtime_error("list_dir: path too long '%s'", path);
+            struct _finddata_t item;
+            intptr_t h = _findfirst(pattern, &item);
+            if (h == -1) {
+                runtime_error("list_dir: cannot read '%s': %s", path, strerror(errno));
+                return NULL_VAL;
+            }
+            do {
+                if (strcmp(item.name, ".") && strcmp(item.name, ".."))
+                    array_push(result.arr, make_str(item.name));
+            } while (_findnext(h, &item) == 0);
+            _findclose(h);
+#else
+            DIR *dir = opendir(path);
+            if (!dir) {
+                runtime_error("list_dir: cannot read '%s': %s", path, strerror(errno));
+                return NULL_VAL;
+            }
+            struct dirent *entry;
+            while ((entry = readdir(dir)) != NULL)
+                if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, ".."))
+                    array_push(result.arr, make_str(entry->d_name));
+            closedir(dir);
+#endif
+            for (int i = 0; i < result.arr->count; i++)
+                for (int j = i + 1; j < result.arr->count; j++)
+                    if (strcmp(result.arr->items[i].sv, result.arr->items[j].sv) > 0) {
+                        SubVal t = result.arr->items[i];
+                        result.arr->items[i] = result.arr->items[j];
+                        result.arr->items[j] = t;
+                    }
+            return result;
+        }
+
+        if (fn && strcmp(fn, "remove") == 0) {
+            if (node->child_count < 1) runtime_error("remove needs a path");
+            SubVal pv = eval(node->children[0], env);
+            const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
+            struct stat st;
+            if (stat(path, &st) != 0) return make_bool(0);
+            int rc = S_ISDIR(st.st_mode) ? rmdir(path) : remove(path);
+            if (rc != 0) {
+                runtime_error("remove: cannot remove '%s': %s", path, strerror(errno));
+                return NULL_VAL;
+            }
+            return make_bool(1);
+        }
+
+        if (fn && strcmp(fn, "rename") == 0) {
+            if (node->child_count < 2) runtime_error("rename needs source and destination");
+            SubVal from = eval(node->children[0], env);
+            SubVal to = eval(node->children[1], env);
+            const char *src = from.type == VAL_STRING && from.sv ? from.sv : "";
+            const char *dst = to.type == VAL_STRING && to.sv ? to.sv : "";
+            if (rename(src, dst) != 0) {
+                runtime_error("rename: cannot rename '%s' to '%s': %s",
+                              src, dst, strerror(errno));
+                return NULL_VAL;
+            }
+            return make_bool(1);
+        }
+
+        if (fn && strcmp(fn, "env") == 0) {
+            if (node->child_count < 1) runtime_error("env needs a name");
+            SubVal nv = eval(node->children[0], env);
+            const char *name = nv.type == VAL_STRING && nv.sv ? nv.sv : "";
+            const char *value = getenv(name);
+            return make_str(value ? value : "");
+        }
+
+        if (fn && strcmp(fn, "args") == 0)
+            return builtin_args();
+
+        if (fn && strcmp(fn, "object_keys") == 0) {
+            if (node->child_count < 1) runtime_error("object_keys needs an object");
+            SubVal ov = eval(node->children[0], env);
+            if (ov.type != VAL_OBJECT || !ov.obj) {
+                runtime_error("object_keys needs an object");
+                return NULL_VAL;
+            }
+            SubVal result = make_array_val();
+            for (int i = 0; i < ov.obj->count; i++)
+                array_push(result.arr, make_str(ov.obj->keys[i]));
+            return result;
+        }
+
+        if (fn && strcmp(fn, "exit") == 0) {
+            long long code = 0;
+            if (node->child_count > 0) code = val_as_int(eval(node->children[0], env));
+            exit((int)code);
+        }
+
+        if (fn && strcmp(fn, "exec") == 0) {
+            if (node->child_count < 1) runtime_error("exec needs a command");
+            SubVal cv = eval(node->children[0], env);
+            const char *command = cv.type == VAL_STRING && cv.sv ? cv.sv : "";
+#ifdef _WIN32
+            FILE *pipe = _popen(command, "r");
+#else
+            FILE *pipe = popen(command, "r");
+#endif
+            if (!pipe) {
+                runtime_error("exec: cannot run command '%s': %s", command, strerror(errno));
+                return NULL_VAL;
+            }
+            size_t cap = 4096, len = 0;
+            char *out = malloc(cap);
+            if (!out) runtime_error("exec: out of memory for command '%s'", command);
+            char buf[1024];
+            while (out && fgets(buf, sizeof(buf), pipe)) {
+                size_t n = strlen(buf);
+                if (n > SIZE_MAX - len - 1) {
+                    free(out); out = NULL;
+                    runtime_error("exec: output too large for command '%s'", command);
+                    break;
+                }
+                while (len + n + 1 > cap) {
+                    if (cap > SIZE_MAX / 2) { free(out); out = NULL; break; }
+                    cap *= 2;
+                    char *grown = realloc(out, cap);
+                    if (!grown) { free(out); out = NULL; break; }
+                    out = grown;
+                }
+                if (!out) break;
+                memcpy(out + len, buf, n);
+                len += n;
+            }
+#ifdef _WIN32
+            int status = _pclose(pipe);
+#else
+            int status = pclose(pipe);
+#endif
+            if (!out) return NULL_VAL;
+            out[len] = '\0';
+            SubVal result = make_object_val();
+            object_set(result.obj, "code", make_int(
+#ifdef _WIN32
+                status
+#else
+                WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status)
+#endif
+            ));
+            object_set(result.obj, "out", (SubVal){VAL_STRING, {.sv = out}, NULL});
+            return result;
         }
 
         /* net_fetch(url) -> response body (HTTP GET) */

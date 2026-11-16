@@ -1,0 +1,4 @@
+# SHA-256 is a runtime builtin because a pure SUB implementation would be
+# needlessly slow for package metadata and cannot efficiently process large
+# inputs. The interpreter exposes `sha256(text)` directly; importing this
+# module documents the package-manager dependency without shadowing the builtin.

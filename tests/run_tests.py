@@ -428,6 +428,86 @@ def main():
         else:
             fail(label, detail)
 
+    print("\n=== system builtins (interpreter reference) ===")
+    system_file = os.path.join(SCRIPT_DIR, "test_system_builtins.sb")
+    rc, out = run([SUBI, system_file], cwd=ROOT_DIR)
+    expected = "onetwo\ntrue\ntrue\na.txt\ntrue\n0\nsystem-exec"
+    if rc == 0 and out.rstrip() == expected:
+        print("  OK   subi: test_system_builtins.sb")
+    else:
+        fail("subi: test_system_builtins.sb",
+             f"exit {rc}: {out}")
+
+    package_file = os.path.join(SCRIPT_DIR, "test_package_stdlib.sb")
+    rc, out = run([SUBI, package_file], cwd=ROOT_DIR)
+    expected_hashes = (
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n"
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    )
+    if rc == 0 and expected_hashes in out and '{"name":"sub","items":[1,true,null]}' in out:
+        print("  OK   subi: package stdlib modules")
+    else:
+        fail("subi: package stdlib modules", f"exit {rc}: {out}")
+
+    # Independent SHA-256 vector. Generate the input here rather than
+    # committing a megabyte fixture or building it with quadratic SUB
+    # concatenation.
+    import hashlib
+    million_hash = hashlib.sha256(b"a" * 1000000).hexdigest()
+    million_sb = os.path.join(SCRIPT_DIR, "_sha256_million.sb")
+    with open(million_sb, "w") as f:
+        f.write('println(sha256("' + ("a" * 1000000) + '"))\n')
+    try:
+        rc, out = run([SUBI, million_sb], cwd=ROOT_DIR)
+        if rc == 0 and out.rstrip().endswith(million_hash):
+            print("  OK   subi: SHA-256 one-million-'a' vector")
+        else:
+            fail("subi: SHA-256 one-million-'a' vector",
+                 f"exit {rc}: {out[-200:]}")
+        if tool_available("gcc"):
+            out_name = os.path.join(ROOT_DIR, "_sha256_million")
+            rc, out = run([SUBC, million_sb, "--via-c", "-o", out_name])
+            binary = out_name + EXE
+            if rc == 0 and os.path.exists(binary):
+                run_rc, run_out = run([binary])
+                if run_rc == 0 and run_out.rstrip().endswith(million_hash):
+                    print("  OK   subc: SHA-256 one-million-'a' vector")
+                else:
+                    fail("subc: SHA-256 one-million-'a' vector",
+                         f"exit {run_rc}: {run_out[-200:]}")
+                os.remove(binary)
+            else:
+                fail("subc: SHA-256 one-million-'a' vector",
+                     f"compile exit {rc}: {out[-400:]}")
+            c_file = out_name + ".c"
+            if os.path.exists(c_file):
+                os.remove(c_file)
+    finally:
+        if os.path.exists(million_sb):
+            os.remove(million_sb)
+
+    bad_json = os.path.join(SCRIPT_DIR, "_bad_json.sb")
+    bad_semver = os.path.join(SCRIPT_DIR, "_bad_semver.sb")
+    try:
+        with open(bad_json, "w") as f:
+            f.write('import "json"\njson_parse("{")\n')
+        with open(bad_semver, "w") as f:
+            f.write('import "semver"\nsemver_parse("1.x.0")\n')
+        rc, out = run([SUBI, bad_json], cwd=ROOT_DIR)
+        if rc == 70 and "json syntax error" in out:
+            print("  OK   subi: bad JSON reports position")
+        else:
+            fail("subi: bad JSON", f"exit {rc}: {out}")
+        rc, out = run([SUBI, bad_semver], cwd=ROOT_DIR)
+        if rc == 70 and "semver: invalid version" in out:
+            print("  OK   subi: bad semver reports input")
+        else:
+            fail("subi: bad semver", f"exit {rc}: {out}")
+    finally:
+        for path in (bad_json, bad_semver):
+            if os.path.exists(path):
+                os.remove(path)
+
     print(f"\n{'='*40}")
     if failures:
         print(f"{len(failures)} check(s) failed:")

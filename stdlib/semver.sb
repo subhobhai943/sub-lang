@@ -1,0 +1,86 @@
+# ============================================================
+# SUB Standard Library - semver
+#
+# Supports numeric major/minor/patch versions, optional prerelease text,
+# exact versions, ^, ~, >=, <, and comma-joined ranges.
+# ============================================================
+
+import "strings"
+
+fn _semver_fail(text: string) {
+    println("semver: invalid version '" + text + "'")
+    exit(70)
+}
+
+fn semver_parse(text: string) {
+    let core = text
+    let pre = ""
+    let dash = find(core, "-")
+    if dash >= 0 {
+        pre = substring(core, dash + 1, len(core))
+        core = substring(core, 0, dash)
+    }
+    let parts = split(core, ".")
+    if len(parts) != 3 {
+        _semver_fail(text)
+    }
+    let major = int(parts[0])
+    let minor = int(parts[1])
+    let patch = int(parts[2])
+    if major < 0 || minor < 0 || patch < 0 {
+        _semver_fail(text)
+    }
+    if str(major) != parts[0] || str(minor) != parts[1] || str(patch) != parts[2] {
+        _semver_fail(text)
+    }
+    return {"major": major, "minor": minor, "patch": patch, "pre": pre}
+}
+
+fn semver_compare(a_text: string, b_text: string): int {
+    let a = semver_parse(a_text)
+    let b = semver_parse(b_text)
+    if a.major != b.major { return a.major < b.major ? 0 - 1 : 1 }
+    if a.minor != b.minor { return a.minor < b.minor ? 0 - 1 : 1 }
+    if a.patch != b.patch { return a.patch < b.patch ? 0 - 1 : 1 }
+    if a.pre == b.pre { return 0 }
+    if a.pre == "" { return 1 }
+    if b.pre == "" { return 0 - 1 }
+    return a.pre < b.pre ? 0 - 1 : 1
+}
+
+fn _semver_base(range_text: string): string {
+    let r = trim(range_text)
+    if starts_with(r, "^") || starts_with(r, "~") || starts_with(r, ">=") || starts_with(r, "<") {
+        return trim(substring(r, starts_with(r, ">=") ? 2 : 1, len(r)))
+    }
+    return r
+}
+
+fn _semver_one(version: string, range_text: string): bool {
+    let r = trim(range_text)
+    if len(r) == 0 { return true }
+    let base_text = _semver_base(r)
+    let base = semver_parse(base_text)
+    let cmp = semver_compare(version, base_text)
+    if starts_with(r, "^") {
+        let upper = str(base.major + 1) + ".0.0"
+        return cmp >= 0 && semver_compare(version, upper) < 0
+    }
+    if starts_with(r, "~") {
+        let upper = str(base.major) + "." + str(base.minor + 1) + ".0"
+        return cmp >= 0 && semver_compare(version, upper) < 0
+    }
+    if starts_with(r, ">=") { return cmp >= 0 }
+    if starts_with(r, "<") { return cmp < 0 }
+    return cmp == 0
+}
+
+fn semver_satisfies(version: string, range_text: string): bool {
+    let ranges = split(range_text, ",")
+    for r in ranges {
+        if !_semver_one(version, r) {
+            return false
+        }
+    }
+    return true
+}

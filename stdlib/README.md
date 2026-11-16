@@ -12,10 +12,48 @@ import "encoding"
 import "collections"
 ```
 
-Nine modules, written in SUB. Every function here produces identical output
-through all the backends and the interpreter — `tests/conformance/19_stdlib.sb`
-and `20_stdlib_tour.sb` check exactly that on every push, the same way the
-language itself is checked.
+The original portable modules are written in SUB and produce identical output
+through all the backends. The package-manager modules described below are
+currently interpreter-oriented and compiled backends refuse their unsupported
+dynamic/system operations explicitly.
+
+The interpreter also provides the system layer needed by a future package
+manager: `read_file`, `write_file`, `append_file`, `file_exists`, `is_dir`,
+`mkdir`, `list_dir`, `remove`, `rename`, `env`, `args`, `exit`, and `exec`.
+`exec(command)` invokes a shell and returns an object with `code` and `out`;
+callers must not interpolate untrusted input into the command.
+
+## json
+
+`json_parse(text)` accepts JSON objects, arrays, strings, integers, floats,
+booleans, and null. `json_stringify(value)` emits compact JSON. Invalid input
+reports the byte position and exits with status 70. Unicode escapes above ASCII
+are rejected explicitly because SUB currently has no character-from-codepoint
+primitive.
+
+## hash
+
+`sha256(text)` is a runtime builtin exposed by this module. It returns a
+lowercase hexadecimal SHA-256 digest and is implemented by the interpreter and
+C backend. It is verified against the empty-string and `"abc"` FIPS 180-4
+vectors.
+
+## semver
+
+`semver_parse`, `semver_compare`, and `semver_satisfies` support exact,
+`^`, `~`, `>=`, `<`, and comma-joined ranges. Invalid versions are runtime
+errors with the offending input.
+
+## fs
+
+`read_lines`, `write_lines`, `copy_file`, `ensure_dir`, and `walk` build on the
+system filesystem builtins. `remove_tree` is recursive only within its
+explicitly guarded relative path and refuses `/`, `..`, absolute paths, and
+parent traversal segments.
+
+Archive extraction is not yet exposed as a builtin: the current runtime does
+not include a safe, cross-platform tar/gzip library, and this implementation
+does not shell out to `tar` on untrusted archive paths.
 
 Run `examples/stdlib_tour.sb` to see the whole library working:
 

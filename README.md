@@ -78,7 +78,7 @@
 
 - **A compiler, not a wrapper**: on x86-64 Linux `subc` goes from `.sb` straight to machine code in one process. Nothing is shelled out to, so the machine that compiles a SUB program needs no toolchain beyond `subc` itself.
 - **Dynamic & Static Flexibility**: SUB is dynamically typed, but a shared inference pass gives every function a concrete signature when targeting a statically typed language - so `fn add(a, b)` becomes `long add(long, long)` in C and `fn add(a: i64, b: i64) -> i64` in Rust without annotations.
-- **Standard Library**: nine modules — `math`, `arrays`, `strings`, `io`, `path`, `format`, `testing`, `encoding`, `collections` — written in SUB and verified through every backend, loaded with `import`.
+- **Standard Library**: portable modules — `math`, `arrays`, `strings`, `io`, `path`, `format`, `testing`, `encoding`, and `collections` — plus interpreter-oriented package modules loaded with `import`.
 - **Cross-Platform UI Tree**: First-class declarative syntax for UI windows, labels, buttons, and inputs.
 
 ---
@@ -574,6 +574,20 @@ ui.window(title="SUB App", width=800, height=600) {
 | `net_fetch(url)` | HTTP GET; returns the response body | `net_fetch("http://127.0.0.1:8000/hi.txt")` |
 | `net_post(url, body)` | HTTP POST; returns the response body | `net_post(url, "payload")` |
 | `net_download(url, path)` | GET to a file; returns bytes written | `net_download(url, "out.txt")` |
+| `read_file(path)` | Reads a binary-safe file; missing files are runtime errors | `read_file("manifest.json")` |
+| `write_file(path, content)` / `append_file(path, content)` | Writes or appends bytes; returns the byte count | `write_file("x", "data")` |
+| `file_exists(path)` / `is_dir(path)` | Filesystem queries | `is_dir("stdlib")` |
+| `mkdir(path)` / `list_dir(path)` | Create parent directories or list sorted names | `mkdir("build/cache")` |
+| `remove(path)` / `rename(from, to)` | Remove a file/empty directory or rename a path | `rename("a", "b")` |
+| `env(name)` / `args()` | Read an environment value or script arguments | `args()` |
+| `exit(code)` | Terminates with the supplied status | `exit(1)` |
+| `exec(command)` | Runs a shell command and returns `{code, out}` | `exec("tar -tf archive.tar")` |
+
+These system builtins are currently implemented by the interpreter. `exec`
+deliberately uses the platform shell, so callers must never pass unsanitized
+user input. The machine-code and generated-C backends reject these names
+explicitly until their runtimes support filesystem arrays and objects; `subc`
+reports the limitation instead of emitting an undefined C call.
 
 All ten backends and the interpreter agree on these, down to the edge cases:
 `substring` clamps a negative bound to 0 rather than counting from the end,
@@ -586,9 +600,10 @@ is what holds them to it.
 
 ## Standard Library
 
-Nine modules, written in SUB, in `stdlib/`. Every function in them produces
-identical output through all the backends — the conformance suite checks the
-library the same way it checks the language.
+The original portable modules are written in SUB and checked through every
+backend. The package-manager modules (`json`, `semver`, and `fs`) currently
+target the interpreter because they rely on dynamic objects, arrays, and the
+system builtins; unsupported compiled backends refuse them explicitly.
 
 ```coffee
 import "math"
@@ -625,6 +640,10 @@ ok("done")
 | `testing` | `assert`, `assert_eq`, `assert_ne`, `assert_true`, `assert_false`, `test`, `summary` |
 | `encoding` | `hex_encode`, `hex_decode`, `url_encode` |
 | `collections` | `set_union`, `set_intersection`, `set_difference`, `set_has`, `peek`, `peek_front` |
+| `json` | `json_parse`, `json_stringify` |
+| `hash` | `sha256` (interpreter and C backend runtime builtin; FIPS 180-4) |
+| `semver` | `semver_parse`, `semver_compare`, `semver_satisfies` |
+| `fs` | `read_lines`, `write_lines`, `copy_file`, `remove_tree`, `ensure_dir`, `walk` |
 
 `examples/stdlib_tour.sb` exercises the core modules; `stdlib/README.md`
 documents every function, and is candid about what is missing and why.

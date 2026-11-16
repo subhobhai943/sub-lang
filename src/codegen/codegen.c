@@ -890,6 +890,12 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                         sb_append(sb, "))");
                     }
                     else if (strcmp(fn, "input") == 0) sb_append(sb, "sub_input(");
+                    else if (strcmp(fn, "sha256") == 0) {
+                        sb_append(sb, "sub_sha256((const char*)(");
+                        if (node->child_count > 0) generate_expression(sb, node->children[0]);
+                        else sb_append(sb, "\"\"");
+                        sb_append(sb, "))");
+                    }
                     else if (strcmp(fn, "net_fetch") == 0) {
                         sb_append(sb, "sub_net_fetch((const char*)(");
                         if (node->child_count > 0) generate_expression(sb, node->children[0]);
@@ -1038,6 +1044,7 @@ static void generate_expression(StringBuilder *sb, ASTNode *node) {
                         strcmp(fn, "upper") != 0 && strcmp(fn, "lower") != 0 &&
                         strcmp(fn, "substring") != 0 && strcmp(fn, "split") != 0 &&
                         strcmp(fn, "contains") != 0 && strcmp(fn, "replace") != 0 &&
+                        strcmp(fn, "sha256") != 0 &&
                         strcmp(fn, "net_fetch") != 0 && strcmp(fn, "net_post") != 0 &&
                         strcmp(fn, "net_download") != 0 &&
                         strcmp(fn, "len") != 0 && strcmp(fn, "length") != 0 &&
@@ -1612,7 +1619,51 @@ static ASTNode* class_lookup(const char *name) {
     return NULL;
 }
 
+static const char *c_backend_unsupported_builtin(const char *name) {
+    static const char *const names[] = {
+        "read_file", "write_file", "append_file", "file_exists", "is_dir",
+        "mkdir", "list_dir", "remove", "rename", "env", "args", "exit",
+        "exec", "object_keys", "json_parse", "json_stringify",
+        "semver_parse", "semver_compare", "semver_satisfies",
+        "read_lines", "write_lines", "copy_file", "remove_tree",
+        "ensure_dir", "walk", NULL
+    };
+    if (!name) return NULL;
+    for (int i = 0; names[i]; i++)
+        if (strcmp(name, names[i]) == 0) return names[i];
+    return NULL;
+}
+
+static const char *ast_c_backend_unsupported(ASTNode *node) {
+    if (!node) return NULL;
+    if (node->type == AST_CALL_EXPR) {
+        const char *unsupported = c_backend_unsupported_builtin(node->value);
+        if (unsupported) return unsupported;
+    }
+    const char *unsupported = ast_c_backend_unsupported(node->body);
+    if (unsupported) return unsupported;
+    unsupported = ast_c_backend_unsupported(node->left);
+    if (unsupported) return unsupported;
+    unsupported = ast_c_backend_unsupported(node->right);
+    if (unsupported) return unsupported;
+    unsupported = ast_c_backend_unsupported(node->condition);
+    if (unsupported) return unsupported;
+    unsupported = ast_c_backend_unsupported(node->next);
+    if (unsupported) return unsupported;
+    for (int i = 0; i < node->child_count; i++) {
+        unsupported = ast_c_backend_unsupported(node->children[i]);
+        if (unsupported) return unsupported;
+    }
+    return NULL;
+}
+
 static char* generate_c_code(ASTNode *ast) {
+    const char *unsupported = ast_c_backend_unsupported(ast);
+    if (unsupported) {
+        fprintf(stderr, "Error: '%s' is not supported by the C backend; "
+                        "run it with subi instead\n", unsupported);
+        return NULL;
+    }
     g_class_count = 0;
     classes_collect(ast);
 
@@ -2037,6 +2088,26 @@ static char* generate_c_code(ASTNode *ast) {
     sb_append(sb, "static inline long long sub_int_from_str(const char* s) { return s ? atol(s) : 0; }\n");
     sb_append(sb, "static inline char* sub_str_from_long(long long v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%lld\", v); return sub_strdup(buf); }\n");
     sb_append(sb, "static inline char* sub_str_from_double(double v) { char buf[64]; snprintf(buf, sizeof(buf), \"%%g\", v); return sub_strdup(buf); }\n\n");
+    sb_append(sb, "static inline uint32_t sub_rotr32(uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); }\n");
+    sb_append(sb, "static char* sub_sha256(const char* input) {\n");
+    sb_append(sb, "    static const uint32_t k[64] = {");
+    sb_append(sb, "0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,");
+    sb_append(sb, "0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,");
+    sb_append(sb, "0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,");
+    sb_append(sb, "0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,");
+    sb_append(sb, "0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,");
+    sb_append(sb, "0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,");
+    sb_append(sb, "0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,");
+    sb_append(sb, "0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2};\n");
+    sb_append(sb, "    uint32_t h[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};\n");
+    sb_append(sb, "    size_t len=strlen(input?input:\"\"); if (len>(SIZE_MAX-72)/8) sub_die(\"sha256: input is too large\");\n");
+    sb_append(sb, "    size_t total=((len+9+63)/64)*64; unsigned char* msg=(unsigned char*)calloc(total,1); if(!msg) sub_die(\"sha256: out of memory\");\n");
+    sb_append(sb, "    memcpy(msg,input?input:\"\",len); msg[len]=0x80; uint64_t bits=(uint64_t)len*8; for(int i=0;i<8;i++) msg[total-1-i]=(unsigned char)(bits>>(i*8));\n");
+    sb_append(sb, "    for(size_t off=0;off<total;off+=64){uint32_t w[64]; for(int i=0;i<16;i++) w[i]=((uint32_t)msg[off+i*4]<<24)|((uint32_t)msg[off+i*4+1]<<16)|((uint32_t)msg[off+i*4+2]<<8)|msg[off+i*4+3];\n");
+    sb_append(sb, "      for(int i=16;i<64;i++){uint32_t s0=sub_rotr32(w[i-15],7)^sub_rotr32(w[i-15],18)^(w[i-15]>>3),s1=sub_rotr32(w[i-2],17)^sub_rotr32(w[i-2],19)^(w[i-2]>>10);w[i]=w[i-16]+s0+w[i-7]+s1;}\n");
+    sb_append(sb, "      uint32_t a=h[0],b=h[1],c=h[2],d=h[3],e=h[4],f=h[5],g=h[6],q=h[7]; for(int i=0;i<64;i++){uint32_t s1=sub_rotr32(e,6)^sub_rotr32(e,11)^sub_rotr32(e,25),ch=(e&f)^(~e&g),t1=q+s1+ch+k[i]+w[i],s0=sub_rotr32(a,2)^sub_rotr32(a,13)^sub_rotr32(a,22),maj=(a&b)^(a&c)^(b&c),t2=s0+maj;q=g;g=f;f=e;e=d+t1;d=c;c=b;b=a;a=t1+t2;} h[0]+=a;h[1]+=b;h[2]+=c;h[3]+=d;h[4]+=e;h[5]+=f;h[6]+=g;h[7]+=q; }\n");
+    sb_append(sb, "    free(msg); char* out=(char*)malloc(65); if(!out) sub_die(\"sha256: out of memory\"); for(int i=0;i<8;i++) snprintf(out+i*8,9,\"%%08x\",h[i]); return out;\n");
+    sb_append(sb, "}\n\n");
 
     /* Networking builtins: the same minimal HTTP/1.1-over-sockets client the
        interpreter has, so a program using net_fetch means the same thing

@@ -1,0 +1,213 @@
+# ============================================================
+# SUB Standard Library - json
+#
+# Recursive JSON parser/stringifier. Errors are reported with the input
+# position and terminate with status 70.
+# ============================================================
+
+import "strings"
+
+fn _json_fail(text: string, at: int, message: string) {
+    println("json syntax error at " + str(at) + ": " + message)
+    exit(70)
+}
+
+fn _json_ws(text: string, at: int): int {
+    while at < len(text) {
+        let c = char_at(text, at)
+        if c != " " && c != "\n" && c != "\r" && c != "\t" {
+            break
+        }
+        at = at + 1
+    }
+    return at
+}
+
+fn _json_hex_digit(c: string): int {
+    let digits = "0123456789abcdefABCDEF"
+    let n = find(digits, c)
+    if n < 0 { return 0 - 1 }
+    if n >= 16 { return n - 6 }
+    return n
+}
+
+fn _json_parse_string(text: string, at: int) {
+    let i = at + 1
+    let out = ""
+    while i < len(text) {
+        let c = char_at(text, i)
+        if c == "\"" {
+            return {"value": out, "pos": i + 1}
+        }
+        let is_escape = c == "\\"
+        if is_escape {
+            i = i + 1
+            if i >= len(text) { _json_fail(text, i, "unterminated escape") }
+            let e = char_at(text, i)
+            let handled = false
+            if e == "\"" || e == "\\" || e == "/" {
+                out = out + e
+                handled = true
+            }
+            if e == "b" { out = out + "\x08"; handled = true }
+            if e == "f" { out = out + "\x0c"; handled = true }
+            if e == "n" { out = out + "\n"; handled = true }
+            if e == "r" { out = out + "\r"; handled = true }
+            if e == "t" { out = out + "\t"; handled = true }
+            if e == "u" {
+                handled = true
+                if i + 4 >= len(text) { _json_fail(text, i, "short unicode escape") }
+                let code = _json_hex_digit(char_at(text, i + 1)) * 4096
+                code = code + _json_hex_digit(char_at(text, i + 2)) * 256
+                code = code + _json_hex_digit(char_at(text, i + 3)) * 16
+                code = code + _json_hex_digit(char_at(text, i + 4))
+                if code < 0 { _json_fail(text, i, "bad unicode escape") }
+                if code < 128 {
+                    out = out + char_at(" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~", code - 32)
+                } else {
+                    _json_fail(text, i, "unicode escapes above ASCII are unsupported")
+                }
+                i = i + 4
+            }
+            if !handled { _json_fail(text, i, "unknown escape") }
+        }
+        if !is_escape { out = out + c }
+        i = i + 1
+    }
+    _json_fail(text, i, "unterminated string")
+    return {"value": "", "pos": i}
+}
+
+fn _json_parse_number(text: string, at: int) {
+    let i = at
+    if char_at(text, i) == "-" { i = i + 1 }
+    while i < len(text) && is_digit(char_at(text, i)) { i = i + 1 }
+    let is_float = false
+    if i < len(text) && char_at(text, i) == "." {
+        is_float = true
+        i = i + 1
+        while i < len(text) && is_digit(char_at(text, i)) { i = i + 1 }
+    }
+    if i < len(text) && (char_at(text, i) == "e" || char_at(text, i) == "E") {
+        is_float = true
+        i = i + 1
+        if i < len(text) && (char_at(text, i) == "+" || char_at(text, i) == "-") { i = i + 1 }
+        while i < len(text) && is_digit(char_at(text, i)) { i = i + 1 }
+    }
+    let raw = substring(text, at, i)
+    return {"value": is_float ? float(raw) : int(raw), "pos": i}
+}
+
+fn _json_parse_value(text: string, at: int) {
+    let i = _json_ws(text, at)
+    if i >= len(text) { _json_fail(text, i, "expected value") }
+    let c = char_at(text, i)
+    if c == "\"" { return _json_parse_string(text, i) }
+    if c == "[" {
+        let out = []
+        i = _json_ws(text, i + 1)
+        if i < len(text) && char_at(text, i) == "]" {
+            return {"value": out, "pos": i + 1}
+        }
+        while true {
+            let item = _json_parse_value(text, i)
+            push(out, item.value)
+            i = _json_ws(text, item.pos)
+            if i >= len(text) { _json_fail(text, i, "unterminated array") }
+            if char_at(text, i) == "]" { return {"value": out, "pos": i + 1} }
+            if char_at(text, i) != "," { _json_fail(text, i, "expected comma") }
+            i = _json_ws(text, i + 1)
+        }
+    }
+    if c == "{" {
+        let out = {}
+        i = _json_ws(text, i + 1)
+        if i < len(text) && char_at(text, i) == "}" {
+            return {"value": out, "pos": i + 1}
+        }
+        while true {
+            if i >= len(text) || char_at(text, i) != "\"" {
+                _json_fail(text, i, "object key must be a string")
+            }
+            let key = _json_parse_string(text, i)
+            i = _json_ws(text, key.pos)
+            if i >= len(text) || char_at(text, i) != ":" {
+                _json_fail(text, i, "expected colon")
+            }
+            let item = _json_parse_value(text, i + 1)
+            out[key.value] = item.value
+            i = _json_ws(text, item.pos)
+            if i >= len(text) { _json_fail(text, i, "unterminated object") }
+            if char_at(text, i) == "}" { return {"value": out, "pos": i + 1} }
+            if char_at(text, i) != "," { _json_fail(text, i, "expected comma") }
+            i = _json_ws(text, i + 1)
+        }
+    }
+    if starts_with(substring(text, i, len(text)), "true") {
+        return {"value": true, "pos": i + 4}
+    }
+    if starts_with(substring(text, i, len(text)), "false") {
+        return {"value": false, "pos": i + 5}
+    }
+    if starts_with(substring(text, i, len(text)), "null") {
+        return {"value": null, "pos": i + 4}
+    }
+    if c == "-" || is_digit(c) { return _json_parse_number(text, i) }
+    _json_fail(text, i, "unexpected token")
+    return {"value": null, "pos": i}
+}
+
+fn json_parse(text: string) {
+    let parsed = _json_parse_value(text, 0)
+    let finish = _json_ws(text, parsed.pos)
+    if finish != len(text) {
+        _json_fail(text, finish, "trailing input")
+    }
+    return parsed.value
+}
+
+fn _json_quote(text: string): string {
+    let out = "\""
+    let i = 0
+    while i < len(text) {
+        let c = char_at(text, i)
+        let escaped = false
+        if c == "\"" { out = out + "\\\""; escaped = true }
+        if c == "\\" { out = out + "\\\\"; escaped = true }
+        if c == "\n" { out = out + "\\n"; escaped = true }
+        if c == "\r" { out = out + "\\r"; escaped = true }
+        if c == "\t" { out = out + "\\t"; escaped = true }
+        if !escaped { out = out + c }
+        i = i + 1
+    }
+    return out + "\""
+}
+
+fn _json_stringify(value): string {
+    let kind = type(value)
+    if kind == "null" { return "null" }
+    if kind == "bool" {
+        if value { return "true" }
+        return "false"
+    }
+    if kind == "int" || kind == "float" { return str(value) }
+    if kind == "string" { return _json_quote(value) }
+    if kind == "array" {
+        let parts = []
+        for item in value { push(parts, _json_stringify(item)) }
+        return "[" + join(parts, ",") + "]"
+    }
+    if kind == "object" {
+        let parts = []
+        for key in object_keys(value) {
+            push(parts, _json_quote(key) + ":" + _json_stringify(value[key]))
+        }
+        return "{" + join(parts, ",") + "}"
+    }
+    _json_fail("", 0, "cannot stringify value")
+    return ""
+}
+
+fn json_stringify(value): string {
+    return _json_stringify(value)
+}

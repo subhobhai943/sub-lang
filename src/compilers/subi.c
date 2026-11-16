@@ -284,5 +284,7 @@ int main(int argc, char *argv[]) {
         printf("subi %s\n", SUB_VERSION);
         return 0;
     }
+    /* The script name is argv[1]; args() exposes only values after it. */
+    interp_set_args(argc - 1, argv + 1);
     return interp_run_on_big_stack(run_interpret_file_thread, argv[1]);
 }

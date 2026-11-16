@@ -105,6 +105,19 @@ end
 
 `allocate`, `malloc`, `free` are documented ideas, not implemented builtins.
 
+## Package-manager runtime
+
+The interpreter now exposes file, directory, environment, argument, process
+exit, and shell-command primitives for a future `subpkg` implementation.
+`exec` is intentionally shell-based and must only receive trusted command
+strings. The direct x86-64 backend rejects these builtins explicitly until it
+has equivalent filesystem-array/object runtime support.
+
+Archive extraction remains intentionally unimplemented. A future `untar`/
+`gunzip` API must validate every archive entry against absolute paths and
+parent traversal before writing anything; invoking a shell archive tool is not
+an acceptable substitute for untrusted package input.
+
 ## Known bugs tracked here (not roadmap items, but adjacent)
 
 - ~~The parser does not treat parse errors as fatal~~ — fixed: `parser_parse()`
