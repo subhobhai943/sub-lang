@@ -1,0 +1,17 @@
+fn fact(n) {
+    if n <= 1 {
+        return 1
+    }
+    return n * fact(n - 1)
+}
+
+let total = 0
+for i in range(0, 4) {
+    if i == 2 {
+        total = total + fact(i)
+    }
+}
+print(why total)
+
+let no_history
+print(why no_history)

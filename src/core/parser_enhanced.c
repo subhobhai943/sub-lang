@@ -23,6 +23,7 @@ typedef struct {
 /* Forward declarations */
 static ASTNode* parse_statement(ParserState *state);
 static ASTNode* parse_expression(ParserState *state);
+static ASTNode* parse_unary(ParserState *state);
 static ASTNode* parse_do_while(ParserState *state);
 static ASTNode* parse_try(ParserState *state);
 static ASTNode* parse_throw(ParserState *state);
@@ -239,6 +240,20 @@ static ASTNode* parse_expression(ParserState *state);
 static ASTNode* parse_primary(ParserState *state) {
     Token *tok = current_token(state);
     if (!tok) return NULL;
+
+    if (match(state, TOKEN_WHY)) {
+        advance(state);
+        ASTNode *node = create_node(AST_WHY_EXPR, tok, "why");
+        if (!node) return NULL;
+        if (match(state, TOKEN_LPAREN)) {
+            advance(state);
+            node->right = parse_expression(state);
+            expect(state, TOKEN_RPAREN, "Expected ')' after why expression");
+        } else {
+            node->right = parse_unary(state);
+        }
+        return node;
+    }
 
     if (match(state, TOKEN_NUMBER)) {
         ASTNode *node = create_node(AST_LITERAL, tok, tok->value);

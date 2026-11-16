@@ -41,6 +41,7 @@
 - [The Three Tools](#the-three-tools)
 - [Language Syntax Guide](#language-syntax-guide)
   - [Variables & Types](#variables--types)
+  - [Value Provenance (`why`)](#value-provenance-why)
   - [Functions](#functions)
   - [Classes & Objects](#classes--objects)
   - [Control Flow](#control-flow)
@@ -282,6 +283,32 @@ let ok    = true         # boolean
 let empty = null         # empty value
 const MAX = 100          # constant (cannot be reassigned)
 ```
+
+### Value Provenance (`why`)
+
+The interpreter provides `why <expr>` to inspect how a value was produced.
+It returns an object rather than only printing text:
+
+```coffee
+let a = 10
+let b = a * 2
+let c = b + 5
+
+let history = why(c)
+println(history.depth)
+println(history.sources)
+println(history.text)
+```
+
+The object has `depth`, `sources`, `value`, and `text` properties. Sources
+include assignments, operations, user-function calls, and runtime `input()`
+values. Traces are cycle-safe and capped at 64 entries. Provenance tracking is
+enabled only for a parsed program containing `why`; ordinary `subi` programs
+do not create provenance records.
+
+`why` is currently an interpreter-only feature. The C backend rejects a
+program containing it with a clear compile error because it cannot preserve
+runtime value history without changing the generated program's representation.
 
 ### Functions
 

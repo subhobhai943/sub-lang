@@ -64,7 +64,107 @@
    Global State
    ================================================================ */
 
-static SubVal NULL_VAL = {VAL_NULL, {.iv = 0}};
+static SubVal NULL_VAL = {VAL_NULL, {.iv = 0}, NULL};
+static int g_provenance_enabled = 0;
+static SubProvenance *g_binary_left = NULL;
+static SubProvenance *g_binary_right = NULL;
+
+#define PROVENANCE_MAX_DEPTH 64
+
+struct SubProvenance {
+    int refs;
+    int line;
+    int runtime;
+    char *operation;
+    struct SubProvenance *parents[2];
+};
+
+static void provenance_retain(SubProvenance *p) {
+    if (p) p->refs++;
+}
+
+static void provenance_release(SubProvenance *p) {
+    if (!p || --p->refs > 0) return;
+    provenance_release(p->parents[0]);
+    provenance_release(p->parents[1]);
+    free(p->operation);
+    free(p);
+}
+
+static SubProvenance *provenance_new(int line, const char *operation,
+                                     int runtime, SubProvenance *a,
+                                     SubProvenance *b) {
+    if (!g_provenance_enabled) return NULL;
+    SubProvenance *p = calloc(1, sizeof(*p));
+    if (!p) return NULL;
+    p->refs = 1;
+    p->line = line;
+    p->runtime = runtime;
+    p->operation = strdup(operation ? operation : "value");
+    p->parents[0] = a;
+    p->parents[1] = b;
+    provenance_retain(a);
+    provenance_retain(b);
+    return p;
+}
+
+static char *ast_expression_text(ASTNode *node) {
+    if (!node) return strdup("value");
+    if (node->type == AST_IDENTIFIER || node->type == AST_LITERAL)
+        return strdup(node->value ? node->value : "value");
+    if (node->type == AST_WHY_EXPR)
+        return strdup("why");
+    if (node->type == AST_BINARY_EXPR || node->type == AST_ASSIGN_STMT) {
+        char *l = ast_expression_text(node->left);
+        char *r = ast_expression_text(node->right);
+        size_t n = strlen(l) + strlen(r) + strlen(node->value ? node->value : "=") + 5;
+        char *s = malloc(n);
+        if (s) snprintf(s, n, "%s %s %s", l, node->value ? node->value : "=", r);
+        free(l); free(r);
+        return s ? s : strdup("expression");
+    }
+    if (node->type == AST_CALL_EXPR) {
+        size_t n = strlen(node->value ? node->value : "call") + 3;
+        for (int i = 0; i < node->child_count; i++) {
+            char *a = ast_expression_text(node->children[i]);
+            n += strlen(a) + 2;
+            free(a);
+        }
+        char *s = malloc(n);
+        if (!s) return strdup("call()");
+        snprintf(s, n, "%s(", node->value ? node->value : "call");
+        for (int i = 0; i < node->child_count; i++) {
+            char *a = ast_expression_text(node->children[i]);
+            if (i) strcat(s, ", ");
+            strcat(s, a);
+            free(a);
+        }
+        strcat(s, ")");
+        return s;
+    }
+    return strdup("expression");
+}
+
+static void provenance_attach(SubVal *v, ASTNode *node, const char *label,
+                              SubProvenance *a, SubProvenance *b, int runtime) {
+    if (!g_provenance_enabled || !v) return;
+    char *text = label ? strdup(label) : ast_expression_text(node);
+    SubProvenance *next = provenance_new(node ? node->line : 0, text, runtime, a, b);
+    provenance_release(v->provenance);
+    v->provenance = next;
+    free(text);
+}
+
+static int ast_contains_why(ASTNode *node) {
+    if (!node) return 0;
+    if (node->type == AST_WHY_EXPR) return 1;
+    if (ast_contains_why(node->left) || ast_contains_why(node->right) ||
+        ast_contains_why(node->condition) || ast_contains_why(node->body) ||
+        ast_contains_why(node->next)) return 1;
+    for (int i = 0; i < node->child_count; i++)
+        if (ast_contains_why(node->children[i])) return 1;
+    return 0;
+}
 
 /* Read an integer out of a value whatever numeric form it arrived in.
 
@@ -84,7 +184,7 @@ static long long val_as_int(SubVal v) {
 
 
 /* Exception handling state (checked at every eval entry) */
-static SubVal g_exception    = {VAL_NULL, {.iv = 0}};
+static SubVal g_exception    = {VAL_NULL, {.iv = 0}, NULL};
 static int    g_exception_thrown = 0;
 
 /* ---- Runtime error policy ----
@@ -181,6 +281,7 @@ static void   val_free(SubVal v);
 static void   print_val(SubVal v);
 static SubVal val_to_str(SubVal v);
 static const char *type_name(ValType t);
+static void array_push(SubArray *arr, SubVal item);
 
 /* Networking builtins (defined near the bottom, after the helpers they
    use; eval()'s builtin dispatch appears earlier in the file). */
@@ -196,19 +297,19 @@ static SubVal make_float(double v)    { SubVal r = {VAL_FLOAT, .fv = v}; return 
 static SubVal make_bool(int v)        { SubVal r = {VAL_BOOL, .bv = v ? 1 : 0}; return r; }
 
 static SubVal make_str(const char *s) {
-    SubVal r = {VAL_STRING, {.sv = NULL}};
+    SubVal r = {VAL_STRING, {.sv = NULL}, NULL};
     r.sv = strdup(s ? s : "");
     return r;
 }
 
 static SubVal make_array_val(void) {
-    SubVal r = {VAL_ARRAY, {.arr = NULL}};
+    SubVal r = {VAL_ARRAY, {.arr = NULL}, NULL};
     r.arr = calloc(1, sizeof(SubArray));
     return r;
 }
 
 static SubVal make_object_val(void) {
-    SubVal r = {VAL_OBJECT, {.obj = NULL}};
+    SubVal r = {VAL_OBJECT, {.obj = NULL}, NULL};
     r.obj = calloc(1, sizeof(SubObject));
     return r;
 }
@@ -218,6 +319,7 @@ static SubVal make_object_val(void) {
    ================================================================ */
 
 static void val_free(SubVal v) {
+    provenance_release(v.provenance);
     switch (v.type) {
     case VAL_STRING:
         free(v.sv);
@@ -264,6 +366,7 @@ static void val_free(SubVal v) {
    goes on modifying a in place. */
 static SubVal val_copy(SubVal v) {
     SubVal r = v;
+    provenance_retain(r.provenance);
     if (v.type == VAL_STRING && v.sv) {
         r.sv = strdup(v.sv);
         return r;
@@ -526,6 +629,7 @@ static void print_val(SubVal v) {
             if (i > 0) printf(", ");
             print_val(v.arr->items[i]);
         }
+
         printf("]");
         break;
     }
@@ -540,6 +644,66 @@ static void print_val(SubVal v) {
         break;
     }
     }
+}
+
+static int provenance_depth(SubProvenance *p, SubProvenance **seen, int count) {
+    if (!p || count >= PROVENANCE_MAX_DEPTH) return 0;
+    for (int i = 0; i < count; i++) if (seen[i] == p) return 0;
+    seen[count++] = p;
+    int a = provenance_depth(p->parents[0], seen, count);
+    int b = provenance_depth(p->parents[1], seen, count);
+    return 1 + (a > b ? a : b);
+}
+
+static void provenance_sources(SubProvenance *p, SubArray *out,
+                               SubProvenance **seen, int *count,
+                               int *remaining) {
+    if (!p || !out || !remaining || *remaining <= 0 ||
+        *count >= PROVENANCE_MAX_DEPTH) return;
+    for (int i = 0; i < *count; i++) if (seen[i] == p) return;
+    seen[(*count)++] = p;
+    char line[512];
+    if (p->runtime)
+        snprintf(line, sizeof(line), "%s (line %d, runtime)", p->operation, p->line);
+    else
+        snprintf(line, sizeof(line), "%s (line %d)", p->operation, p->line);
+    array_push(out, make_str(line));
+    (*remaining)--;
+    provenance_sources(p->parents[0], out, seen, count, remaining);
+    provenance_sources(p->parents[1], out, seen, count, remaining);
+}
+
+static SubVal make_why_value(SubVal value, ASTNode *operand) {
+    SubVal result = make_object_val();
+    SubVal depth = make_int(0);
+    SubVal sources = make_array_val();
+    SubVal rendered = val_to_str(value);
+    SubVal text = make_str("");
+    if (value.provenance) {
+        SubProvenance *seen[PROVENANCE_MAX_DEPTH] = {0};
+        depth = make_int(provenance_depth(value.provenance, seen, 0));
+        int count = 0, remaining = PROVENANCE_MAX_DEPTH;
+        memset(seen, 0, sizeof(seen));
+        provenance_sources(value.provenance, sources.arr, seen, &count, &remaining);
+        if (remaining == 0) array_push(sources.arr, make_str("... (more)"));
+    } else {
+        array_push(sources.arr, make_str("(no history)"));
+    }
+    if (operand && operand->type == AST_IDENTIFIER && operand->value) {
+        size_t n = strlen(operand->value) + strlen(rendered.sv ? rendered.sv : "") + 4;
+        char *named = malloc(n);
+        if (named) {
+            snprintf(named, n, "%s = %s", operand->value, rendered.sv ? rendered.sv : "null");
+            val_free(text);
+            text = make_str(named);
+            free(named);
+        }
+    }
+    object_set(result.obj, "depth", depth);
+    object_set(result.obj, "sources", sources);
+    object_set(result.obj, "value", rendered);
+    object_set(result.obj, "text", text);
+    return result;
 }
 
 /* ================================================================
@@ -616,6 +780,8 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
 
     SubVal L = eval(node->left, env);
     SubVal R = eval(node->right, env);
+    g_binary_left = L.provenance;
+    g_binary_right = R.provenance;
 
     /* --- String concatenation (+) --- */
     if (strcmp(op, "+") == 0 && (L.type == VAL_STRING || R.type == VAL_STRING)) {
@@ -1053,19 +1219,24 @@ SubVal eval(ASTNode *node, Env *env) {
        ============================================================ */
     case AST_PROGRAM:
     case AST_BLOCK:
+        if (node->type == AST_PROGRAM)
+            g_provenance_enabled = ast_contains_why(node);
         return eval_block(node, env);
 
     /* ============================================================
        Literals
        ============================================================ */
     case AST_LITERAL: {
-        if (node->data_type == TYPE_NULL)   return NULL_VAL;
-        if (node->data_type == TYPE_STRING) return make_str(node->value);
-        if (node->data_type == TYPE_BOOL)
-            return make_bool(node->value && strcmp(node->value, "true") == 0);
-        if (node->data_type == TYPE_FLOAT)
-            return make_float(atof(node->value ? node->value : "0"));
-        return make_int(atoll(node->value ? node->value : "0"));
+        SubVal value;
+        if (node->data_type == TYPE_NULL) value = NULL_VAL;
+        else if (node->data_type == TYPE_STRING) value = make_str(node->value);
+        else if (node->data_type == TYPE_BOOL)
+            value = make_bool(node->value && strcmp(node->value, "true") == 0);
+        else if (node->data_type == TYPE_FLOAT)
+            value = make_float(atof(node->value ? node->value : "0"));
+        else value = make_int(atoll(node->value ? node->value : "0"));
+        provenance_attach(&value, node, NULL, NULL, NULL, 0);
+        return value;
     }
 
     /* ============================================================
@@ -1080,8 +1251,24 @@ SubVal eval(ASTNode *node, Env *env) {
     case AST_VAR_DECL:
     case AST_CONST_DECL: {
         SubVal val = node->right ? eval(node->right, env) : NULL_VAL;
+        if (node->right) {
+            char *text = ast_expression_text(node->right);
+            char *label = malloc(strlen(node->value ? node->value : "value") +
+                                 strlen(text) + 4);
+            if (label) {
+                sprintf(label, "%s = %s", node->value ? node->value : "value", text);
+                provenance_attach(&val, node, label, val.provenance, NULL, 0);
+                free(label);
+            }
+            free(text);
+        }
         env_define(env, node->value, val);
         return val;
+    }
+
+    case AST_WHY_EXPR: {
+        SubVal value = eval(node->right, env);
+        return make_why_value(value, node->right);
     }
 
     /* ============================================================
@@ -1103,6 +1290,15 @@ SubVal eval(ASTNode *node, Env *env) {
             const char *name = node->left->value;
 
             if (op && strcmp(op, "=") == 0) {
+                char *text = ast_expression_text(node->right);
+                size_t n = strlen(name ? name : "value") + strlen(text) + 4;
+                char *label = malloc(n);
+                if (label) {
+                    snprintf(label, n, "%s = %s", name ? name : "value", text);
+                    provenance_attach(&rhs, node, label, rhs.provenance, NULL, 0);
+                    free(label);
+                }
+                free(text);
                 env_set(env, name, rhs);
                 return rhs;
             }
@@ -1152,6 +1348,7 @@ SubVal eval(ASTNode *node, Env *env) {
                 );
             }
 
+            provenance_attach(&result, node, NULL, cur.provenance, rhs.provenance, 0);
             env_set(env, name, result);
             return result;
         }
@@ -1255,8 +1452,11 @@ SubVal eval(ASTNode *node, Env *env) {
     /* ============================================================
        Binary Expression
        ============================================================ */
-    case AST_BINARY_EXPR:
-        return eval_binary(node, env);
+    case AST_BINARY_EXPR: {
+        SubVal result = eval_binary(node, env);
+        provenance_attach(&result, node, NULL, g_binary_left, g_binary_right, 0);
+        return result;
+    }
 
     /* ============================================================
        Unary Expression (-, !, +, ~, ++, --)
@@ -1574,7 +1774,7 @@ SubVal eval(ASTNode *node, Env *env) {
                 return NULL_VAL;
             }
         }
-        SubVal ctor = {VAL_FUNC, {.fn = node}};
+        SubVal ctor = {VAL_FUNC, {.fn = node}, NULL};
         env_define(env, node->value, ctor);
         /* env_define stores a copy of the value, and a VAL_FUNC "copy" is
            the same node pointer, so the definition outlives this eval. */
@@ -2028,10 +2228,18 @@ SubVal eval(ASTNode *node, Env *env) {
         if (fn && strcmp(fn, "input") == 0) {
             if (node->child_count > 0) print_val(eval(node->children[0], env));
             char buf[1024];
-            if (!fgets(buf, sizeof(buf), stdin)) return make_str("");
+            if (!fgets(buf, sizeof(buf), stdin)) {
+                SubVal empty = make_str("");
+                provenance_attach(&empty, node, "input() = \"\"", NULL, NULL, 1);
+                return empty;
+            }
             size_t l = strlen(buf);
             if (l > 0 && buf[l - 1] == '\n') buf[l - 1] = '\0';
-            return make_str(buf);
+            SubVal input = make_str(buf);
+            char label[1200];
+            snprintf(label, sizeof(label), "input() = %s", buf);
+            provenance_attach(&input, node, label, NULL, NULL, 1);
+            return input;
         }
 
         /* net_fetch(url) -> response body (HTTP GET) */
@@ -2042,7 +2250,7 @@ SubVal eval(ASTNode *node, Env *env) {
             const char *url = uv.type == VAL_STRING && uv.sv ? uv.sv : "";
             char *body = net_http_request("GET", url, NULL, NULL);
             if (!body) return NULL_VAL;
-            SubVal r = {VAL_STRING, {.sv = body}};
+            SubVal r = {VAL_STRING, {.sv = body}, NULL};
             return r;
         }
 
@@ -2056,7 +2264,7 @@ SubVal eval(ASTNode *node, Env *env) {
             char *bstr = bv.type == VAL_STRING && bv.sv ? bv.sv : "";
             char *resp = net_http_request("POST", url, bstr, NULL);
             if (!resp) return NULL_VAL;
-            SubVal r = {VAL_STRING, {.sv = resp}};
+            SubVal r = {VAL_STRING, {.sv = resp}, NULL};
             return r;
         }
 
@@ -2101,7 +2309,10 @@ SubVal eval(ASTNode *node, Env *env) {
                     }
                 }
                 eval(fn_decl->body, fn_env);
-                SubVal ret = fn_env->returning ? fn_env->ret_val : NULL_VAL;
+                SubVal ret = fn_env->returning ? val_copy(fn_env->ret_val) : NULL_VAL;
+                char *call_text = ast_expression_text(node);
+                provenance_attach(&ret, node, call_text, ret.provenance, NULL, 0);
+                free(call_text);
                 env_free(fn_env);
                 return ret;
             }
@@ -2482,7 +2693,9 @@ int interpret_source(const char *source, Env *env) {
         fprintf(stderr, "Warning: semantic analysis reported issues (continuing)\n");
     }
 
+    g_provenance_enabled = ast_contains_why(ast);
     eval(ast, env);
+    g_provenance_enabled = 0;
     int aborted = g_runtime_aborted;
 
     parser_free_ast(ast);

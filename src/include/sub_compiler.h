@@ -52,6 +52,7 @@ typedef enum {
     TOKEN_CATCH,          // catch
     TOKEN_FINALLY,        // finally
     TOKEN_THROW,          // throw
+    TOKEN_WHY,            // why
     
     // Embedded Languages
     TOKEN_EMBED,          // embed
@@ -190,7 +191,8 @@ typedef enum {
     AST_PARAM_DECL,       // Function parameter declaration
     AST_SWITCH_STMT,      // switch/match statement
     AST_CASE_CLAUSE,      // case clause in switch
-    AST_DEFAULT_CLAUSE    // default clause in switch
+    AST_DEFAULT_CLAUSE,   // default clause in switch
+    AST_WHY_EXPR          // why <expr>
 } ASTNodeType;
 
 /* AST Node Structure */

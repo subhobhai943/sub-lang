@@ -337,6 +337,47 @@ def main():
 
     # --- Special-purpose checks ---
 
+    print("\n=== value provenance (why) ===")
+    why_file = os.path.join(SCRIPT_DIR, "test_why.sb")
+    rc, out = run([SUBI, why_file])
+    if rc != 0:
+        fail("subi: test_why.sb", f"exit {rc}: {out}")
+    elif ("c = 25" in out and "double(a)" in out and
+          "x * 2" in out and out.rstrip().splitlines()[-1].isdigit()):
+        print("  OK   subi: test_why.sb")
+    else:
+        fail("subi: test_why.sb", f"unexpected output: {out}")
+
+    rc, out = run([SUBC, why_file, "--via-c",
+                   "-o", os.path.join(ROOT_DIR, "_why_rejected")])
+    if rc != 0 and "C backend cannot preserve runtime value history" in out:
+        print("  OK   subc rejects unsupported why")
+    else:
+        fail("subc rejects unsupported why", f"exit {rc}: {out}")
+
+    edges_file = os.path.join(SCRIPT_DIR, "test_why_edges.sb")
+    rc, out = run([SUBI, edges_file])
+    if (rc == 0 and "fact(i)" in out and "n * fact(n - 1)" in out and
+            "(no history)" in out):
+        print("  OK   subi: why loops, branches, recursion, and no history")
+    else:
+        fail("subi: why edge cases", f"exit {rc}: {out}")
+
+    input_file = os.path.join(SCRIPT_DIR, "test_why_input.sb")
+    try:
+        proc = subprocess.run([SUBI, input_file], input="5\n",
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True,
+                              timeout=30)
+        out = proc.stdout
+        if proc.returncode == 0 and "input() = 5" in out and "runtime" in out:
+            print("  OK   subi: why runtime input")
+        else:
+            fail("subi: why runtime input",
+                 f"exit {proc.returncode}: {out}")
+    except (subprocess.TimeoutExpired, OSError) as e:
+        fail("subi: why runtime input", str(e))
+
     # 64-bit integer precision. int+int used to go through a double, so
     # 2**53 + 1 rounded to 2**53 through subi while the native backend kept
     # the exact value. Only the interpreter and subc are int64-native here;
