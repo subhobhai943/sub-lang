@@ -90,6 +90,7 @@ void   env_define(Env *env, const char *name, SubVal val);
 SubVal eval(ASTNode *node, Env *env);
 int    interpret_file(const char *path);
 int    interpret_source(const char *source, Env *env);
+void   interp_set_args(int argc, char **argv);
 
 /* ---------- Runtime Error Policy ---------- */
 

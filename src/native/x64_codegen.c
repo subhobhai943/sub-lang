@@ -293,6 +293,12 @@ static int builtin_fixed_type(const char *name, DataType *out) {
         {"ceil", TYPE_INT}, {"round", TYPE_INT},
         {"float", TYPE_FLOAT}, {"sqrt", TYPE_FLOAT},
         {"print", TYPE_VOID}, {"println", TYPE_VOID}, {"show", TYPE_VOID},
+        {"read_file", TYPE_STRING}, {"sha256", TYPE_STRING}, {"write_file", TYPE_INT},
+        {"append_file", TYPE_INT}, {"file_exists", TYPE_BOOL},
+        {"is_dir", TYPE_BOOL}, {"mkdir", TYPE_BOOL}, {"list_dir", TYPE_ARRAY},
+        {"remove", TYPE_BOOL}, {"rename", TYPE_BOOL}, {"env", TYPE_STRING},
+        {"args", TYPE_ARRAY}, {"exec", TYPE_OBJECT}, {"object_keys", TYPE_ARRAY},
+        {"exit", TYPE_VOID},
         {NULL, TYPE_UNKNOWN}
     };
     for (int i = 0; tab[i].n; i++)
@@ -483,6 +489,17 @@ static void fail_unsupported(ASTNode *n, const char *what) {
     else
         nc_fail(C, "this %s is not supported by the native backend "
                    "(node kind %d, line %d)", what, (int)n->type, n->line);
+}
+
+static int native_system_builtin(const char *name) {
+    static const char *names[] = {
+        "read_file", "sha256", "write_file", "append_file", "file_exists", "is_dir",
+        "mkdir", "list_dir", "remove", "rename", "env", "args", "exit",
+        "exec", "object_keys", "net_fetch", "net_post", "net_download", NULL
+    };
+    for (int i = 0; names[i]; i++)
+        if (name && strcmp(name, names[i]) == 0) return 1;
+    return 0;
 }
 
 /* ----------------------------------------------------------------
@@ -932,6 +949,12 @@ static void gen_call(ASTNode *n) {
     if (!strcmp(fn, "println"))                      { gen_print(n, 1); return; }
 
     ASTNode *a0 = n->child_count > 0 ? n->children[0] : NULL;
+
+    if (native_system_builtin(fn)) {
+        nc_fail(C, "%s() is not supported by the native backend; "
+                   "use the C backend instead (line %d)", fn, n->line);
+        return;
+    }
 
     if (!strcmp(fn, "str") || !strcmp(fn, "to_string")) {
         if (!a0) { nc_load_cstr(C, RAX, ""); return; }

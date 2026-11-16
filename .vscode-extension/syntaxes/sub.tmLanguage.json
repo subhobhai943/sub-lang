@@ -133,7 +133,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.sub",
-          "match": "\\b(print|println|show|input|len|length|range|type|str|to_string|int|float|bool|abs|sqrt|min|max|floor|ceil|round|push|pop|append|split|join|upper|lower|trim|substring|replace|contains|char_at)\\b(?=\\s*\\()"
+          "match": "\\b(print|println|show|input|len|length|range|type|str|to_string|int|float|bool|abs|sqrt|min|max|floor|ceil|round|push|pop|append|split|join|upper|lower|trim|substring|replace|contains|char_at|read_file|write_file|append_file|file_exists|is_dir|mkdir|list_dir|remove|rename|env|args|exit|exec|net_fetch|net_post|net_download)\\b(?=\\s*\\()"
         },
         {
           "name": "entity.name.function.sub",
