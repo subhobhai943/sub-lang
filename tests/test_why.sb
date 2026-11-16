@@ -1,0 +1,9 @@
+fn double(x) {
+    return x * 2
+}
+
+let a = 10
+let b = double(a)
+let c = b + 5
+print(why c)
+println(why(c).depth)

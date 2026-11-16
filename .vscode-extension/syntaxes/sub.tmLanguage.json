@@ -38,7 +38,7 @@
       "patterns": [
         {
           "name": "keyword.control.sub",
-          "match": "\\b(if|elif|else|for|while|do|end|break|continue|return|try|catch|finally|throw|switch|match|case|default|in)\\b"
+          "match": "\\b(if|elif|else|for|while|do|end|break|continue|return|try|catch|finally|throw|why|switch|match|case|default|in)\\b"
         },
         {
           "name": "keyword.declaration.sub",

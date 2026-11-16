@@ -132,6 +132,7 @@ static const KWEntry kw_table[] = {
     {"catch",       TOKEN_CATCH},
     {"finally",     TOKEN_FINALLY},
     {"throw",       TOKEN_THROW},
+    {"why",         TOKEN_WHY},
 
     /* Embedded language names */
     {"embed",       TOKEN_EMBED},
@@ -665,6 +666,7 @@ const char* token_type_to_string(TokenType type) {
         case TOKEN_CATCH:          return "CATCH";
         case TOKEN_FINALLY:        return "FINALLY";
         case TOKEN_THROW:          return "THROW";
+        case TOKEN_WHY:            return "WHY";
         case TOKEN_EMBED:          return "EMBED";
         case TOKEN_ENDEMBED:       return "ENDEMBED";
         case TOKEN_CPP:            return "CPP";

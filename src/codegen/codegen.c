@@ -130,6 +130,17 @@ static void optimize_remove_dead_code(ASTNode *node);
 static bool is_node_pure(ASTNode *node);
 static void optimize_constant_folding(ASTNode *node);
 
+static int contains_why(ASTNode *node) {
+    if (!node) return 0;
+    if (node->type == AST_WHY_EXPR) return 1;
+    if (contains_why(node->left) || contains_why(node->right) ||
+        contains_why(node->condition) || contains_why(node->body) ||
+        contains_why(node->next)) return 1;
+    for (int i = 0; i < node->child_count; i++)
+        if (contains_why(node->children[i])) return 1;
+    return 0;
+}
+
 /* Dead Code Elimination */
 static bool is_node_pure(ASTNode *node) {
     if (!node) return false;
@@ -2433,6 +2444,11 @@ static char* generate_macos(ASTNode *ast) {
 char* codegen_generate(ASTNode *ast, Platform platform) {
     if (!ast) {
         fprintf(stderr, "Error: NULL AST node\n");
+        return NULL;
+    }
+    if (contains_why(ast)) {
+        fprintf(stderr, "Error: 'why' provenance is supported by subi only; "
+                        "the C backend cannot preserve runtime value history\n");
         return NULL;
     }
     

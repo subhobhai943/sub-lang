@@ -1,0 +1,2 @@
+let answer = input()
+print(why answer)

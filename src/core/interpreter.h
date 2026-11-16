@@ -14,6 +14,7 @@
 
 struct SubVal;
 typedef struct SubVal SubVal;
+typedef struct SubProvenance SubProvenance;
 
 /* ---------- Dynamic Array Value ---------- */
 
@@ -56,6 +57,7 @@ struct SubVal {
         SubArray   *arr;
         SubObject  *obj;
     };
+    SubProvenance *provenance;
 };
 
 /* ---------- Environment (Variable Scope) ---------- */
