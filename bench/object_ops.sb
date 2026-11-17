@@ -1,0 +1,12 @@
+// bench/object_ops.sb - Object field read/write in a loop
+// Measures object property lookup overhead
+
+var obj = {"x": 0, "y": 0, "z": 0}
+var i = 0
+while (i < 1000000) {
+    obj.x = obj.x + 1
+    obj.y = obj.y + 2
+    obj.z = obj.z + 3
+    i = i + 1
+}
+print(obj.x + obj.y + obj.z)

@@ -1,0 +1,10 @@
+// bench/loop20m.sb - 20M iteration arithmetic loop
+// Measures per-iteration overhead: env creation, variable lookup, arithmetic
+
+var total = 0
+var i = 0
+while (i < 20000000) {
+    total = total + i
+    i = i + 1
+}
+print(total)

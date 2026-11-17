@@ -1,0 +1,24 @@
+// bench/func_calls.sb - Many small function calls
+// Measures function call overhead: env creation, argument binding, return
+
+fn add(a, b) {
+    return a + b
+}
+
+fn mul(a, b) {
+    return a * b
+}
+
+fn identity(x) {
+    return x
+}
+
+var total = 0
+var i = 0
+while (i < 5000000) {
+    total = total + add(i, 1)
+    total = total + mul(i, 2)
+    total = total + identity(i)
+    i = i + 1
+}
+print(total)
