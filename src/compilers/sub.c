@@ -384,6 +384,13 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+        /* Reject path traversal (..) and absolute paths so output cannot
+           escape the intended directory. */
+        if (strstr(output_file, "..") != NULL || output_file[0] == '/') {
+            fprintf(stderr, "Error: Output name contains path traversal: '%s'\n", output_file);
+            free(source); lexer_free_tokens(tokens, token_count); parser_free_ast(ast); free(output_code);
+            return 1;
+        }
         char compile_cmd[1024];
         const char *bin_ext = (target->platform == PLATFORM_WINDOWS) ? ".exe" : "";
         snprintf(compile_cmd, sizeof(compile_cmd), "gcc -O2 -o \"%s%s\" \"%s\"", base_name, bin_ext, output_file);
