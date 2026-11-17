@@ -308,7 +308,8 @@ static void array_push(SubArray *arr, SubVal item);
 /* Networking builtins (defined near the bottom, after the helpers they
    use; eval()'s builtin dispatch appears earlier in the file). */
 static char *net_http_request(const char *method, const char *url,
-                              const char *body, int *status_out);
+                              const char *body, int *status_out,
+                              size_t *body_len_out);
 
 /* ================================================================
    Value Constructors
@@ -1312,8 +1313,12 @@ static SubVal eval_array_method(SubArray *arr, const char *method,
 
     /* --- Methods --- */
     if (strcmp(method, "push") == 0) {
-        if (call_node && call_node->child_count > 0)
-            array_push(arr, eval(call_node->children[0], env));
+        if (call_node && call_node->child_count > 0) {
+            SubVal item = eval(call_node->children[0], env);
+            if (expr_borrows_binding(call_node->children[0]))
+                item = val_copy(item);
+            array_push(arr, item);
+        }
         return NULL_VAL;
     }
 
@@ -2623,7 +2628,8 @@ SubVal eval(ASTNode *node, Env *env) {
                 runtime_error("net_fetch needs a URL");
             SubVal uv = eval(node->children[0], env);
             const char *url = uv.type == VAL_STRING && uv.sv ? uv.sv : "";
-            char *body = net_http_request("GET", url, NULL, NULL);
+            size_t blen = 0;
+            char *body = net_http_request("GET", url, NULL, NULL, &blen);
             if (!body) return NULL_VAL;
             SubVal r = {VAL_STRING, {.sv = body}, NULL};
             return r;
@@ -2637,7 +2643,8 @@ SubVal eval(ASTNode *node, Env *env) {
             SubVal bv = eval(node->children[1], env);
             const char *url = uv.type == VAL_STRING && uv.sv ? uv.sv : "";
             char *bstr = bv.type == VAL_STRING && bv.sv ? bv.sv : "";
-            char *resp = net_http_request("POST", url, bstr, NULL);
+            size_t blen = 0;
+            char *resp = net_http_request("POST", url, bstr, NULL, &blen);
             if (!resp) return NULL_VAL;
             SubVal r = {VAL_STRING, {.sv = resp}, NULL};
             return r;
@@ -2651,10 +2658,9 @@ SubVal eval(ASTNode *node, Env *env) {
             SubVal pv = eval(node->children[1], env);
             const char *url = uv.type == VAL_STRING && uv.sv ? uv.sv : "";
             const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
-            char *body = net_http_request("GET", url, NULL, NULL);
+            size_t blen = 0;
+            char *body = net_http_request("GET", url, NULL, NULL, &blen);
             if (!body) return NULL_VAL;
-            size_t blen = strlen(body);   /* text bodies; a real length
-                                             would need the raw response */
             FILE *f = fopen(path, "wb");
             if (!f) {
                 free(body);
@@ -2875,9 +2881,11 @@ static char *net_read_all(int fd, size_t *out_len) {
 /* Perform one HTTP request. method is "GET" or "POST"; body may be NULL.
    Returns the response body, malloc'd and NUL-terminated, with headers
    stripped; a Content-Length is honoured, and a chunked body is
-   de-chunked. status_out (may be NULL) receives the status code. */
+   de-chunked. status_out (may be NULL) receives the status code.
+   body_len_out (may be NULL) receives the number of body bytes. */
 static char *net_http_request(const char *method, const char *url,
-                              const char *body, int *status_out) {
+                              const char *body, int *status_out,
+                              size_t *body_len_out) {
     NetUrl u;
     if (net_parse_url(url, &u) != 0) return NULL;
 
@@ -3027,16 +3035,18 @@ static char *net_http_request(const char *method, const char *url,
     }
     free(raw);
     if (status_out) *status_out = status;
-    (void)out_len;
+    if (body_len_out) *body_len_out = out_len;
     return out_body;
 }
 
 #else  /* !_WIN32: stubs with the same errors */
 
 static char *net_http_request(const char *method, const char *url,
-                              const char *body, int *status_out) {
+                              const char *body, int *status_out,
+                              size_t *body_len_out) {
     (void)method; (void)url; (void)body;
     if (status_out) *status_out = 0;
+    if (body_len_out) *body_len_out = 0;
     runtime_error("net_fetch is not supported on this platform");
     return NULL;
 }
