@@ -2642,13 +2642,17 @@ SubVal eval(ASTNode *node, Env *env) {
 
         /* pop(arr) */
         if (fn && strcmp(fn, "pop") == 0 && node->child_count > 0) {
-            SubVal arr = eval(node->children[0], env);
+            int borrowed_arr = node->children[0]->type == AST_IDENTIFIER;
+            SubVal arr = borrowed_arr
+                ? env_get_node(node->children[0], env, node->children[0]->value)
+                : eval(node->children[0], env);
             SubVal result;
             if (arr.type == VAL_ARRAY && arr.arr)
                 result = array_pop(arr.arr);
             else
                 result = NULL_VAL;
-            val_free(arr);
+            if (!borrowed_arr)
+                val_free(arr);
             return result;
         }
 
