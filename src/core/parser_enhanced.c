@@ -102,6 +102,8 @@ static ASTNode* create_node(ASTNodeType type, const Token *tok, const char *valu
         free(node);
         return NULL;
     }
+    node->resolved_depth = -1;
+    node->resolved_slot = -1;
     node->line = tok ? tok->line : 0;
     node->column = tok ? tok->column : 0;
     return node;

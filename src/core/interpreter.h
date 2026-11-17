@@ -65,11 +65,15 @@ struct SubVal {
 typedef struct EnvEntry {
     char           *name;
     SubVal          val;
+    int             slot;      /* index in env->slots, or -1 if not yet assigned */
     struct EnvEntry *next;
 } EnvEntry;
 
 typedef struct Env {
     EnvEntry    *vars;
+    EnvEntry   **slots;      /* array of EnvEntry pointers for fast indexed access */
+    int          slot_count; /* number of slots in use (next free index) */
+    int          slot_capacity; /* allocated size of slots array */
     struct Env  *parent;
     int          returning;   /* return flag  - propagates up   */
     int          breaking;    /* break   flag - consumed by loop */
@@ -81,9 +85,18 @@ typedef struct Env {
 
 Env   *env_new(Env *parent);
 void   env_free(Env *env);
+/* env_get/env_set with node hint: when node->resolved_slot >= 0, use direct
+   slot access instead of linear name search. Pass NULL for call sites without
+   an AST node (e.g. builtins). */
+SubVal env_get_node(ASTNode *node, Env *env, const char *name);
 SubVal env_get(Env *env, const char *name);
+void   env_set_node(ASTNode *node, Env *env, const char *name, SubVal val);
 void   env_set(Env *env, const char *name, SubVal val);
 void   env_define(Env *env, const char *name, SubVal val);
+
+/* One-time pass after parsing: resolve every AST_IDENTIFIER to a
+   (depth, slot) pair so env_get_node/env_set_node can use O(1) access. */
+void resolve_variables(ASTNode *node);
 
 /* ---------- Interpreter Entry Points ---------- */
 

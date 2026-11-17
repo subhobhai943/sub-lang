@@ -218,6 +218,11 @@ typedef struct ASTNode {
     struct ASTNode **children;
     int child_count;
     void *metadata;
+    /* Variable resolution cache: when >= 0, env_get/env_set can use direct
+       slot access instead of linear name search. Filled by resolve_variables()
+       after parsing. -1 = unresolved. */
+    int resolved_depth;
+    int resolved_slot;
     int line;
     int column;
 } ASTNode;
