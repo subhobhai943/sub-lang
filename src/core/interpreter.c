@@ -869,6 +869,9 @@ static SubVal make_why_value(SubVal value, ASTNode *operand) {
 Env *env_new(Env *parent) {
     Env *e = calloc(1, sizeof(Env));
     e->parent = parent;
+    e->slots = NULL;
+    e->slot_count = 0;
+    e->slot_capacity = 0;
     return e;
 }
 
@@ -882,16 +885,48 @@ void env_free(Env *env) {
         free(e);
         e = n;
     }
+    free(env->slots);
     free(env);
 }
 
-SubVal env_get(Env *env, const char *name) {
+SubVal env_get_node(ASTNode *node, Env *env, const char *name) {
+    /* Fast path: direct slot access when the identifier was resolved to the
+       current env (depth 0). Depth > 0 is context-dependent so not cached. */
+    if (node && node->resolved_slot >= 0 && node->resolved_depth == 0) {
+        if (node->resolved_slot < env->slot_count)
+            return env->slots[node->resolved_slot]->val;
+    }
+    /* Slow path: linear name search */
     for (Env *s = env; s; s = s->parent)
         for (EnvEntry *e = s->vars; e; e = e->next)
-            if (strcmp(e->name, name) == 0)
+            if (strcmp(e->name, name) == 0) {
+                /* Cache only depth-0 resolutions (variable in current env) */
+                if (node && s == env) {
+                    node->resolved_depth = 0;
+                    node->resolved_slot = e->slot;
+                }
                 return e->val;
+            }
     runtime_error("undefined variable '%s'", name);
     return NULL_VAL;
+}
+
+SubVal env_get(Env *env, const char *name) {
+    return env_get_node(NULL, env, name);
+}
+
+static void env_ensure_slot(Env *env, int slot) {
+    if (slot < 0) return;
+    if (slot >= env->slot_capacity) {
+        int new_cap = env->slot_capacity ? env->slot_capacity * 2 : 4;
+        while (new_cap <= slot) new_cap *= 2;
+        EnvEntry **ns = realloc(env->slots, (size_t)new_cap * sizeof(EnvEntry *));
+        if (!ns) return;
+        for (int i = env->slot_capacity; i < new_cap; i++)
+            ns[i] = NULL;
+        env->slots = ns;
+        env->slot_capacity = new_cap;
+    }
 }
 
 void env_define(Env *env, const char *name, SubVal val) {
@@ -899,20 +934,42 @@ void env_define(Env *env, const char *name, SubVal val) {
     EnvEntry *e = calloc(1, sizeof(EnvEntry));
     e->name = strdup(name);
     e->val  = val_copy(val);      /* see val_copy: a value, not a share */
+    e->slot = env->slot_count;
+    env_ensure_slot(env, e->slot);
+    env->slots[e->slot] = e;
+    env->slot_count++;
     e->next = env->vars;
     env->vars = e;
 }
 
-void env_set(Env *env, const char *name, SubVal val) {
+void env_set_node(ASTNode *node, Env *env, const char *name, SubVal val) {
+    /* Fast path: direct slot access when the identifier was resolved to the
+       current env (depth 0). Depth > 0 is context-dependent so not cached. */
+    if (node && node->resolved_slot >= 0 && node->resolved_depth == 0) {
+        if (node->resolved_slot < env->slot_count) {
+            val_free(env->slots[node->resolved_slot]->val);
+            env->slots[node->resolved_slot]->val = val_copy(val);
+            return;
+        }
+    }
+    /* Slow path: linear name search */
     for (Env *s = env; s; s = s->parent)
         for (EnvEntry *e = s->vars; e; e = e->next)
             if (strcmp(e->name, name) == 0) {
+                if (node && s == env) {
+                    node->resolved_depth = 0;
+                    node->resolved_slot = e->slot;
+                }
                 val_free(e->val);
-                e->val = val_copy(val);  /* see val_copy */
+                e->val = val_copy(val);
                 return;
             }
     /* Variable not found - create in current scope */
     env_define(env, name, val);
+}
+
+void env_set(Env *env, const char *name, SubVal val) {
+    env_set_node(NULL, env, name, val);
 }
 
 /* ================================================================
@@ -1403,7 +1460,7 @@ SubVal eval(ASTNode *node, Env *env) {
        Identifier
        ============================================================ */
     case AST_IDENTIFIER:
-        return env_get(env, node->value);
+        return env_get_node(node, env, node->value);
 
     /* ============================================================
        Variable / Constant Declaration
@@ -1461,12 +1518,12 @@ SubVal eval(ASTNode *node, Env *env) {
                     }
                     free(text);
                 }
-                env_set(env, name, rhs);
+                env_set_node(node->left, env, name, rhs);
                 return rhs;
             }
 
             /* Compound: get current, compute, set */
-            SubVal cur = env_get(env, name);
+            SubVal cur = env_get_node(node->left, env, name);
 
             /* Convert to numbers. Integer paths stay integer: going through
                double here dropped the low bits of large values (see the note
@@ -1512,7 +1569,7 @@ SubVal eval(ASTNode *node, Env *env) {
 
             if (g_provenance_enabled)
                 provenance_attach(&result, node, NULL, cur.provenance, rhs.provenance, 0);
-            env_set(env, name, result);
+            env_set_node(node->left, env, name, result);
             return result;
         }
 
@@ -1608,7 +1665,7 @@ SubVal eval(ASTNode *node, Env *env) {
         }
 
         /* Simple assignment fallback */
-        env_set(env, node->left ? node->left->value : "", rhs);
+        env_set_node(node->left, env, node->left ? node->left->value : "", rhs);
         return rhs;
     }
 
@@ -1631,36 +1688,36 @@ SubVal eval(ASTNode *node, Env *env) {
         /* Pre-increment: ++var */
         if (op && strcmp(op, "++") == 0 && node->right && node->right->type == AST_IDENTIFIER) {
             const char *name = node->right->value;
-            SubVal cur = env_get(env, name);
+            SubVal cur = env_get_node(node->right, env, name);
             SubVal nxt = (cur.type == VAL_FLOAT) ? make_float(cur.fv + 1.0) : make_int(cur.iv + 1);
-            env_set(env, name, nxt);
+            env_set_node(node->right, env, name, nxt);
             return nxt;
         }
 
         /* Pre-decrement: --var */
         if (op && strcmp(op, "--") == 0 && node->right && node->right->type == AST_IDENTIFIER) {
             const char *name = node->right->value;
-            SubVal cur = env_get(env, name);
+            SubVal cur = env_get_node(node->right, env, name);
             SubVal nxt = (cur.type == VAL_FLOAT) ? make_float(cur.fv - 1.0) : make_int(cur.iv - 1);
-            env_set(env, name, nxt);
+            env_set_node(node->right, env, name, nxt);
             return nxt;
         }
 
         /* Post-increment: var++ (operand in left) */
         if (op && strcmp(op, "++") == 0 && node->left && node->left->type == AST_IDENTIFIER) {
             const char *name = node->left->value;
-            SubVal cur = env_get(env, name);
+            SubVal cur = env_get_node(node->left, env, name);
             SubVal nxt = (cur.type == VAL_FLOAT) ? make_float(cur.fv + 1.0) : make_int(cur.iv + 1);
-            env_set(env, name, nxt);
+            env_set_node(node->left, env, name, nxt);
             return cur; /* return old value */
         }
 
         /* Post-decrement: var-- (operand in left) */
         if (op && strcmp(op, "--") == 0 && node->left && node->left->type == AST_IDENTIFIER) {
             const char *name = node->left->value;
-            SubVal cur = env_get(env, name);
+            SubVal cur = env_get_node(node->left, env, name);
             SubVal nxt = (cur.type == VAL_FLOAT) ? make_float(cur.fv - 1.0) : make_int(cur.iv - 1);
-            env_set(env, name, nxt);
+            env_set_node(node->left, env, name, nxt);
             return cur; /* return old value */
         }
 
@@ -2679,7 +2736,7 @@ SubVal eval(ASTNode *node, Env *env) {
 
         /* ==== User-defined function call ==== */
         if (fn) {
-            SubVal fv = env_get(env, fn);
+            SubVal fv = env_get_node(node, env, fn);
             if (fv.type == VAL_FUNC && fv.fn) {
                 ASTNode *fn_decl = fv.fn;
 
