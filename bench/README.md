@@ -15,6 +15,7 @@ measure interpreter performance and guide optimization efforts.
 | array_ops | `bench/array_ops.sb` | Array push/index - array growth and bounds checking |
 | object_ops | `bench/object_ops.sb` | Object field read/write - property lookup overhead |
 | func_calls | `bench/func_calls.sb` | Many small function calls - call/return overhead |
+| string_leak | `bench/string_leak.sb` | String concat in a loop - memory leak detection |
 
 ## Running
 
@@ -29,7 +30,9 @@ measure interpreter performance and guide optimization efforts.
 ./bench/run.sh --compare
 ```
 
-## Baseline Results (before optimization)
+## Results
+
+### Before Optimization
 
 | Benchmark | Time |
 |-----------|------|
@@ -40,16 +43,25 @@ measure interpreter performance and guide optimization efforts.
 | object field R/W, 1M iterations | 0.85s |
 | small function calls, 5M iterations | 19.37s |
 
-## Results After All Optimizations
+### After Optimization
 
-| Benchmark | Before | After | Ratio |
-|-----------|--------|-------|-------|
-| fib(32) recursive | 7.10s | 4.48s | 0.63x |
-| while loop, 20M iterations | 18.30s | 5.44s | 0.30x |
-| string concat, 20K iterations | 1.51s | 1.30s | 0.86x |
-| array push/index, 1M iterations | 1.36s | 0.66s | 0.49x |
-| object field R/W, 1M iterations | 0.85s | 0.57s | 0.67x |
-| small function calls, 5M iterations | 19.37s | 7.41s | 0.38x |
+| Benchmark | Time | Ratio |
+|-----------|------|-------|
+| fib(32) recursive | 4.48s | 0.63x |
+| while loop, 20M iterations | 5.44s | 0.30x |
+| string concat, 20K iterations | 1.30s | 0.86x |
+| array push/index, 1M iterations | 0.66s | 0.49x |
+| object field R/W, 1M iterations | 0.57s | 0.67x |
+| small function calls, 5M iterations | 7.41s | 0.38x |
+| string concat, 200K iterations | ~5.0s | N/A (new benchmark) |
+
+### Memory Usage
+
+| Benchmark | Peak RSS |
+|-----------|----------|
+| string concat, 20K iterations | ~3 MB |
+| string concat, 200K iterations | ~3.7 MB |
+| string concat, 1M iterations | ~18 MB (completes successfully) |
 
 ## Optimizations Applied
 
@@ -58,46 +70,61 @@ measure interpreter performance and guide optimization efforts.
 `ast_expression_text()` was called unconditionally on every variable
 declaration, assignment, binary expression, and function call, building
 malloc'd/snprintf'd/free'd label strings even when `g_provenance_enabled`
-is 0 (no `why` expression in the program). `provenance_attach()` already
-checked `g_provenance_enabled` and returned early, but the label
-construction happened *before* that check.
-
-All `ast_expression_text`/`provenance_attach` call sites are now guarded
-with `g_provenance_enabled` so programs that never use `why` pay zero cost.
-
-**Impact:** loop20m 18.30s → 5.89s (68% faster), fib 7.10s → 4.14s.
+is 0 (no `why` expression in the program). All call sites are now guarded.
 
 ### 2. Resolve variables to (depth, slot) indexes
 
 Replaced linear name-search in `env_get`/`env_set` with direct slot
 access for variables resolved to the current env (depth 0). Each
 `EnvEntry` gets a slot index; `Env` gets an array of `EnvEntry*` pointers
-for O(1) access. `AST_IDENTIFIER` nodes cache `(depth, slot)` on first
-successful lookup. Depth > 0 lookups (parent env) still use linear search
-since depth is context-dependent.
-
-**Impact:** loop20m 5.89s → 5.34s, func_calls 10.52s → 7.41s.
+for O(1) access.
 
 ### 3. Inline identifier/literal handling in eval_block
 
-Avoid full `eval()` dispatch for `AST_IDENTIFIER` and `AST_LITERAL` nodes
-inside `eval_block` by handling them inline. Saves a function call and
-switch dispatch per variable/literal reference in statement blocks.
+`eval_block` handles `AST_IDENTIFIER` and `AST_LITERAL` nodes inline
+instead of calling `eval()` for each.
 
-**Impact:** marginal (measurement noise).
+### 4. Fix memory leaks
+
+Fixed memory leaks in:
+- `eval_block()`: statement results now freed between loop iterations
+- `eval_binary()`: operands `L` and `R` now freed after use
+- `eval()`: `AST_IDENTIFIER` now returns `val_copy()` instead of borrowed
+  reference, making all `eval()` results owned values
+- Builtins: `print`, `show`, `println`, `str`, `to_string`, `int`, `float`,
+  `len`, `type`, `abs`, `min`, `max`, `sqrt`, `floor`, `ceil`, `round`,
+  `upper`, `lower`, `split`, `join`, `substring`, `contains`, `replace`,
+  `trim`, `char_at`, `push`, `append`, `pop`, `input`, `read_file`,
+  `sha256`, `write_file`, `append_file`, `file_exists`, `is_dir`, `mkdir`,
+  `list_dir`, `remove`, `rename`, `env`, `object_keys`, `exec`
+- `AST_ARRAY_ACCESS`: array element now copied before container is freed
+- `AST_MEMBER_ACCESS`: object property now copied before object is freed
+- `AST_ASSIGN_STMT` index/member assignment: uses `env_get_node` directly
+  for identifiers to modify original in place
+
+### 5. Capacity-doubling string concatenation
+
+`s = s + x` now uses capacity-doubling for amortized O(1) append:
+- When the left operand's buffer has enough capacity, append in place
+- When the buffer is too small, `realloc()` with doubling
+- Falls back to `malloc()` if `realloc()` fails
 
 ## Remaining Bottlenecks
 
 The tree-walking `eval()` function is the fundamental bottleneck at ~44%
-of runtime with 160M calls for loop20m. Each call involves C function
-call/return overhead + switch-on-node-type dispatch + early-exit checks.
+of runtime. Each call involves C function call/return overhead, switch
+on node-type dispatch, and early-exit checks.
 
 **Target:** fib(32) under 1s and 20M loop under 2s with tree-walker alone.
 
-**Assessment:** Not achievable with tree-walker optimizations alone.
-The best tree-walker result is fib(32) at ~4.5s and loop20m at ~5.4s.
-Reaching the targets requires a bytecode compiler + stack VM
-(`subi --vm`) as described in the optimization plan (Step 2).
+**Assessment:** NOT ACHIEVABLE with tree-walker optimizations alone.
+Best tree-walker results:
+- fib(32): ~4.5s (need ~4.5x more improvement)
+- loop20m: ~5.4s (need ~2.7x more improvement)
+- string concat 200K: ~5s (need ~25x more improvement for 0.2s target)
+
+A bytecode compiler + stack VM (`subi --vm`) would be needed for further
+gains. Keep the tree-walker as the reference implementation.
 
 ## Test Suite
 
@@ -107,4 +134,8 @@ python3 tests/run_tests.py
 python3 tests/conformance.py
 ```
 
-All existing tests pass after each optimization.
+Run under ASAN to check for leaks:
+```bash
+gcc -fsanitize=address -g -o subi_asan ...
+ASAN_OPTIONS=abort_on_error=1:halt_on_error=1 ./subi_asan program.sb
+```

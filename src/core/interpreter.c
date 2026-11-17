@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <malloc.h>
 #include <string.h>
 #include <math.h>
 #include <ctype.h>
@@ -982,13 +983,21 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     /* --- Logical short-circuit (eval right lazily) --- */
     if (strcmp(op, "&&") == 0) {
         SubVal L = eval(node->left, env);
-        if (!is_truthy(L)) return make_bool(0);
-        return make_bool(is_truthy(eval(node->right, env)));
+        if (!is_truthy(L)) { val_free(L); return make_bool(0); }
+        SubVal R = eval(node->right, env);
+        SubVal result = make_bool(is_truthy(R));
+        val_free(L);
+        val_free(R);
+        return result;
     }
     if (strcmp(op, "||") == 0) {
         SubVal L = eval(node->left, env);
-        if (is_truthy(L)) return make_bool(1);
-        return make_bool(is_truthy(eval(node->right, env)));
+        if (is_truthy(L)) { val_free(L); return make_bool(1); }
+        SubVal R = eval(node->right, env);
+        SubVal result = make_bool(is_truthy(R));
+        val_free(L);
+        val_free(R);
+        return result;
     }
 
     SubVal L = eval(node->left, env);
@@ -996,32 +1005,83 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     g_binary_left = L.provenance;
     g_binary_right = R.provenance;
 
+    /* Extract all data into locals. L and R are freed after the string
+       comparison block, since lsv/rsv point into their heap memory. */
+    ValType ltype = L.type, rtype = R.type;
+    const char *lsv = L.sv ? L.sv : "";
+    const char *rsv = R.sv ? R.sv : "";
+    long long liv = L.iv, riv = R.iv;
+    double lfv = L.fv, rfv = R.fv;
+    int lbv = L.bv, rbv = R.bv;
+    ASTNode *lfn = L.fn, *rfn = R.fn;
+    SubArray *larr = L.arr, *rarr = R.arr;
+    SubObject *lobj = L.obj, *robj = R.obj;
+
     /* --- String concatenation (+) --- */
-    if (strcmp(op, "+") == 0 && (L.type == VAL_STRING || R.type == VAL_STRING)) {
-        SubVal ls = val_to_str(L);
-        SubVal rs = val_to_str(R);
-        size_t n  = strlen(ls.sv) + strlen(rs.sv) + 1;
-        char *buf = malloc(n);
-        if (buf) snprintf(buf, n, "%s%s", ls.sv, rs.sv);
-        else buf = strdup("");
-        val_free(ls);
-        val_free(rs);
+    if (strcmp(op, "+") == 0 && (ltype == VAL_STRING || rtype == VAL_STRING)) {
+        size_t l_len = strlen(lsv);
+        size_t r_len = strlen(rsv);
+        size_t total = l_len + r_len + 1;
+        char *buf = NULL;
+
+        if (ltype == VAL_STRING) {
+            /* Capacity-doubling append: try to grow L's buffer.
+               Makes s = s + x amortized O(1) instead of O(n). */
+            size_t cap = malloc_usable_size((char *)lsv);
+            if (cap >= total) {
+                /* Enough room: append in place, no data copy needed */
+                memcpy((char *)lsv + l_len, rsv, r_len + 1);
+                SubVal r = {VAL_STRING, .sv = (char *)lsv};
+                L.sv = NULL; /* prevent val_free(L) from freeing our buffer */
+                if (g_provenance_enabled)
+                    provenance_attach(&r, node, NULL,
+                                      g_binary_left, g_binary_right, 0);
+                val_free(L);
+                val_free(R);
+                return r;
+            }
+            /* Not enough room: realloc with doubling for future appends */
+            size_t new_cap = total * 2;
+            char *new_sv = (char *)realloc((char *)lsv, new_cap);
+            if (new_sv) {
+                L.sv = NULL;
+                memcpy(new_sv + l_len, rsv, r_len + 1);
+                SubVal r = {VAL_STRING, .sv = new_sv};
+                if (g_provenance_enabled)
+                    provenance_attach(&r, node, NULL,
+                                      g_binary_left, g_binary_right, 0);
+                val_free(L);
+                val_free(R);
+                return r;
+            }
+        }
+
+        /* Fallback: allocate a fresh buffer */
+        buf = (char *)malloc(total);
+        if (buf) {
+            memcpy(buf, lsv, l_len);
+            memcpy(buf + l_len, rsv, r_len + 1);
+        } else {
+            buf = strdup("");
+        }
+        val_free(L);
+        val_free(R);
         SubVal r = {VAL_STRING, .sv = buf};
+        if (g_provenance_enabled)
+            provenance_attach(&r, node, NULL, g_binary_left, g_binary_right, 0);
         return r;
     }
 
     /* --- String comparison --- */
-    if (L.type == VAL_STRING || R.type == VAL_STRING) {
-        if (L.type != VAL_STRING || R.type != VAL_STRING) {
+    if (ltype == VAL_STRING || rtype == VAL_STRING) {
+        if (ltype != VAL_STRING || rtype != VAL_STRING) {
             if (strcmp(op, "==") == 0) return make_bool(0);
             if (strcmp(op, "!=") == 0) return make_bool(1);
             runtime_error("cannot compare string with %s using '%s'",
-                    type_name(L.type == VAL_STRING ? R.type : L.type), op);
+                    type_name(ltype == VAL_STRING ? rtype : ltype), op);
             return NULL_VAL;
         }
-        const char *ls = L.sv ? L.sv : "";
-        const char *rs = R.sv ? R.sv : "";
-        int cmp = strcmp(ls, rs);
+        int cmp = strcmp(lsv, rsv);
         if (strcmp(op, "==") == 0) return make_bool(cmp == 0);
         if (strcmp(op, "!=") == 0) return make_bool(cmp != 0);
         if (strcmp(op, "<")  == 0) return make_bool(cmp <  0);
@@ -1031,32 +1091,34 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
         runtime_error("operator '%s' not supported for strings", op);
         return NULL_VAL;
     }
+    val_free(L);
+    val_free(R);
 
     /* --- Same-type non-numeric comparison --- */
-    if (L.type == R.type) {
-        switch (L.type) {
+    if (ltype == rtype) {
+        switch (ltype) {
         case VAL_NULL:
             if (strcmp(op, "==") == 0) return make_bool(1);
             if (strcmp(op, "!=") == 0) return make_bool(0);
             runtime_error("cannot use '%s' on null", op);
             return NULL_VAL;
         case VAL_BOOL:
-            if (strcmp(op, "==") == 0) return make_bool(L.bv == R.bv);
-            if (strcmp(op, "!=") == 0) return make_bool(L.bv != R.bv);
+            if (strcmp(op, "==") == 0) return make_bool(lbv == rbv);
+            if (strcmp(op, "!=") == 0) return make_bool(lbv != rbv);
             break; /* fall through to numeric */
         case VAL_FUNC:
-            if (strcmp(op, "==") == 0) return make_bool(L.fn == R.fn);
-            if (strcmp(op, "!=") == 0) return make_bool(L.fn != R.fn);
+            if (strcmp(op, "==") == 0) return make_bool(lfn == rfn);
+            if (strcmp(op, "!=") == 0) return make_bool(lfn != rfn);
             runtime_error("cannot use '%s' on functions", op);
             return NULL_VAL;
         case VAL_ARRAY:
-            if (strcmp(op, "==") == 0) return make_bool(L.arr == R.arr);
-            if (strcmp(op, "!=") == 0) return make_bool(L.arr != R.arr);
+            if (strcmp(op, "==") == 0) return make_bool(larr == rarr);
+            if (strcmp(op, "!=") == 0) return make_bool(larr != rarr);
             runtime_error("cannot use '%s' on arrays", op);
             return NULL_VAL;
         case VAL_OBJECT:
-            if (strcmp(op, "==") == 0) return make_bool(L.obj == R.obj);
-            if (strcmp(op, "!=") == 0) return make_bool(L.obj != R.obj);
+            if (strcmp(op, "==") == 0) return make_bool(lobj == robj);
+            if (strcmp(op, "!=") == 0) return make_bool(lobj != robj);
             runtime_error("cannot use '%s' on objects", op);
             return NULL_VAL;
         default:
@@ -1065,13 +1127,13 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     }
 
     /* --- Mixed type check --- */
-    int both_numeric = (L.type == VAL_INT || L.type == VAL_FLOAT) &&
-                       (R.type == VAL_INT || R.type == VAL_FLOAT);
+    int both_numeric = (ltype == VAL_INT || ltype == VAL_FLOAT) &&
+                       (rtype == VAL_INT || rtype == VAL_FLOAT);
     if (!both_numeric) {
         if (strcmp(op, "==") == 0) return make_bool(0);
         if (strcmp(op, "!=") == 0) return make_bool(1);
         runtime_error("cannot use '%s' on %s and %s",
-                op, type_name(L.type), type_name(R.type));
+                op, type_name(ltype), type_name(rtype));
         return NULL_VAL;
     }
 
@@ -1080,10 +1142,10 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
        loses the low bits above 2^53, so 4611686018427387904 + 1 answered
        ...904 through the interpreter while every other backend said ...905.
        Floats still go through double, and a comparison may mix the two. */
-    int use_float = (L.type == VAL_FLOAT || R.type == VAL_FLOAT);
-    long long ia = L.iv, ib = R.iv;
-    double a = (L.type == VAL_FLOAT) ? L.fv : (double)L.iv;
-    double b = (R.type == VAL_FLOAT) ? R.fv : (double)R.iv;
+    int use_float = (ltype == VAL_FLOAT || rtype == VAL_FLOAT);
+    long long ia = liv, ib = riv;
+    double a = (ltype == VAL_FLOAT) ? lfv : (double)liv;
+    double b = (rtype == VAL_FLOAT) ? rfv : (double)riv;
 
     /* Arithmetic */
     if (strcmp(op, "+") == 0)  return use_float ? make_float(a + b)    : make_int(ia + ib);
@@ -1163,8 +1225,9 @@ static SubVal eval_block(ASTNode *node, Env *env) {
            overhead for the common case of variable lookups. */
         for (int i = 0; i < node->child_count && !should_stop(env); i++) {
             ASTNode *child = node->children[i];
+            val_free(last);
             if (child->type == AST_IDENTIFIER)
-                last = env_get_node(child, env, child->value);
+                last = val_copy(env_get_node(child, env, child->value));
             else if (child->type == AST_LITERAL) {
                 if (child->data_type == TYPE_NULL) last = NULL_VAL;
                 else if (child->data_type == TYPE_STRING) last = make_str(child->value);
@@ -1178,8 +1241,10 @@ static SubVal eval_block(ASTNode *node, Env *env) {
         }
     } else {
         /* Walk body->next linked-list chain (fallback for parser linked-list storage) */
-        for (ASTNode *n = node->body; n && !should_stop(env); n = n->next)
+        for (ASTNode *n = node->body; n && !should_stop(env); n = n->next) {
+            val_free(last);
             last = eval(n, env);
+        }
     }
 
     return last;
@@ -1475,7 +1540,7 @@ SubVal eval(ASTNode *node, Env *env) {
        Identifier
        ============================================================ */
     case AST_IDENTIFIER:
-        return env_get_node(node, env, node->value);
+        return val_copy(env_get_node(node, env, node->value));
 
     /* ============================================================
        Variable / Constant Declaration
@@ -1582,8 +1647,6 @@ SubVal eval(ASTNode *node, Env *env) {
                 );
             }
 
-            if (g_provenance_enabled)
-                provenance_attach(&result, node, NULL, cur.provenance, rhs.provenance, 0);
             env_set_node(node->left, env, name, result);
             return result;
         }
@@ -1592,18 +1655,32 @@ SubVal eval(ASTNode *node, Env *env) {
            objects. Compound forms go through the array path above. */
         if (node->left && node->left->type == AST_ARRAY_ACCESS &&
             op && strcmp(op, "=") == 0) {
-            SubVal target = eval(node->left->left, env);
+            /* Use env_get_node directly for identifiers so we get a borrowed
+               reference and can modify the original array/object in place.
+               For non-identifier containers, eval() returns an owned copy. */
+            SubVal target;
+            if (node->left->left->type == AST_IDENTIFIER) {
+                target = env_get_node(node->left->left, env,
+                                      node->left->left->value);
+            } else {
+                target = eval(node->left->left, env);
+            }
             if (target.type == VAL_OBJECT && target.obj) {
                 SubVal key_val = val_to_str(eval(node->left->right, env));
                 object_set(target.obj, key_val.sv, val_copy(rhs));
                 val_free(key_val);
+                if (node->left->left->type != AST_IDENTIFIER)
+                    val_free(target);
                 return rhs;
             }
             if (target.type == VAL_ARRAY && target.arr) {
                 SubVal idx_val = eval(node->left->right, env);
                 long long idx = val_as_int(idx_val);
+                val_free(idx_val);
                 if (idx < 0) idx += (long long)target.arr->count;
                 if (idx < 0 || idx >= target.arr->count) {
+                    if (node->left->left->type != AST_IDENTIFIER)
+                        val_free(target);
                     runtime_error("array index %lld out of bounds [0, %d)",
                                   idx, target.arr->count);
                     return NULL_VAL;
@@ -1611,23 +1688,40 @@ SubVal eval(ASTNode *node, Env *env) {
                 if (expr_borrows_binding(node->right)) { /* already copied */ }
                 val_free(target.arr->items[idx]);
                 target.arr->items[idx] = rhs;
+                if (node->left->left->type != AST_IDENTIFIER)
+                    val_free(target);
                 return rhs;
             }
+            if (node->left->left->type != AST_IDENTIFIER)
+                val_free(target);
             runtime_error("cannot index-assign into %s", type_name(target.type));
             return NULL_VAL;
         }
 
         /* Compound assignment on array access: arr[i] += val */
         if (node->left && node->left->type == AST_ARRAY_ACCESS) {
-            SubVal arr_val = eval(node->left->left, env);
+            /* Use env_get_node directly for identifiers so we get a borrowed
+               reference and can modify the original array in place. */
+            SubVal arr_val;
+            if (node->left->left->type == AST_IDENTIFIER) {
+                arr_val = env_get_node(node->left->left, env,
+                                       node->left->left->value);
+            } else {
+                arr_val = eval(node->left->left, env);
+            }
             if (arr_val.type != VAL_ARRAY || !arr_val.arr) {
+                if (node->left->left->type != AST_IDENTIFIER)
+                    val_free(arr_val);
                 runtime_error("compound assignment on non-array");
                 return NULL_VAL;
             }
             SubVal idx_val = eval(node->left->right, env);
             long long idx = val_as_int(idx_val);
+            val_free(idx_val);
             if (idx < 0) idx += (long long)arr_val.arr->count;
             if (idx < 0 || idx >= arr_val.arr->count) {
+                if (node->left->left->type != AST_IDENTIFIER)
+                    val_free(arr_val);
                 runtime_error("array index %lld out of bounds [0, %d)",
                               idx, arr_val.arr->count);
                 return NULL_VAL;
@@ -1643,16 +1737,18 @@ SubVal eval(ASTNode *node, Env *env) {
             else if (strcmp(op, "-=") == 0) result = uf ? make_float(ida - idb) : make_int(iia - iib);
             else if (strcmp(op, "*=") == 0) result = uf ? make_float(ida * idb) : make_int(iia * iib);
             else if (strcmp(op, "/=") == 0) {
-                if (uf ? idb == 0.0 : iib == 0) { runtime_error("division by zero"); return NULL_VAL; }
+                if (uf ? idb == 0.0 : iib == 0) { runtime_error("division by zero"); if (node->left->left->type != AST_IDENTIFIER) val_free(arr_val); return NULL_VAL; }
                 result = uf ? make_float(ida / idb) : make_int(iia / iib);
             }
             else if (strcmp(op, "%=") == 0) {
-                if (uf ? idb == 0.0 : iib == 0) { runtime_error("modulo by zero"); return NULL_VAL; }
+                if (uf ? idb == 0.0 : iib == 0) { runtime_error("modulo by zero"); if (node->left->left->type != AST_IDENTIFIER) val_free(arr_val); return NULL_VAL; }
                 result = uf ? make_float(fmod(ida, idb)) : make_int(iia % iib);
             }
             else result = rhs;
             val_free(*item);
             *item = result;
+            if (node->left->left->type != AST_IDENTIFIER)
+                val_free(arr_val);
             return result;
         }
 
@@ -1669,13 +1765,25 @@ SubVal eval(ASTNode *node, Env *env) {
                 runtime_error("cannot assign to read-only property 'length'");
                 return NULL_VAL;
             }
-            SubVal target = eval(node->left->left, env);
+            /* Use env_get_node directly for identifiers so we get a borrowed
+               reference and can modify the original object in place. */
+            SubVal target;
+            if (node->left->left->type == AST_IDENTIFIER) {
+                target = env_get_node(node->left->left, env,
+                                      node->left->left->value);
+            } else {
+                target = eval(node->left->left, env);
+            }
             if (target.type != VAL_OBJECT || !target.obj) {
+                if (node->left->left->type != AST_IDENTIFIER)
+                    val_free(target);
                 runtime_error("cannot set property '%s' on %s",
                         member ? member : "?", type_name(target.type));
                 return NULL_VAL;
             }
             object_set(target.obj, member, val_copy(rhs));
+            if (node->left->left->type != AST_IDENTIFIER)
+                val_free(target);
             return rhs;
         }
 
@@ -1688,10 +1796,7 @@ SubVal eval(ASTNode *node, Env *env) {
        Binary Expression
        ============================================================ */
     case AST_BINARY_EXPR: {
-        SubVal result = eval_binary(node, env);
-        if (g_provenance_enabled)
-            provenance_attach(&result, node, NULL, g_binary_left, g_binary_right, 0);
-        return result;
+        return eval_binary(node, env);
     }
 
     /* ============================================================
@@ -2060,21 +2165,32 @@ SubVal eval(ASTNode *node, Env *env) {
 
         /* String property */
         if (obj.type == VAL_STRING) {
-            if (strcmp(member, "length") == 0)
-                return make_int((long long)strlen(obj.sv ? obj.sv : ""));
+            if (strcmp(member, "length") == 0) {
+                SubVal result = make_int((long long)strlen(obj.sv ? obj.sv : ""));
+                val_free(obj);
+                return result;
+            }
         }
 
         /* Array property */
         if (obj.type == VAL_ARRAY && obj.arr) {
-            if (strcmp(member, "length") == 0)
-                return make_int((long long)obj.arr->count);
+            if (strcmp(member, "length") == 0) {
+                SubVal result = make_int((long long)obj.arr->count);
+                val_free(obj);
+                return result;
+            }
         }
 
         /* Object property: .length is the property count, as len() is */
         if (obj.type == VAL_OBJECT && obj.obj) {
-            if (strcmp(member, "length") == 0)
-                return make_int((long long)obj.obj->count);
-            return object_get(obj.obj, member);
+            if (strcmp(member, "length") == 0) {
+                SubVal result = make_int((long long)obj.obj->count);
+                val_free(obj);
+                return result;
+            }
+            SubVal result = val_copy(object_get(obj.obj, member));
+            val_free(obj);
+            return result;
         }
 
         /* Class constructor: `Point.new` evaluates the class's field
@@ -2094,9 +2210,11 @@ SubVal eval(ASTNode *node, Env *env) {
                 val_free(field);
             }
             env_free(ctor_env);
+            val_free(obj);
             return inst;
         }
 
+        val_free(obj);
         runtime_error("cannot access property '%s' on %s",
                 member, type_name(obj.type));
         return NULL_VAL;
@@ -2113,11 +2231,16 @@ SubVal eval(ASTNode *node, Env *env) {
         if (container.type == VAL_ARRAY && container.arr) {
             if (i < 0) i += (long long)container.arr->count;
             if (i < 0 || i >= container.arr->count) {
+                val_free(container);
+                val_free(idx);
                 runtime_error("array index %lld out of bounds [0, %d)",
                         i, container.arr->count);
                 return NULL_VAL;
             }
-            return container.arr->items[i];
+            SubVal result = val_copy(container.arr->items[i]);
+            val_free(container);
+            val_free(idx);
+            return result;
         }
 
         if (container.type == VAL_STRING) {
@@ -2125,21 +2248,30 @@ SubVal eval(ASTNode *node, Env *env) {
             long long slen = (long long)strlen(str);
             if (i < 0) i += slen;
             if (i < 0 || i >= slen) {
+                val_free(container);
+                val_free(idx);
                 runtime_error("string index %lld out of bounds", i);
                 return NULL_VAL;
             }
             char ch[2] = {str[i], '\0'};
-            return make_str(ch);
+            SubVal result = make_str(ch);
+            val_free(container);
+            val_free(idx);
+            return result;
         }
 
         /* Object property access: obj["key"] */
         if (container.type == VAL_OBJECT && container.obj) {
             SubVal key_val = val_to_str(idx);
-            SubVal result = object_get(container.obj, key_val.sv);
+            SubVal result = val_copy(object_get(container.obj, key_val.sv));
             val_free(key_val);
+            val_free(container);
+            val_free(idx);
             return result;
         }
 
+        val_free(container);
+        val_free(idx);
         runtime_error("cannot index into %s", type_name(container.type));
         return NULL_VAL;
     }
@@ -2187,8 +2319,9 @@ SubVal eval(ASTNode *node, Env *env) {
         if (fn && (strcmp(fn, "print") == 0 || strcmp(fn, "show") == 0)) {
             for (int i = 0; i < node->child_count; i++) {
                 SubVal arg = eval(node->children[i], env);
-                if (g_runtime_aborted) return NULL_VAL;
+                if (g_runtime_aborted) { val_free(arg); return NULL_VAL; }
                 print_val(arg);
+                val_free(arg);
                 printf("\n");
             }
             return NULL_VAL;
@@ -2198,9 +2331,10 @@ SubVal eval(ASTNode *node, Env *env) {
         if (fn && strcmp(fn, "println") == 0) {
             for (int i = 0; i < node->child_count; i++) {
                 SubVal arg = eval(node->children[i], env);
-                if (g_runtime_aborted) return NULL_VAL;
+                if (g_runtime_aborted) { val_free(arg); return NULL_VAL; }
                 if (i > 0) printf(" ");
                 print_val(arg);
+                val_free(arg);
             }
             printf("\n");
             return NULL_VAL;
@@ -2208,7 +2342,12 @@ SubVal eval(ASTNode *node, Env *env) {
 
         /* str / to_string: convert to string */
         if (fn && (strcmp(fn, "str") == 0 || strcmp(fn, "to_string") == 0)) {
-            if (node->child_count > 0) return val_to_str(eval(node->children[0], env));
+            if (node->child_count > 0) {
+                SubVal v = eval(node->children[0], env);
+                SubVal r = val_to_str(v);
+                val_free(v);
+                return r;
+            }
             return make_str("");
         }
 
@@ -2239,26 +2378,36 @@ SubVal eval(ASTNode *node, Env *env) {
         if (fn && strcmp(fn, "len") == 0) {
             if (node->child_count > 0) {
                 SubVal v = eval(node->children[0], env);
-                if (v.type == VAL_STRING) return make_int((long long)strlen(v.sv ? v.sv : ""));
-                if (v.type == VAL_ARRAY  && v.arr) return make_int((long long)v.arr->count);
-                if (v.type == VAL_OBJECT && v.obj) return make_int((long long)v.obj->count);
+                long long result = 0;
+                if (v.type == VAL_STRING) result = (long long)strlen(v.sv ? v.sv : "");
+                else if (v.type == VAL_ARRAY  && v.arr) result = (long long)v.arr->count;
+                else if (v.type == VAL_OBJECT && v.obj) result = (long long)v.obj->count;
+                val_free(v);
+                return make_int(result);
             }
             return make_int(0);
         }
 
         /* type: return type name as string */
         if (fn && strcmp(fn, "type") == 0) {
-            if (node->child_count > 0)
-                return make_str(type_name(eval(node->children[0], env).type));
+            if (node->child_count > 0) {
+                SubVal v = eval(node->children[0], env);
+                SubVal r = make_str(type_name(v.type));
+                val_free(v);
+                return r;
+            }
             return make_str("null");
         }
 
         /* abs: absolute value */
         if (fn && strcmp(fn, "abs") == 0 && node->child_count > 0) {
             SubVal v = eval(node->children[0], env);
-            if (v.type == VAL_FLOAT) return make_float(fabs(v.fv));
-            if (v.type == VAL_INT)   return make_int(llabs(v.iv));
-            return v;
+            SubVal result;
+            if (v.type == VAL_FLOAT) result = make_float(fabs(v.fv));
+            else if (v.type == VAL_INT) result = make_int(llabs(v.iv));
+            else result = v;
+            val_free(v);
+            return result;
         }
 
         /* min: minimum of two values */
@@ -2268,7 +2417,10 @@ SubVal eval(ASTNode *node, Env *env) {
             double da = (a.type == VAL_FLOAT) ? a.fv : (double)a.iv;
             double db = (b.type == VAL_FLOAT) ? b.fv : (double)b.iv;
             int uf = (a.type == VAL_FLOAT || b.type == VAL_FLOAT);
-            return uf ? make_float(da < db ? da : db) : make_int(da < db ? (long long)da : (long long)db);
+            SubVal result = uf ? make_float(da < db ? da : db) : make_int(da < db ? (long long)da : (long long)db);
+            val_free(a);
+            val_free(b);
+            return result;
         }
 
         /* max: maximum of two values */
@@ -2278,13 +2430,17 @@ SubVal eval(ASTNode *node, Env *env) {
             double da = (a.type == VAL_FLOAT) ? a.fv : (double)a.iv;
             double db = (b.type == VAL_FLOAT) ? b.fv : (double)b.iv;
             int uf = (a.type == VAL_FLOAT || b.type == VAL_FLOAT);
-            return uf ? make_float(da > db ? da : db) : make_int(da > db ? (long long)da : (long long)db);
+            SubVal result = uf ? make_float(da > db ? da : db) : make_int(da > db ? (long long)da : (long long)db);
+            val_free(a);
+            val_free(b);
+            return result;
         }
 
         /* sqrt: square root */
         if (fn && strcmp(fn, "sqrt") == 0 && node->child_count > 0) {
             SubVal v = to_number(eval(node->children[0], env));
             double d = (v.type == VAL_FLOAT) ? v.fv : (double)v.iv;
+            val_free(v);
             return make_float(sqrt(d));
         }
 
@@ -2292,6 +2448,7 @@ SubVal eval(ASTNode *node, Env *env) {
         if (fn && strcmp(fn, "floor") == 0 && node->child_count > 0) {
             SubVal v = to_number(eval(node->children[0], env));
             double d = (v.type == VAL_FLOAT) ? v.fv : (double)v.iv;
+            val_free(v);
             return make_int((long long)floor(d));
         }
 
@@ -2299,6 +2456,7 @@ SubVal eval(ASTNode *node, Env *env) {
         if (fn && strcmp(fn, "ceil") == 0 && node->child_count > 0) {
             SubVal v = to_number(eval(node->children[0], env));
             double d = (v.type == VAL_FLOAT) ? v.fv : (double)v.iv;
+            val_free(v);
             return make_int((long long)ceil(d));
         }
 
@@ -2306,120 +2464,149 @@ SubVal eval(ASTNode *node, Env *env) {
         if (fn && strcmp(fn, "round") == 0 && node->child_count > 0) {
             SubVal v = to_number(eval(node->children[0], env));
             double d = (v.type == VAL_FLOAT) ? v.fv : (double)v.iv;
+            val_free(v);
             return make_int((long long)round(d));
         }
 
         /* upper: string to uppercase */
         if (fn && strcmp(fn, "upper") == 0 && node->child_count > 0) {
             SubVal v = eval(node->children[0], env);
+            SubVal result;
             if (v.type == VAL_STRING && v.sv) {
                 char *r = strdup(v.sv);
                 for (int i = 0; r[i]; i++)
                     r[i] = (char)toupper((unsigned char)r[i]);
-                SubVal res = {VAL_STRING, .sv = r};
-                return res;
+                result = (SubVal){VAL_STRING, .sv = r};
+            } else {
+                result = v;
             }
-            return v;
+            val_free(v);
+            return result;
         }
 
         /* lower: string to lowercase */
         if (fn && strcmp(fn, "lower") == 0 && node->child_count > 0) {
             SubVal v = eval(node->children[0], env);
+            SubVal result;
             if (v.type == VAL_STRING && v.sv) {
                 char *r = strdup(v.sv);
                 for (int i = 0; r[i]; i++)
                     r[i] = (char)tolower((unsigned char)r[i]);
-                SubVal res = {VAL_STRING, .sv = r};
-                return res;
+                result = (SubVal){VAL_STRING, .sv = r};
+            } else {
+                result = v;
             }
-            return v;
+            val_free(v);
+            return result;
         }
 
         /* split(s[, sep]) */
         if (fn && strcmp(fn, "split") == 0 && node->child_count > 0) {
             SubVal sv = eval(node->children[0], env);
+            SubVal result;
             if (sv.type == VAL_STRING) {
-                /* Every other function-form builtin here shifts the argument
-                   list past the subject before handing it to the method
-                   helper. This one passed `node` through unshifted, so the
-                   helper read the string itself as the separator and
-                   split("a,,b", ",") answered ["a", ""] -- the string cut on
-                   itself -- rather than ["a", "", "b"]. */
                 ASTNode temp = *node;
                 temp.child_count = node->child_count - 1;
                 temp.children    = node->child_count > 1 ? &node->children[1] : NULL;
-                return eval_string_method(sv.sv, "split", &temp, env);
+                result = eval_string_method(sv.sv, "split", &temp, env);
+            } else {
+                result = make_array_val();
             }
-            return make_array_val();
+            val_free(sv);
+            return result;
         }
 
         /* join: join array elements with separator */
         if (fn && strcmp(fn, "join") == 0 && node->child_count >= 1) {
             SubVal arr = eval(node->children[0], env);
+            SubVal result;
             if (arr.type == VAL_ARRAY && arr.arr) {
-                /* Temporarily set node->children so method helper can find separator */
                 ASTNode temp = *node;
                 temp.child_count = node->child_count - 1;
                 temp.children    = node->child_count > 1 ? &node->children[1] : NULL;
-                return eval_array_method(arr.arr, "join", &temp, env);
+                result = eval_array_method(arr.arr, "join", &temp, env);
+            } else {
+                result = make_str("");
             }
-            return make_str("");
+            val_free(arr);
+            return result;
         }
 
         /* substring(s, start[, end]) */
         if (fn && strcmp(fn, "substring") == 0 && node->child_count >= 2) {
             SubVal sv = eval(node->children[0], env);
+            SubVal result;
             if (sv.type == VAL_STRING) {
                 ASTNode temp = *node;
                 temp.child_count = node->child_count - 1;
                 temp.children    = &node->children[1];
-                return eval_string_method(sv.sv, "substring", &temp, env);
+                result = eval_string_method(sv.sv, "substring", &temp, env);
+            } else {
+                result = NULL_VAL;
             }
-            return NULL_VAL;
+            val_free(sv);
+            return result;
         }
 
         /* contains(s, sub) */
         if (fn && strcmp(fn, "contains") == 0 && node->child_count >= 2) {
             SubVal sv = eval(node->children[0], env);
+            SubVal result;
             if (sv.type == VAL_STRING) {
                 ASTNode temp = *node;
                 temp.child_count = node->child_count - 1;
                 temp.children    = &node->children[1];
-                return eval_string_method(sv.sv, "contains", &temp, env);
+                result = eval_string_method(sv.sv, "contains", &temp, env);
+            } else {
+                result = make_bool(0);
             }
-            return make_bool(0);
+            val_free(sv);
+            return result;
         }
 
         /* replace(s, old, new) */
         if (fn && strcmp(fn, "replace") == 0 && node->child_count >= 3) {
             SubVal sv = eval(node->children[0], env);
+            SubVal result;
             if (sv.type == VAL_STRING) {
                 ASTNode temp = *node;
                 temp.child_count = node->child_count - 1;
                 temp.children    = &node->children[1];
-                return eval_string_method(sv.sv, "replace", &temp, env);
+                result = eval_string_method(sv.sv, "replace", &temp, env);
+            } else {
+                result = NULL_VAL;
             }
-            return NULL_VAL;
+            val_free(sv);
+            return result;
         }
 
         /* trim(s) */
         if (fn && strcmp(fn, "trim") == 0 && node->child_count > 0) {
             SubVal sv = eval(node->children[0], env);
-            if (sv.type == VAL_STRING)
-                return eval_string_method(sv.sv, "trim", NULL, env);
-            return sv;
+            SubVal result;
+            if (sv.type == VAL_STRING) {
+                result = eval_string_method(sv.sv, "trim", NULL, env);
+            } else {
+                result = sv;
+            }
+            val_free(sv);
+            return result;
         }
 
         /* char_at(s, i) */
         if (fn && strcmp(fn, "char_at") == 0 && node->child_count >= 2) {
             SubVal sv = eval(node->children[0], env);
+            SubVal result;
             if (sv.type == VAL_STRING) {
                 ASTNode temp = *node;
                 temp.child_count = node->child_count - 1;
                 temp.children    = &node->children[1];
-                return eval_string_method(sv.sv, "char_at", &temp, env);
+                result = eval_string_method(sv.sv, "char_at", &temp, env);
+            } else {
+                result = NULL_VAL;
             }
-            return NULL_VAL;
+            val_free(sv);
+            return result;
         }
 
         /* push(arr, item) */
@@ -2434,6 +2621,7 @@ SubVal eval(ASTNode *node, Env *env) {
                     item = val_copy(item);
                 array_push(arr.arr, item);
             }
+            val_free(arr);
             return NULL_VAL;
         }
 
@@ -2449,20 +2637,30 @@ SubVal eval(ASTNode *node, Env *env) {
                     item = val_copy(item);
                 array_push(arr.arr, item);
             }
+            val_free(arr);
             return NULL_VAL;
         }
 
         /* pop(arr) */
         if (fn && strcmp(fn, "pop") == 0 && node->child_count > 0) {
             SubVal arr = eval(node->children[0], env);
+            SubVal result;
             if (arr.type == VAL_ARRAY && arr.arr)
-                return array_pop(arr.arr);
-            return NULL_VAL;
+                result = array_pop(arr.arr);
+            else
+                result = NULL_VAL;
+            val_free(arr);
+            return result;
         }
 
         /* input([prompt]) */
         if (fn && strcmp(fn, "input") == 0) {
-            if (node->child_count > 0) print_val(eval(node->children[0], env));
+            SubVal prompt = NULL_VAL;
+            if (node->child_count > 0) {
+                prompt = eval(node->children[0], env);
+                print_val(prompt);
+                val_free(prompt);
+            }
             char buf[1024];
             if (!fgets(buf, sizeof(buf), stdin)) {
                 SubVal empty = make_str("");
@@ -2484,6 +2682,7 @@ SubVal eval(ASTNode *node, Env *env) {
             const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
             size_t len = 0;
             char *data = read_file_bytes(path, &len);
+            val_free(pv);
             if (!data) return NULL_VAL;
             (void)len;
             return (SubVal){VAL_STRING, {.sv = data}, NULL};
@@ -2494,6 +2693,7 @@ SubVal eval(ASTNode *node, Env *env) {
             SubVal input = eval(node->children[0], env);
             const char *text = input.type == VAL_STRING && input.sv ? input.sv : "";
             char *digest = sha256_string(text);
+            val_free(input);
             if (!digest) return NULL_VAL;
             return (SubVal){VAL_STRING, {.sv = digest}, NULL};
         }
@@ -2508,6 +2708,8 @@ SubVal eval(ASTNode *node, Env *env) {
             const char *content = cv.type == VAL_STRING && cv.sv ? cv.sv : "";
             FILE *f = fopen(path, strcmp(fn, "write_file") == 0 ? "wb" : "ab");
             if (!f) {
+                val_free(pv);
+                val_free(cv);
                 runtime_error("%s: cannot open '%s': %s", fn, path, strerror(errno));
                 return NULL_VAL;
             }
@@ -2515,6 +2717,8 @@ SubVal eval(ASTNode *node, Env *env) {
             size_t wrote = len ? fwrite(content, 1, len, f) : 0;
             int failed = ferror(f);
             fclose(f);
+            val_free(pv);
+            val_free(cv);
             if (failed || wrote != len) {
                 runtime_error("%s: cannot write '%s'", fn, path);
                 return NULL_VAL;
@@ -2529,6 +2733,7 @@ SubVal eval(ASTNode *node, Env *env) {
             const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
             struct stat st;
             int exists = stat(path, &st) == 0;
+            val_free(pv);
             if (strcmp(fn, "is_dir") == 0) exists = exists && S_ISDIR(st.st_mode);
             return make_bool(exists);
         }
@@ -2538,9 +2743,11 @@ SubVal eval(ASTNode *node, Env *env) {
             SubVal pv = eval(node->children[0], env);
             const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
             if (mkdir_parents(path) != 0) {
+                val_free(pv);
                 runtime_error("mkdir: cannot create '%s': %s", path, strerror(errno));
                 return NULL_VAL;
             }
+            val_free(pv);
             return make_bool(1);
         }
 
@@ -2556,6 +2763,7 @@ SubVal eval(ASTNode *node, Env *env) {
             struct _finddata_t item;
             intptr_t h = _findfirst(pattern, &item);
             if (h == -1) {
+                val_free(pv);
                 runtime_error("list_dir: cannot read '%s': %s", path, strerror(errno));
                 return NULL_VAL;
             }
@@ -2567,6 +2775,7 @@ SubVal eval(ASTNode *node, Env *env) {
 #else
             DIR *dir = opendir(path);
             if (!dir) {
+                val_free(pv);
                 runtime_error("list_dir: cannot read '%s': %s", path, strerror(errno));
                 return NULL_VAL;
             }
@@ -2576,6 +2785,7 @@ SubVal eval(ASTNode *node, Env *env) {
                     array_push(result.arr, make_str(entry->d_name));
             closedir(dir);
 #endif
+            val_free(pv);
             for (int i = 0; i < result.arr->count; i++)
                 for (int j = i + 1; j < result.arr->count; j++)
                     if (strcmp(result.arr->items[i].sv, result.arr->items[j].sv) > 0) {
@@ -2591,8 +2801,12 @@ SubVal eval(ASTNode *node, Env *env) {
             SubVal pv = eval(node->children[0], env);
             const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
             struct stat st;
-            if (stat(path, &st) != 0) return make_bool(0);
+            if (stat(path, &st) != 0) {
+                val_free(pv);
+                return make_bool(0);
+            }
             int rc = S_ISDIR(st.st_mode) ? rmdir(path) : remove(path);
+            val_free(pv);
             if (rc != 0) {
                 runtime_error("remove: cannot remove '%s': %s", path, strerror(errno));
                 return NULL_VAL;
@@ -2607,10 +2821,14 @@ SubVal eval(ASTNode *node, Env *env) {
             const char *src = from.type == VAL_STRING && from.sv ? from.sv : "";
             const char *dst = to.type == VAL_STRING && to.sv ? to.sv : "";
             if (rename(src, dst) != 0) {
+                val_free(from);
+                val_free(to);
                 runtime_error("rename: cannot rename '%s' to '%s': %s",
                               src, dst, strerror(errno));
                 return NULL_VAL;
             }
+            val_free(from);
+            val_free(to);
             return make_bool(1);
         }
 
@@ -2619,6 +2837,7 @@ SubVal eval(ASTNode *node, Env *env) {
             SubVal nv = eval(node->children[0], env);
             const char *name = nv.type == VAL_STRING && nv.sv ? nv.sv : "";
             const char *value = getenv(name);
+            val_free(nv);
             return make_str(value ? value : "");
         }
 
@@ -2628,19 +2847,26 @@ SubVal eval(ASTNode *node, Env *env) {
         if (fn && strcmp(fn, "object_keys") == 0) {
             if (node->child_count < 1) runtime_error("object_keys needs an object");
             SubVal ov = eval(node->children[0], env);
+            SubVal result;
             if (ov.type != VAL_OBJECT || !ov.obj) {
                 runtime_error("object_keys needs an object");
+                val_free(ov);
                 return NULL_VAL;
             }
-            SubVal result = make_array_val();
+            result = make_array_val();
             for (int i = 0; i < ov.obj->count; i++)
                 array_push(result.arr, make_str(ov.obj->keys[i]));
+            val_free(ov);
             return result;
         }
 
         if (fn && strcmp(fn, "exit") == 0) {
             long long code = 0;
-            if (node->child_count > 0) code = val_as_int(eval(node->children[0], env));
+            if (node->child_count > 0) {
+                SubVal cv = eval(node->children[0], env);
+                code = val_as_int(cv);
+                val_free(cv);
+            }
             exit((int)code);
         }
 
@@ -2655,8 +2881,10 @@ SubVal eval(ASTNode *node, Env *env) {
 #endif
             if (!pipe) {
                 runtime_error("exec: cannot run command '%s': %s", command, strerror(errno));
+                val_free(cv);
                 return NULL_VAL;
             }
+            val_free(cv);
             size_t cap = 4096, len = 0;
             char *out = malloc(cap);
             if (!out) runtime_error("exec: out of memory for command '%s'", command);
@@ -2706,6 +2934,7 @@ SubVal eval(ASTNode *node, Env *env) {
             const char *url = uv.type == VAL_STRING && uv.sv ? uv.sv : "";
             size_t blen = 0;
             char *body = net_http_request("GET", url, NULL, NULL, &blen);
+            val_free(uv);
             if (!body) return NULL_VAL;
             SubVal r = {VAL_STRING, {.sv = body}, NULL};
             return r;
@@ -2721,6 +2950,8 @@ SubVal eval(ASTNode *node, Env *env) {
             char *bstr = bv.type == VAL_STRING && bv.sv ? bv.sv : "";
             size_t blen = 0;
             char *resp = net_http_request("POST", url, bstr, NULL, &blen);
+            val_free(uv);
+            val_free(bv);
             if (!resp) return NULL_VAL;
             SubVal r = {VAL_STRING, {.sv = resp}, NULL};
             return r;
@@ -2736,6 +2967,8 @@ SubVal eval(ASTNode *node, Env *env) {
             const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
             size_t blen = 0;
             char *body = net_http_request("GET", url, NULL, NULL, &blen);
+            val_free(uv);
+            val_free(pv);
             if (!body) return NULL_VAL;
             FILE *f = fopen(path, "wb");
             if (!f) {
@@ -2763,6 +2996,7 @@ SubVal eval(ASTNode *node, Env *env) {
                     for (int i = 0; i < fn_decl->child_count && i < node->child_count; i++) {
                         SubVal arg = eval(node->children[i], env);
                         env_define(fn_env, fn_decl->children[i]->value, arg);
+                        val_free(arg);
                     }
                 }
                 eval(fn_decl->body, fn_env);
@@ -3157,8 +3391,9 @@ int interpret_source(const char *source, Env *env) {
     }
 
     g_provenance_enabled = ast_contains_why(ast);
-    eval(ast, env);
+    SubVal top = eval(ast, env);
     g_provenance_enabled = 0;
+    val_free(top);
     int aborted = g_runtime_aborted;
 
     parser_free_ast(ast);
@@ -3243,7 +3478,8 @@ int interpret_file(const char *path) {
     }
 
     Env *global = env_new(NULL);
-    eval(ast, global);
+    SubVal top = eval(ast, global);
+    val_free(top);
     env_free(global);
 
     parser_free_ast(ast);
