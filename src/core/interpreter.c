@@ -27,7 +27,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <malloc.h>
 #include <string.h>
 #include <math.h>
 #include <ctype.h>
@@ -1004,6 +1003,11 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
     SubVal R = eval(node->right, env);
     g_binary_left = L.provenance;
     g_binary_right = R.provenance;
+    /* The operands may be released below before the caller adds the
+       expression node to the provenance chain. Keep these parent references
+       alive until that attachment is complete. */
+    provenance_retain(g_binary_left);
+    provenance_retain(g_binary_right);
 
     /* Extract all data into locals. L and R are freed after the string
        comparison block, since lsv/rsv point into their heap memory. */
@@ -1027,29 +1031,14 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
         if (ltype == VAL_STRING) {
             /* Capacity-doubling append: try to grow L's buffer.
                Makes s = s + x amortized O(1) instead of O(n). */
-            size_t cap = malloc_usable_size((char *)lsv);
-            if (cap >= total) {
-                /* Enough room: append in place, no data copy needed */
-                memcpy((char *)lsv + l_len, rsv, r_len + 1);
-                SubVal r = {VAL_STRING, .sv = (char *)lsv};
-                L.sv = NULL; /* prevent val_free(L) from freeing our buffer */
-                if (g_provenance_enabled)
-                    provenance_attach(&r, node, NULL,
-                                      g_binary_left, g_binary_right, 0);
-                val_free(L);
-                val_free(R);
-                return r;
-            }
-            /* Not enough room: realloc with doubling for future appends */
+            /* Grow with room for a future append.  The allocator's usable
+               size is not portable (and is unavailable on Windows/macOS). */
             size_t new_cap = total * 2;
             char *new_sv = (char *)realloc((char *)lsv, new_cap);
             if (new_sv) {
                 L.sv = NULL;
                 memcpy(new_sv + l_len, rsv, r_len + 1);
                 SubVal r = {VAL_STRING, .sv = new_sv};
-                if (g_provenance_enabled)
-                    provenance_attach(&r, node, NULL,
-                                      g_binary_left, g_binary_right, 0);
                 val_free(L);
                 val_free(R);
                 return r;
@@ -1067,8 +1056,6 @@ static SubVal eval_binary(ASTNode *node, Env *env) {
         val_free(L);
         val_free(R);
         SubVal r = {VAL_STRING, .sv = buf};
-        if (g_provenance_enabled)
-            provenance_attach(&r, node, NULL, g_binary_left, g_binary_right, 0);
         return r;
     }
 
@@ -1225,7 +1212,6 @@ static SubVal eval_block(ASTNode *node, Env *env) {
            overhead for the common case of variable lookups. */
         for (int i = 0; i < node->child_count && !should_stop(env); i++) {
             ASTNode *child = node->children[i];
-            val_free(last);
             if (child->type == AST_IDENTIFIER)
                 last = val_copy(env_get_node(child, env, child->value));
             else if (child->type == AST_LITERAL) {
@@ -1242,7 +1228,6 @@ static SubVal eval_block(ASTNode *node, Env *env) {
     } else {
         /* Walk body->next linked-list chain (fallback for parser linked-list storage) */
         for (ASTNode *n = node->body; n && !should_stop(env); n = n->next) {
-            val_free(last);
             last = eval(n, env);
         }
     }
@@ -1796,7 +1781,13 @@ SubVal eval(ASTNode *node, Env *env) {
        Binary Expression
        ============================================================ */
     case AST_BINARY_EXPR: {
-        return eval_binary(node, env);
+        SubVal result = eval_binary(node, env);
+        if (g_provenance_enabled) {
+            provenance_attach(&result, node, NULL, g_binary_left, g_binary_right, 0);
+            provenance_release(g_binary_left);
+            provenance_release(g_binary_right);
+        }
+        return result;
     }
 
     /* ============================================================
@@ -2611,7 +2602,10 @@ SubVal eval(ASTNode *node, Env *env) {
 
         /* push(arr, item) */
         if (fn && strcmp(fn, "push") == 0 && node->child_count >= 2) {
-            SubVal arr = eval(node->children[0], env);
+            int borrowed_arr = node->children[0]->type == AST_IDENTIFIER;
+            SubVal arr = borrowed_arr
+                ? env_get_node(node->children[0], env, node->children[0]->value)
+                : eval(node->children[0], env);
             if (arr.type == VAL_ARRAY && arr.arr) {
                 SubVal item = eval(node->children[1], env);
                 /* The array takes ownership, so a value that is still a
@@ -2621,13 +2615,17 @@ SubVal eval(ASTNode *node, Env *env) {
                     item = val_copy(item);
                 array_push(arr.arr, item);
             }
-            val_free(arr);
+            if (!borrowed_arr)
+                val_free(arr);
             return NULL_VAL;
         }
 
         /* append(arr, item) - alias for push */
         if (fn && strcmp(fn, "append") == 0 && node->child_count >= 2) {
-            SubVal arr = eval(node->children[0], env);
+            int borrowed_arr = node->children[0]->type == AST_IDENTIFIER;
+            SubVal arr = borrowed_arr
+                ? env_get_node(node->children[0], env, node->children[0]->value)
+                : eval(node->children[0], env);
             if (arr.type == VAL_ARRAY && arr.arr) {
                 SubVal item = eval(node->children[1], env);
                 /* The array takes ownership, so a value that is still a
@@ -2637,7 +2635,8 @@ SubVal eval(ASTNode *node, Env *env) {
                     item = val_copy(item);
                 array_push(arr.arr, item);
             }
-            val_free(arr);
+            if (!borrowed_arr)
+                val_free(arr);
             return NULL_VAL;
         }
 
@@ -2806,11 +2805,12 @@ SubVal eval(ASTNode *node, Env *env) {
                 return make_bool(0);
             }
             int rc = S_ISDIR(st.st_mode) ? rmdir(path) : remove(path);
-            val_free(pv);
             if (rc != 0) {
                 runtime_error("remove: cannot remove '%s': %s", path, strerror(errno));
+                val_free(pv);
                 return NULL_VAL;
             }
+            val_free(pv);
             return make_bool(1);
         }
 
@@ -2968,17 +2968,18 @@ SubVal eval(ASTNode *node, Env *env) {
             size_t blen = 0;
             char *body = net_http_request("GET", url, NULL, NULL, &blen);
             val_free(uv);
-            val_free(pv);
             if (!body) return NULL_VAL;
             FILE *f = fopen(path, "wb");
             if (!f) {
                 free(body);
                 runtime_error("net_download: cannot write '%s'", path);
+                val_free(pv);
                 return NULL_VAL;
             }
             size_t wrote = fwrite(body, 1, blen, f);
             fclose(f);
             free(body);
+            val_free(pv);
             return make_int((long long)wrote);
         }
 
@@ -2996,7 +2997,6 @@ SubVal eval(ASTNode *node, Env *env) {
                     for (int i = 0; i < fn_decl->child_count && i < node->child_count; i++) {
                         SubVal arg = eval(node->children[i], env);
                         env_define(fn_env, fn_decl->children[i]->value, arg);
-                        val_free(arg);
                     }
                 }
                 eval(fn_decl->body, fn_env);
