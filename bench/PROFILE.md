@@ -2,9 +2,10 @@
 
 ## Methodology
 
-Built `subi` with `gcc -O2 -pg` (gprof) and ran each benchmark. gprof samples at 10ms intervals.
+Built `subi` with `gcc -O2 -pg` (gprof) and ran each benchmark. gprof
+samples at 10ms intervals.
 
-## Baseline Results (before optimization)
+## Baseline Results (before any optimization)
 
 | Benchmark | Time | Notes |
 |-----------|------|-------|
@@ -15,47 +16,86 @@ Built `subi` with `gcc -O2 -pg` (gprof) and ran each benchmark. gprof samples at
 | object field R/W, 1M iterations | 0.85s | |
 | small function calls, 5M iterations | 19.37s | |
 
-## Top Hotspots (loop20m, gprof)
+## Top Hotspots (loop20m, BEFORE optimization, gprof)
 
 | Function | % self time | self seconds | calls | Analysis |
 |----------|-------------|--------------|-------|----------|
-| `eval` | 57.0% | 2.65s | 120M | Tree-walk dispatch overhead — fundamental to interpreter |
+| `eval` | 57.0% | 2.65s | 120M | Tree-walk dispatch overhead — fundamental |
 | `eval_binary` | 19.3% | 0.90s | 60M | Arithmetic + comparison ops |
 | `env_set` | 6.0% | 0.28s | 40M | Variable assignment — linear name search |
-| `ast_expression_text` | 5.3% | 0.25s | 40M | **WASTED**: builds provenance label strings even when `why` is unused |
+| `ast_expression_text` | 5.3% | 0.25s | 40M | **WASTED**: provenance label building |
 | `env_get` | 3.9% | 0.18s | 80M | Variable lookup — linear name search |
 | `val_copy` | 3.0% | 0.14s | 40M | Value copying on assignment |
-| `provenance_release` | 2.2% | 0.10s | 40M | **WASTED**: provenance refcounting when `why` is unused |
+| `provenance_release` | 2.2% | 0.10s | 40M | **WASTED**: provenance refcounting |
 
-## Top Hotspots (fib(32), gprof)
+## Top Hotspots (loop20m, AFTER all optimizations, gprof)
 
 | Function | % self time | self seconds | calls | Analysis |
 |----------|-------------|--------------|-------|----------|
-| `eval` | 47.5% | 0.85s | 35M | Tree-walk dispatch overhead |
-| `eval_binary` | 15.1% | 0.27s | 17.6M | Arithmetic + comparison |
-| `ast_expression_text` | 13.4% | 0.24s | 7M | **WASTED**: provenance label building |
-| `env_get` | 9.5% | 0.17s | 24.7M | Variable lookup — linear name search |
-| `val_copy` | 3.9% | 0.07s | 17.6M | Value copying |
-| `env_define` | 2.2% | 0.04s | 7M | Env entry allocation |
+| `eval` | 44.0% | 1.84s | 160M | Tree-walk dispatch overhead — fundamental bottleneck |
+| `eval_binary` | 21.3% | 0.89s | 60M | Arithmetic + comparison ops |
+| `eval_block` | 9.5% | 0.40s | 20M | Block statement dispatch |
+| `env_get_node` | 8.9% | 0.37s | 80M | Variable lookup (slot-cached for depth 0) |
+| `env_set_node` | 4.6% | 0.19s | 40M | Variable assignment (slot-cached for depth 0) |
+| `val_copy` | 3.8% | 0.16s | 40M | Value copying on assignment |
+| `provenance_release` | 1.9% | 0.08s | 40M | Provenance refcounting (cheap when disabled) |
+| `env_free` | 1.0% | 0.04s | 20M | Loop env deallocation |
 
-## Planned Optimizations (in order)
+## Optimizations Applied
 
-1. **Skip provenance label building when `why` is unused** (`ast_expression_text` called unconditionally on every assignment) — ~5% savings. Already confirmed: `g_provenance_enabled` is checked inside `provenance_attach` but `ast_expression_text` is called *before* that check.
+### Commit 1: Skip provenance label building when `why` is unused
 
-2. **Skip provenance_release when `why` is unused** — ~2% savings. `val_free` calls `provenance_release` unconditionally.
+**File:** `src/core/interpreter.c`
 
-3. **Resolve variables to (depth, slot) indexes** — replace linear name-search in `env_get`/`env_set` with array indexing. ~10% savings. Requires one-time pass after parsing.
+`ast_expression_text()` was called unconditionally before
+`provenance_attach()` checked `g_provenance_enabled`. All call sites
+are now guarded.
 
-4. **Builtin dispatch: cache resolved function pointers** — replace `strcmp` chains with a lookup table or cached enum on the AST node.
+**Measured impact (loop20m):** 18.30s → 5.89s (0.32x, 68% faster)
 
-5. **Reduce per-iteration env allocation in loops** — reuse loop environment instead of malloc/free per iteration.
+### Commit 2: Resolve variables to (depth, slot) indexes
 
-## Target
+**Files:** `src/core/interpreter.c`, `src/core/interpreter.h`,
+`src/include/sub_compiler.h`, `src/core/parser_enhanced.c`
 
-- fib(32) under 1s with tree-walker alone
-- 20M loop under 2s with tree-walker alone
+Added `slot` to `EnvEntry`, `slots`/`slot_count`/`slot_capacity` to `Env`,
+`resolved_depth`/`resolved_slot` to `ASTNode`. Variables resolved to the
+current env (depth 0) use O(1) slot access instead of linear name search.
 
-## Notes
+**Measured impact (loop20m):** 5.89s → 5.34s; func_calls 10.52s → 7.41s
 
-- `ast_expression_text` is called on every `AST_ASSIGN_STMT` with `op == "="`, building a `malloc`'d string, `snprintf`'ing into it, then `free`'ing it — all before `provenance_attach` checks `g_provenance_enabled` and returns early. This is pure waste for programs that never use `why`.
-- `val_copy` on `AST_ASSIGN_STMT` copies the value even for ints/floats/bools (trivial struct copy, but still 40M calls for loop20m).
+### Commit 3: Inline identifier/literal handling in eval_block
+
+**File:** `src/core/interpreter.c`
+
+`eval_block` now handles `AST_IDENTIFIER` and `AST_LITERAL` nodes inline
+instead of calling `eval()` for each.
+
+**Measured impact:** Marginal (within measurement noise).
+
+## Remaining Bottleneck
+
+`eval()` at 44% of runtime with 160M calls is the fundamental bottleneck.
+Each call involves C function call/return overhead, switch-on-node-type
+dispatch, and early-exit checks.
+
+**Target:** fib(32) under 1s and 20M loop under 2s with tree-walker alone.
+
+**Assessment:** NOT ACHIEVABLE with tree-walker optimizations alone.
+Best tree-walker results:
+- fib(32): ~4.5s (need ~4.5x more improvement)
+- loop20m: ~5.4s (need ~2.7x more improvement)
+
+**Next step:** Add a bytecode compiler + stack VM as a second mode
+(`subi --vm`) per the optimization plan Step 2. Keep the tree-walker as
+the reference implementation.
+
+## Test Suite
+
+All existing tests pass:
+- `python3 tests/run_tests.py` — all checks pass
+- `python3 tests/conformance.py` — pass (TypeScript target may fail in
+  some environments; not touched)
+
+ASAN/UBSAN: No new issues introduced. Pre-existing exit-path memory
+leaks are unrelated to these optimizations.
