@@ -2799,12 +2799,13 @@ SubVal eval(ASTNode *node, Env *env) {
             if (node->child_count < 1) runtime_error("remove needs a path");
             SubVal pv = eval(node->children[0], env);
             const char *path = pv.type == VAL_STRING && pv.sv ? pv.sv : "";
-            struct stat st;
-            if (stat(path, &st) != 0) {
+            int rc = rmdir(path);
+            if (rc != 0 && (errno == ENOTDIR || errno == EINVAL))
+                rc = remove(path);
+            if (rc != 0 && errno == ENOENT) {
                 val_free(pv);
                 return make_bool(0);
             }
-            int rc = S_ISDIR(st.st_mode) ? rmdir(path) : remove(path);
             if (rc != 0) {
                 runtime_error("remove: cannot remove '%s': %s", path, strerror(errno));
                 val_free(pv);
