@@ -1,0 +1,10 @@
+// bench/string_leak.sb - String concatenation in a loop
+// Measures memory growth from repeated s = s + x appends
+
+var s = ""
+var i = 0
+while (i < 100000) {
+    s = s + "ab"
+    i = i + 1
+}
+print(len(s))
