@@ -1,0 +1,16 @@
+// bench/array_ops.sb - Array push/index in a loop
+// Measures array growth, bounds checking, value copying
+
+var arr = []
+var i = 0
+while (i < 1000000) {
+    push(arr, i)
+    i = i + 1
+}
+var sum = 0
+var j = 0
+while (j < 1000000) {
+    sum = sum + arr[j]
+    j = j + 1
+}
+print(sum)

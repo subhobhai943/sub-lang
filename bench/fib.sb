@@ -1,0 +1,11 @@
+// bench/fib.sb - Recursive fibonacci(32)
+// Tree-walking interpreter stress test for function call overhead
+
+fn fib(n) {
+    if (n <= 1) {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+print(fib(32))

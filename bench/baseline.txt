@@ -1,0 +1,6 @@
+fib 7.10494
+loop20m 18.3009
+string_ops 1.50925
+array_ops 1.36398
+object_ops 0.845045
+func_calls 19.374

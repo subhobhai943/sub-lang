@@ -1411,7 +1411,7 @@ SubVal eval(ASTNode *node, Env *env) {
     case AST_VAR_DECL:
     case AST_CONST_DECL: {
         SubVal val = node->right ? eval(node->right, env) : NULL_VAL;
-        if (node->right) {
+        if (node->right && g_provenance_enabled) {
             char *text = ast_expression_text(node->right);
             char *label = malloc(strlen(node->value ? node->value : "value") +
                                  strlen(text) + 4);
@@ -1450,15 +1450,17 @@ SubVal eval(ASTNode *node, Env *env) {
             const char *name = node->left->value;
 
             if (op && strcmp(op, "=") == 0) {
-                char *text = ast_expression_text(node->right);
-                size_t n = strlen(name ? name : "value") + strlen(text) + 4;
-                char *label = malloc(n);
-                if (label) {
-                    snprintf(label, n, "%s = %s", name ? name : "value", text);
-                    provenance_attach(&rhs, node, label, rhs.provenance, NULL, 0);
-                    free(label);
+                if (g_provenance_enabled) {
+                    char *text = ast_expression_text(node->right);
+                    size_t n = strlen(name ? name : "value") + strlen(text) + 4;
+                    char *label = malloc(n);
+                    if (label) {
+                        snprintf(label, n, "%s = %s", name ? name : "value", text);
+                        provenance_attach(&rhs, node, label, rhs.provenance, NULL, 0);
+                        free(label);
+                    }
+                    free(text);
                 }
-                free(text);
                 env_set(env, name, rhs);
                 return rhs;
             }
@@ -1508,7 +1510,8 @@ SubVal eval(ASTNode *node, Env *env) {
                 );
             }
 
-            provenance_attach(&result, node, NULL, cur.provenance, rhs.provenance, 0);
+            if (g_provenance_enabled)
+                provenance_attach(&result, node, NULL, cur.provenance, rhs.provenance, 0);
             env_set(env, name, result);
             return result;
         }
@@ -1614,7 +1617,8 @@ SubVal eval(ASTNode *node, Env *env) {
        ============================================================ */
     case AST_BINARY_EXPR: {
         SubVal result = eval_binary(node, env);
-        provenance_attach(&result, node, NULL, g_binary_left, g_binary_right, 0);
+        if (g_provenance_enabled)
+            provenance_attach(&result, node, NULL, g_binary_left, g_binary_right, 0);
         return result;
     }
 
@@ -2691,9 +2695,11 @@ SubVal eval(ASTNode *node, Env *env) {
                 }
                 eval(fn_decl->body, fn_env);
                 SubVal ret = fn_env->returning ? val_copy(fn_env->ret_val) : NULL_VAL;
-                char *call_text = ast_expression_text(node);
-                provenance_attach(&ret, node, call_text, ret.provenance, NULL, 0);
-                free(call_text);
+                if (g_provenance_enabled) {
+                    char *call_text = ast_expression_text(node);
+                    provenance_attach(&ret, node, call_text, ret.provenance, NULL, 0);
+                    free(call_text);
+                }
                 env_free(fn_env);
                 return ret;
             }

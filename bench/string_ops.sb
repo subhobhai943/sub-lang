@@ -1,0 +1,16 @@
+// bench/string_ops.sb - String concat/split/join in a loop
+// Measures string allocation and method dispatch overhead
+
+var s = "hello"
+var result = ""
+var i = 0
+while (i < 20000) {
+    result = result + s
+    i = i + 1
+}
+print(result)
+
+// split/join
+var parts = "a,b,c,d,e,f,g,h,i,j".split(",")
+var joined = parts.join("|")
+print(joined)
