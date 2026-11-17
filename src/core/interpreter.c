@@ -1158,9 +1158,24 @@ static SubVal eval_block(ASTNode *node, Env *env) {
     SubVal last = NULL_VAL;
 
     if (node->child_count > 0) {
-        /* Walk children[] array (primary storage) */
-        for (int i = 0; i < node->child_count && !should_stop(env); i++)
-            last = eval(node->children[i], env);
+        /* Walk children[] array (primary storage).
+           Inline AST_IDENTIFIER to avoid the full eval() dispatch
+           overhead for the common case of variable lookups. */
+        for (int i = 0; i < node->child_count && !should_stop(env); i++) {
+            ASTNode *child = node->children[i];
+            if (child->type == AST_IDENTIFIER)
+                last = env_get_node(child, env, child->value);
+            else if (child->type == AST_LITERAL) {
+                if (child->data_type == TYPE_NULL) last = NULL_VAL;
+                else if (child->data_type == TYPE_STRING) last = make_str(child->value);
+                else if (child->data_type == TYPE_BOOL)
+                    last = make_bool(child->value && strcmp(child->value, "true") == 0);
+                else if (child->data_type == TYPE_FLOAT)
+                    last = make_float(atof(child->value ? child->value : "0"));
+                else last = make_int(atoll(child->value ? child->value : "0"));
+            } else
+                last = eval(child, env);
+        }
     } else {
         /* Walk body->next linked-list chain (fallback for parser linked-list storage) */
         for (ASTNode *n = node->body; n && !should_stop(env); n = n->next)
