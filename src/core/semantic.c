@@ -134,21 +134,21 @@ static void enter_scope(LocalSymbolTable *table) {
     table->current_scope++;
 }
 
+/* Entries are added at the head of the chain, so at scope exit all entries of
+   the leaving scope form a contiguous prefix of the chain (deeper scopes are
+   always exited first). Removing them is therefore proportional to the number
+   of entries leaving the scope, not to the size of the whole table - the old
+   full-table walk made semantic analysis quadratic in the number of scopes. */
 static void exit_scope(LocalSymbolTable *table) {
     if (!table) return;
     int scope = table->current_scope;
-    LocalSymbolEntry **current = &table->head;
-    while (*current) {
-        if ((*current)->scope_level == scope) {
-            LocalSymbolEntry *to_remove = *current;
-            *current = to_remove->next;
-            free(to_remove->name);
-            free(to_remove->type_str);
-            free(to_remove->param_types);
-            free(to_remove);
-        } else {
-            current = &(*current)->next;
-        }
+    while (table->head && table->head->scope_level == scope) {
+        LocalSymbolEntry *to_remove = table->head;
+        table->head = to_remove->next;
+        free(to_remove->name);
+        free(to_remove->type_str);
+        free(to_remove->param_types);
+        free(to_remove);
     }
     table->current_scope--;
 }

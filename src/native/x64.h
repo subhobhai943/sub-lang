@@ -50,7 +50,12 @@
 #define X64_G_GLOBALS   (X64_BSS_BASE + 0x400)
 #define X64_G_GLOBAL_N  256                      /* 2 KB, ends well below the heap */
 #define X64_HEAP_START  (X64_BSS_BASE + 0x1000)
-#define X64_BSS_SIZE    (0x1000 + (64UL << 20))  /* 64 MB of bump heap */
+/* The bump heap never reclaims dead strings, so a program that churns string
+   concatenations can touch far more than 64 MB cumulatively even though its
+   live set is tiny. The segment is demand-zeroed, so a large virtual size
+   costs nothing until it is touched: 2 GB covers the benchmarks (string_ops
+   touches about 1 GB cumulatively) with room to spare. */
+#define X64_BSS_SIZE    (0x1000 + (2UL << 30))   /* 2 GB of bump heap */
 
 /* ---------------- Byte buffer ---------------- */
 

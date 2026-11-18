@@ -7,14 +7,73 @@
 #include "windows_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <ctype.h>
 
 /* ----------------------------------------------------------------
-   Function registry
+   Interned names
+
+   Identifier spellings point into the token storage and stay valid for
+   the whole compilation. Interning them once lets the registries below
+   compare names by pointer instead of re-scanning strings on every
+   lookup.
    ---------------------------------------------------------------- */
 
+#define INTERN_INIT 64
+
+static const char **g_intern_tab;
+static int g_intern_len = 0, g_intern_cap = 0;
+
+static unsigned str_hash(const char *s) {
+    unsigned h = 2166136261U;
+    while (*s) h = (h ^ (unsigned char)*s++) * 16777619U;
+    return h;
+}
+
+static void intern_grow(void) {
+    int ncap = g_intern_cap ? g_intern_cap * 2 : INTERN_INIT;
+    const char **ntab = calloc((size_t)ncap, sizeof(const char *));
+    if (!ntab) abort();
+    for (int i = 0; i < g_intern_cap; i++) {
+        if (!g_intern_tab[i]) continue;
+        unsigned h = str_hash(g_intern_tab[i]) & (unsigned)(ncap - 1);
+        while (ntab[h]) h = (h + 1) & (unsigned)(ncap - 1);
+        ntab[h] = g_intern_tab[i];
+    }
+    free(g_intern_tab);
+    g_intern_tab = ntab;
+    g_intern_cap = ncap;
+}
+
+/* Returns a canonical pointer for `s`: intern it on first sight, so the
+   registries can compare names with `==` in the common case. */
+static const char *intern_name(const char *s) {
+    if (!s) return s;
+    if (g_intern_cap == 0 || g_intern_len + 1 > g_intern_cap * 3 / 4)
+        intern_grow();
+    unsigned h = str_hash(s) & (unsigned)(g_intern_cap - 1);
+    while (g_intern_tab[h]) {
+        if (g_intern_tab[h] == s) return s;
+        if (strcmp(g_intern_tab[h], s) == 0) return g_intern_tab[h];
+        h = (h + 1) & (unsigned)(g_intern_cap - 1);
+    }
+    g_intern_tab[h] = s;
+    g_intern_len++;
+    return s;
+}
+
 #define MAX_TRACKED_FUNCTIONS 512
+
+/* ----------------------------------------------------------------
+   Function registry
+
+   Growable: a program of any size has to track every function. A fixed
+   cap of 512 silently dropped every function past that from inference -
+   their parameters defaulted to int and their return types were lost.
+   The name table is a hash table so lookup stays O(1) for programs with
+   thousands of functions.
+   ---------------------------------------------------------------- */
 
 typedef struct {
     ASTNode *decl;        /* the AST_FUNCTION_DECL node */
@@ -22,19 +81,76 @@ typedef struct {
 } FnEntry;
 
 typedef struct {
-    FnEntry items[MAX_TRACKED_FUNCTIONS];
-    int count;
+    FnEntry *items;
+    int count, cap;
 } FnTable;
 
 static FnTable g_fns;
 
-static ASTNode* fn_lookup(const char *name) {
-    if (!name) return NULL;
-    for (int i = 0; i < g_fns.count; i++) {
-        if (g_fns.items[i].name && strcmp(g_fns.items[i].name, name) == 0)
-            return g_fns.items[i].decl;
+/* name -> index into g_fns.items, open addressing */
+typedef struct {
+    const char *name;
+    int         index;
+} FnSlot;
+
+static FnSlot *g_fn_tab;
+static int g_fn_len = 0, g_fn_cap = 0;
+
+static unsigned fn_slot_hash(const char *name) {
+    return str_hash(name);
+}
+
+static void fn_tab_grow(void) {
+    int ncap = g_fn_cap ? g_fn_cap * 2 : 64;
+    FnSlot *nt = calloc((size_t)ncap, sizeof(FnSlot));
+    if (!nt) abort();
+    for (int i = 0; i < g_fn_cap; i++) {
+        if (!g_fn_tab[i].name) continue;
+        unsigned h = fn_slot_hash(g_fn_tab[i].name) & (unsigned)(ncap - 1);
+        while (nt[h].name) h = (h + 1) & (unsigned)(ncap - 1);
+        nt[h] = g_fn_tab[i];
     }
-    return NULL;
+    free(g_fn_tab);
+    g_fn_tab = nt;
+    g_fn_cap = ncap;
+}
+
+static int fn_lookup_index(const char *name) {
+    if (!name || g_fn_cap == 0) return -1;
+    unsigned h = fn_slot_hash(name) & (unsigned)(g_fn_cap - 1);
+    while (g_fn_tab[h].name) {
+        if (g_fn_tab[h].name == name) return g_fn_tab[h].index;
+        if (strcmp(g_fn_tab[h].name, name) == 0) return g_fn_tab[h].index;
+        h = (h + 1) & (unsigned)(g_fn_cap - 1);
+    }
+    return -1;
+}
+
+static ASTNode *fn_lookup(const char *name) {
+    int i = fn_lookup_index(name);
+    return i < 0 ? NULL : g_fns.items[i].decl;
+}
+
+static void fn_grow(void) {
+    int ncap = g_fns.cap ? g_fns.cap * 2 : 64;
+    FnEntry *ni = realloc(g_fns.items, (size_t)ncap * sizeof(FnEntry));
+    if (!ni) abort();
+    g_fns.items = ni;
+    g_fns.cap = ncap;
+}
+
+/* Register `node`, keeping g_fns and the name hash table in step. */
+static void fn_register_infer(ASTNode *node) {
+    if (g_fns.count == g_fns.cap) fn_grow();
+    g_fns.items[g_fns.count].decl = node;
+    g_fns.items[g_fns.count].name = node->value;
+    int idx = g_fns.count++;
+    if (g_fn_cap == 0 || g_fn_len + 1 > g_fn_cap * 3 / 4) fn_tab_grow();
+    unsigned h = fn_slot_hash(node->value) & (unsigned)(g_fn_cap - 1);
+    while (g_fn_tab[h].name) h = (h + 1) & (unsigned)(g_fn_cap - 1);
+    g_fn_tab[h].name = node->value;
+    g_fn_tab[h].index = idx;
+    g_fn_len++;
 }
 
 /* ----------------------------------------------------------------
@@ -111,47 +227,40 @@ static int builtin_return_type(const char *name, DataType *out) {
 }
 
 /* ----------------------------------------------------------------
-   Variable registry
+   Variable and array-element registries
 
    An identifier node carries no type of its own; the type lives on the
    declaration. Without somewhere to look it up, `println(r)` could not tell
    that r was a double, and the C backend picked the %ld format for it -
    printing the double's bit pattern instead of the number.
 
-   Scope is deliberately flat: SUB programs are small and this only has to
-   pick a printf format and a declaration type, so a whole-program map of
-   name -> type is enough. A name declared twice with different types falls
-   back to the merged type, which is the conservative answer.
-   ---------------------------------------------------------------- */
+   Entries are keyed by (owner function, name); owner is NULL for a
+   top-level variable. Two functions may each have a local called `out` of
+   different types -- arrays.sb and strings.sb both do -- so a table keyed
+   by name alone would answer for whichever was recorded last. That is how
+   len(out) on an array came out as strlen().
 
-#define MAX_TRACKED_VARS 1024
+   Lookup order is deliberate and unchanged: this function's own entries
+   first, then the top-level scope. Open addressing makes both lookup and
+   record expected O(1) instead of O(total entries).
+   ---------------------------------------------------------------- */
 
 /* The function whose body is being walked or generated, NULL at top level.
    Declared here because the type tables below are keyed by it. */
 static ASTNode *g_current_fn;
 
 typedef struct {
-    const char *name;
+    ASTNode *owner;    /* NULL for a top-level variable */
+    const char *name;  /* interned */
     DataType    type;
-    /* Which function declared it, NULL for a top-level variable. Two
-       functions may each have a local called `out` of different types --
-       arrays.sb and strings.sb both do -- and a table keyed by name alone
-       answers for whichever was recorded last. That is how len(out) on an
-       array came out as strlen(). */
-    ASTNode    *owner;
-} VarEntry;
+} VarSlot;
 
-static struct {
-    VarEntry items[MAX_TRACKED_VARS];
-    int count;
-} g_vars;
+typedef struct {
+    VarSlot *items;
+    int len, cap;
+} VarTable;
 
-/* Element types of array-valued variables, kept beside the variable types
-   for the same reason: the declaration knows, and the use site does not. */
-static struct {
-    VarEntry items[MAX_TRACKED_VARS];
-    int count;
-} g_elems;
+static VarTable g_vars, g_elems;
 
 /* Object property types, keyed by variable name and property name. An
    object literal {"name": "x", "version": 2} and a class's field
@@ -162,17 +271,139 @@ typedef struct {
     const char *var_name;
     const char *prop_name;
     DataType    type;
+#define MAX_TRACKED_VARS 1024
 } PropEntry;
 static struct {
     PropEntry items[MAX_TRACKED_VARS];
     int count;
 } g_props;
 
+static unsigned var_slot_hash(ASTNode *owner, const char *name) {
+    return str_hash(name) ^ (unsigned)((uintptr_t)owner * 0x9E3779B9U);
+}
+
+static void var_tab_grow(VarTable *tab) {
+    int ncap = tab->cap ? tab->cap * 2 : 64;
+    VarSlot *ni = calloc((size_t)ncap, sizeof(VarSlot));
+    if (!ni) abort();
+    for (int i = 0; i < tab->cap; i++) {
+        if (!tab->items[i].name) continue;
+        unsigned h = var_slot_hash(tab->items[i].owner, tab->items[i].name)
+                     & (unsigned)(ncap - 1);
+        while (ni[h].name) h = (h + 1) & (unsigned)(ncap - 1);
+        ni[h] = tab->items[i];
+    }
+    free(tab->items);
+    tab->items = ni;
+    tab->cap = ncap;
+}
+
+static int var_tab_find(VarTable *tab, ASTNode *owner, const char *name) {
+    if (tab->cap == 0) return -1;
+    unsigned h = var_slot_hash(owner, name) & (unsigned)(tab->cap - 1);
+    while (tab->items[h].name) {
+        if (tab->items[h].owner == owner &&
+            (tab->items[h].name == name || strcmp(tab->items[h].name, name) == 0))
+            return h;
+        h = (h + 1) & (unsigned)(tab->cap - 1);
+    }
+    return -1;
+}
+
+static void var_tab_insert(VarTable *tab, ASTNode *owner, const char *name,
+                           DataType t) {
+    if (tab->cap == 0 || tab->len + 1 > tab->cap * 3 / 4) var_tab_grow(tab);
+    unsigned h = var_slot_hash(owner, name) & (unsigned)(tab->cap - 1);
+    while (tab->items[h].name) h = (h + 1) & (unsigned)(tab->cap - 1);
+    tab->items[h].owner = owner;
+    tab->items[h].name = name;
+    tab->items[h].type = t;
+    tab->len++;
+}
+
+static DataType var_tab_lookup(VarTable *tab, ASTNode *owner, const char *name) {
+    int i = var_tab_find(tab, owner, name);
+    return i >= 0 ? tab->items[i].type : TYPE_UNKNOWN;
+}
+
+/* ----------------------------------------------------------------
+   Single-visit AST walks
+
+   Statements live both on a `next` chain and in `children[]`, so a
+   naive left/right/condition/body/children/next walk processes every
+   statement of an m-statement block once via the chain and once per
+   preceding sibling via children[] - O(m^2) per block, and the passes
+   below dominated the profile after the lookup tables went in. Every
+   walk marks visited nodes in a set passed down the recursion, so each
+   node is processed exactly once. All the merges the passes perform
+   (type_merge, prop_record conflict widening) are idempotent, and the
+   writes store the same value twice at most, so visiting once instead
+   of twice produces identical types.
+   ---------------------------------------------------------------- */
+
+typedef struct {
+    ASTNode **items;
+    int len, cap;
+} AstSet;
+
+static int ast_set_has(AstSet *set, ASTNode *n) {
+    if (!n || set->cap == 0) return 0;
+    unsigned h = (unsigned)((uintptr_t)n) * 0x9E3779B9U;
+    h &= (unsigned)(set->cap - 1);
+    while (set->items[h]) {
+        if (set->items[h] == n) return 1;
+        h = (h + 1) & (unsigned)(set->cap - 1);
+    }
+    return 0;
+}
+
+static void ast_set_add(AstSet *set, ASTNode *n) {
+    if (!n) return;
+    if (set->len + 1 > set->cap * 3 / 4) {
+        int ncap = set->cap ? set->cap * 2 : 64;
+        ASTNode **ni = calloc((size_t)ncap, sizeof(ASTNode *));
+        ASTNode **old = set->items;
+        int ocap = set->cap;
+        if (!ni) abort();
+        for (int i = 0; i < ocap; i++) {
+            if (!old[i]) continue;
+            unsigned h = (unsigned)((uintptr_t)old[i]) * 0x9E3779B9U;
+            h &= (unsigned)(ncap - 1);
+            while (ni[h]) h = (h + 1) & (unsigned)(ncap - 1);
+            ni[h] = old[i];
+        }
+        if (old) free(old);
+        set->items = ni;
+        set->cap = ncap;
+    }
+    unsigned h = (unsigned)((uintptr_t)n) * 0x9E3779B9U;
+    h &= (unsigned)(set->cap - 1);
+    while (set->items[h]) h = (h + 1) & (unsigned)(set->cap - 1);
+    set->items[h] = n;
+    set->len++;
+}
+
+/* Enter node `n` in walk `seen`: returns (via the enclosing function) if
+   `n` is NULL or was already visited, otherwise marks it visited. */
+#define WALK_ENTER(seen, n) do {                              \
+    if (!n || ast_set_has(seen, n)) return;                   \
+    ast_set_add(seen, n);                                     \
+} while (0)
+
+/* Clear a walk set between passes (len = 0 alone would leave stale
+   entries that make later walks skip nodes they should process). */
+#define WALK_RESET(seen) do {                                 \
+    memset((seen).items, 0, sizeof(void *) * (size_t)(seen).cap); \
+    (seen).len = 0;                                           \
+} while (0)
+
 void prop_record(const char *var_name, const char *prop_name, DataType t) {
     if (!var_name || !prop_name || t == TYPE_UNKNOWN || t == TYPE_VOID) return;
+    var_name = intern_name(var_name);
+    prop_name = intern_name(prop_name);
     for (int i = 0; i < g_props.count; i++)
-        if (strcmp(g_props.items[i].var_name, var_name) == 0 &&
-            strcmp(g_props.items[i].prop_name, prop_name) == 0) {
+        if (g_props.items[i].var_name == var_name &&
+            g_props.items[i].prop_name == prop_name) {
             if (g_props.items[i].type != t)
                 g_props.items[i].type = TYPE_GENERIC; /* conflicting: read as string */
             return;
@@ -186,9 +417,11 @@ void prop_record(const char *var_name, const char *prop_name, DataType t) {
 
 DataType obj_prop_type(const char *var_name, const char *prop_name) {
     if (!var_name || !prop_name) return TYPE_UNKNOWN;
+    var_name = intern_name(var_name);
+    prop_name = intern_name(prop_name);
     for (int i = 0; i < g_props.count; i++)
-        if (strcmp(g_props.items[i].var_name, var_name) == 0 &&
-            strcmp(g_props.items[i].prop_name, prop_name) == 0)
+        if (g_props.items[i].var_name == var_name &&
+            g_props.items[i].prop_name == prop_name)
             return g_props.items[i].type;
     return TYPE_UNKNOWN;
 }
@@ -247,58 +480,35 @@ static void record_instance_props(const char *var_name, ASTNode *ctor_expr) {
 
 static void elem_record(const char *name, DataType t) {
     if (!name || t == TYPE_UNKNOWN) return;
-    for (int i = 0; i < g_elems.count; i++)
-        if (g_elems.items[i].owner == g_current_fn &&
-            strcmp(g_elems.items[i].name, name) == 0) {
-            g_elems.items[i].type = type_merge(g_elems.items[i].type, t);
-            return;
-        }
-    if (g_elems.count >= MAX_TRACKED_VARS) return;
-    g_elems.items[g_elems.count].name  = name;
-    g_elems.items[g_elems.count].type  = t;
-    g_elems.items[g_elems.count].owner = g_current_fn;
-    g_elems.count++;
+    name = intern_name(name);
+    int i = var_tab_find(&g_elems, g_current_fn, name);
+    if (i >= 0) { g_elems.items[i].type = type_merge(g_elems.items[i].type, t); return; }
+    var_tab_insert(&g_elems, g_current_fn, name, t);
 }
 
 static DataType elem_lookup(const char *name) {
     if (!name) return TYPE_UNKNOWN;
     /* This function's own first, then a top-level one. */
-    for (int i = 0; i < g_elems.count; i++)
-        if (g_elems.items[i].owner == g_current_fn &&
-            strcmp(g_elems.items[i].name, name) == 0)
-            return g_elems.items[i].type;
-    for (int i = 0; i < g_elems.count; i++)
-        if (g_elems.items[i].owner == NULL &&
-            strcmp(g_elems.items[i].name, name) == 0)
-            return g_elems.items[i].type;
-    return TYPE_UNKNOWN;
+    DataType t = var_tab_lookup(&g_elems, g_current_fn, name);
+    if (t != TYPE_UNKNOWN) return t;
+    return var_tab_lookup(&g_elems, NULL, name);
 }
 
 static void var_record(const char *name, DataType t) {
     if (!name || t == TYPE_UNKNOWN) return;
-    for (int i = 0; i < g_vars.count; i++) {
-        if (g_vars.items[i].owner == g_current_fn &&
-            strcmp(g_vars.items[i].name, name) == 0) {
-            g_vars.items[i].type = type_merge(g_vars.items[i].type, t);
-            return;
-        }
-    }
-    if (g_vars.count >= MAX_TRACKED_VARS) return;
-    g_vars.items[g_vars.count].name  = name;
-    g_vars.items[g_vars.count].type  = t;
-    g_vars.items[g_vars.count].owner = g_current_fn;
-    g_vars.count++;
+    name = intern_name(name);
+    int i = var_tab_find(&g_vars, g_current_fn, name);
+    if (i >= 0) { g_vars.items[i].type = type_merge(g_vars.items[i].type, t); return; }
+    var_tab_insert(&g_vars, g_current_fn, name, t);
 }
 
 static DataType var_lookup(const char *name) {
     if (!name) return TYPE_UNKNOWN;
     /* This function's own first, then a top-level one. */
-    for (int i = 0; i < g_vars.count; i++)
-        if (g_vars.items[i].owner == g_current_fn &&
-            strcmp(g_vars.items[i].name, name) == 0) return g_vars.items[i].type;
-    for (int i = 0; i < g_vars.count; i++)
-        if (g_vars.items[i].owner == NULL &&
-            strcmp(g_vars.items[i].name, name) == 0) return g_vars.items[i].type;
+    int i = var_tab_find(&g_vars, g_current_fn, name);
+    if (i >= 0) return g_vars.items[i].type;
+    i = var_tab_find(&g_vars, NULL, name);
+    if (i >= 0) return g_vars.items[i].type;
     return TYPE_UNKNOWN;
 }
 
@@ -537,8 +747,9 @@ DataType infer_expr_type(ASTNode *expr) {
 /* Walk a function body collecting the types of every `return <expr>`.
    Does not descend into nested function declarations, whose returns
    belong to that inner function. */
-static void collect_return_types(ASTNode *node, DataType *acc, int *saw_value_return) {
-    if (!node) return;
+static void collect_return_types(ASTNode *node, DataType *acc, int *saw_value_return,
+                                 AstSet *seen) {
+    WALK_ENTER(seen, node);
 
     if (node->type == AST_FUNCTION_DECL || node->type == AST_ARROW_FUNCTION)
         return;
@@ -552,45 +763,53 @@ static void collect_return_types(ASTNode *node, DataType *acc, int *saw_value_re
            value returns still needs the value type. */
     }
 
-    collect_return_types(node->left,      acc, saw_value_return);
-    collect_return_types(node->right,     acc, saw_value_return);
-    collect_return_types(node->condition, acc, saw_value_return);
-    collect_return_types(node->body,      acc, saw_value_return);
+    collect_return_types(node->left,      acc, saw_value_return, seen);
+    collect_return_types(node->right,     acc, saw_value_return, seen);
+    collect_return_types(node->condition, acc, saw_value_return, seen);
+    collect_return_types(node->body,      acc, saw_value_return, seen);
     for (int i = 0; i < node->child_count; i++)
-        collect_return_types(node->children[i], acc, saw_value_return);
-    collect_return_types(node->next,      acc, saw_value_return);
+        collect_return_types(node->children[i], acc, saw_value_return, seen);
+    collect_return_types(node->next,      acc, saw_value_return, seen);
 }
 
 /* The element type of the arrays a function returns, for callers that need to
    know what join() or an index will hand back. Stored on the declaration's
    elem_type, the same field a parameter uses. */
-static void collect_return_elem(ASTNode *node, DataType *acc) {
-    if (!node) return;
+static void collect_return_elem(ASTNode *node, DataType *acc, AstSet *seen) {
+    WALK_ENTER(seen, node);
     if (node->type == AST_FUNCTION_DECL || node->type == AST_ARROW_FUNCTION)
         return;
     if (node->type == AST_RETURN_STMT && node->right &&
         infer_expr_type(node->right) == TYPE_ARRAY)
         *acc = type_merge(*acc, infer_elem_type(node->right));
 
-    collect_return_elem(node->left,      acc);
-    collect_return_elem(node->right,     acc);
-    collect_return_elem(node->condition, acc);
-    collect_return_elem(node->body,      acc);
+    collect_return_elem(node->left,      acc, seen);
+    collect_return_elem(node->right,     acc, seen);
+    collect_return_elem(node->condition, acc, seen);
+    collect_return_elem(node->body,      acc, seen);
     for (int i = 0; i < node->child_count; i++)
-        collect_return_elem(node->children[i], acc);
-    collect_return_elem(node->next,      acc);
+        collect_return_elem(node->children[i], acc, seen);
+    collect_return_elem(node->next,      acc, seen);
 }
 
 DataType infer_return_type(ASTNode *body) {
     DataType acc = TYPE_UNKNOWN;
     int saw_value_return = 0;
-    collect_return_types(body, &acc, &saw_value_return);
+    AstSet seen = {NULL, 0, 0};
+    collect_return_types(body, &acc, &saw_value_return, &seen);
 
-    if (!saw_value_return) return TYPE_VOID;
+    if (!saw_value_return) {
+        free(seen.items);
+        return TYPE_VOID;
+    }
     /* Returns a value we could not classify - let the backend pick its widest
        type rather than emitting `void`, which miscompiles on every target
        that checks return types. */
-    if (type_is_unresolved(acc) || acc == TYPE_NULL) return TYPE_GENERIC;
+    if (type_is_unresolved(acc) || acc == TYPE_NULL) {
+        free(seen.items);
+        return TYPE_GENERIC;
+    }
+    free(seen.items);
     return acc;
 }
 
@@ -598,41 +817,171 @@ DataType infer_return_type(ASTNode *body) {
    Parameter inference from call sites
    ---------------------------------------------------------------- */
 
-static void propagate_call_sites(ASTNode *node) {
-    if (!node) return;
+/* ----------------------------------------------------------------
+   Call-site indexing
+
+   propagate_call_sites used to re-walk the whole AST once per round.
+   Call sites never move and a site's merge only depends on the callee's
+   current parameter types, so the sites are collected once (tree order)
+   and the same list is replayed for every round: identical merges in
+   identical order, O(sites) per round instead of O(program).
+   ---------------------------------------------------------------- */
+
+typedef struct {
+    ASTNode *callee;   /* resolved callee declaration */
+    ASTNode *site;     /* the AST_CALL_EXPR node */
+    int     arg_index; /* which argument / parameter pair */
+} CallSite;
+
+static CallSite *g_sites;
+static int g_nsites = 0, g_sites_cap = 0;
+
+static void site_push(ASTNode *callee, ASTNode *site, int arg_index) {
+    if (g_nsites == g_sites_cap) {
+        int ncap = g_sites_cap ? g_sites_cap * 2 : 64;
+        CallSite *ni = realloc(g_sites, (size_t)ncap * sizeof(CallSite));
+        if (!ni) abort();
+        g_sites = ni;
+        g_sites_cap = ncap;
+    }
+    g_sites[g_nsites].callee = callee;
+    g_sites[g_nsites].site   = site;
+    g_sites[g_nsites].arg_index = arg_index;
+    g_nsites++;
+}
+
+/* One entry per function: indices into g_sites of the call sites inside
+   that function's body subtree. A site under a nested function is listed
+   for every enclosing function, exactly as re-walking each body visits it. */
+typedef struct {
+    int *items;
+    int count, cap;
+} FnSiteList;
+static FnSiteList *g_fn_site_lists = NULL;
+static int g_fn_site_lists_cap = 0;
+
+static void fn_site_list_push(int fn_index, int site_index) {
+    FnSiteList *l = &g_fn_site_lists[fn_index];
+    if (l->count == l->cap) {
+        int ncap = l->cap ? l->cap * 2 : 16;
+        int *ni = realloc(l->items, (size_t)ncap * sizeof(int));
+        if (!ni) abort();
+        l->items = ni;
+        l->cap = ncap;
+    }
+    l->items[l->count++] = site_index;
+}
+
+/* Enclosing functions of the node currently being walked (indices into
+   g_fns; -1 for arrow functions, which are not in g_fns but still group
+   the call sites inside them for their named enclosing functions). */
+static int *g_enclosing_stack;
+static int g_enclosing_len = 0, g_enclosing_cap = 0;
+
+static void enclosing_push(int fn_index) {
+    if (g_enclosing_len == g_enclosing_cap) {
+        int ncap = g_enclosing_cap ? g_enclosing_cap * 2 : 16;
+        int *ni = realloc(g_enclosing_stack, (size_t)ncap * sizeof(int));
+        if (!ni) abort();
+        g_enclosing_stack = ni;
+        g_enclosing_cap = ncap;
+    }
+    g_enclosing_stack[g_enclosing_len++] = fn_index;
+}
+
+static void enclosing_pop(void) {
+    if (g_enclosing_len > 0) g_enclosing_len--;
+}
+
+static void collect_call_sites_walk(ASTNode *node, AstSet *seen) {
+    int is_fn, fn_index;
+    WALK_ENTER(seen, node);
 
     if (node->type == AST_CALL_EXPR && node->value) {
         ASTNode *decl = fn_lookup(node->value);
         if (decl) {
             int n = node->child_count < decl->child_count
-                        ? node->child_count : decl->child_count;
-            for (int i = 0; i < n; i++) {
-                ASTNode *param = decl->children[i];
-                ASTNode *arg   = node->children[i];
-                if (!param || !arg) continue;
-                /* Never override a type the programmer wrote down. */
-                if (param->metadata || param->explicit_type) continue;
-                DataType at = infer_expr_type(arg);
-                if (!type_is_unresolved(at))
-                    param->data_type = type_merge(param->data_type, at);
-                /* An array parameter also needs to know what is in the array,
-                   or the body reads every element back as the default type. */
-                if (at == TYPE_ARRAY) {
-                    DataType et = infer_elem_type(arg);
-                    if (!type_is_unresolved(et))
-                        param->elem_type = type_merge(param->elem_type, et);
-                }
-            }
+                    ? node->child_count : decl->child_count;
+            int base = g_nsites;
+            for (int i = 0; i < n; i++) site_push(decl, node, i);
+            for (int e = 0; e < g_enclosing_len; e++)
+                if (g_enclosing_stack[e] >= 0)
+                    for (int i = 0; i < n; i++)
+                        fn_site_list_push(g_enclosing_stack[e], base + i);
         }
     }
 
-    propagate_call_sites(node->left);
-    propagate_call_sites(node->right);
-    propagate_call_sites(node->condition);
-    propagate_call_sites(node->body);
+    is_fn = (node->type == AST_FUNCTION_DECL || node->type == AST_ARROW_FUNCTION);
+    fn_index = -1;
+    if (is_fn && node->value) fn_index = fn_lookup_index(node->value);
+    if (fn_index >= 0) enclosing_push(fn_index);
+
+    collect_call_sites_walk(node->left, seen);
+    collect_call_sites_walk(node->right, seen);
+    collect_call_sites_walk(node->condition, seen);
+    collect_call_sites_walk(node->body, seen);
     for (int i = 0; i < node->child_count; i++)
-        propagate_call_sites(node->children[i]);
-    propagate_call_sites(node->next);
+        collect_call_sites_walk(node->children[i], seen);
+    collect_call_sites_walk(node->next, seen);
+
+    if (fn_index >= 0) enclosing_pop();
+}
+
+static void collect_call_sites(ASTNode *program) {
+    int i;
+    AstSet seen = {NULL, 0, 0};
+    g_nsites = 0;
+    if (g_fns.count > 0) {
+        if (!g_fn_site_lists) {
+            g_fn_site_lists = calloc((size_t)g_fns.count, sizeof(FnSiteList));
+            if (!g_fn_site_lists) abort();
+            g_fn_site_lists_cap = g_fns.count;
+        } else if (g_fns.count > g_fn_site_lists_cap) {
+            FnSiteList *ni = realloc(g_fn_site_lists,
+                                     (size_t)g_fns.count * sizeof(FnSiteList));
+            if (!ni) abort();
+            for (i = g_fn_site_lists_cap; i < g_fns.count; i++) {
+                ni[i].items = NULL; ni[i].count = 0; ni[i].cap = 0;
+            }
+            g_fn_site_lists = ni;
+            g_fn_site_lists_cap = g_fns.count;
+        }
+        for (i = 0; i < g_fn_site_lists_cap; i++) g_fn_site_lists[i].count = 0;
+    }
+    if (!program) return;
+    collect_call_sites_walk(program, &seen);
+    free(seen.items);
+}
+
+/* One merge, exactly as the old per-site code did it. */
+static void apply_call_site(const CallSite *s) {
+    ASTNode *decl = s->callee;
+    ASTNode *site = s->site;
+    int i = s->arg_index;
+    ASTNode *param = decl->children[i];
+    ASTNode *arg   = site->children[i];
+    if (!param || !arg) return;
+    /* Never override a type the programmer wrote down. */
+    if (param->metadata || param->explicit_type) return;
+    DataType at = infer_expr_type(arg);
+    if (!type_is_unresolved(at))
+        param->data_type = type_merge(param->data_type, at);
+    /* An array parameter also needs to know what is in the array,
+       or the body reads every element back as the default type. */
+    if (at == TYPE_ARRAY) {
+        DataType et = infer_elem_type(arg);
+        if (!type_is_unresolved(et))
+            param->elem_type = type_merge(param->elem_type, et);
+    }
+}
+
+static void propagate_call_sites_round(void) {
+    for (int i = 0; i < g_nsites; i++) apply_call_site(&g_sites[i]);
+}
+
+static void propagate_call_sites_in_fn(int fn_index) {
+    FnSiteList *l = &g_fn_site_lists[fn_index];
+    for (int i = 0; i < l->count; i++) apply_call_site(&g_sites[l->items[i]]);
 }
 
 /* ----------------------------------------------------------------
@@ -646,8 +995,10 @@ static void propagate_call_sites(ASTNode *node) {
    and any `let x = arr[...]`. What those are used for is what the array
    holds. */
 static void bind_element_names(ASTNode *n, const char *arr,
-                               const char *out[], int max, int *count) {
-    if (!n || *count >= max) return;
+                               const char *out[], int max, int *count,
+                               AstSet *seen) {
+    WALK_ENTER(seen, n);
+    if (*count >= max) return;
 
     if (n->type == AST_FOR_STMT && n->value && n->condition &&
         n->condition->type == AST_IDENTIFIER && n->condition->value &&
@@ -662,19 +1013,20 @@ static void bind_element_names(ASTNode *n, const char *arr,
         out[(*count)++] = n->value;
 
     for (int i = 0; i < n->child_count; i++)
-        bind_element_names(n->children[i], arr, out, max, count);
-    bind_element_names(n->left, arr, out, max, count);
-    bind_element_names(n->right, arr, out, max, count);
-    bind_element_names(n->condition, arr, out, max, count);
-    bind_element_names(n->body, arr, out, max, count);
-    bind_element_names(n->next, arr, out, max, count);
+        bind_element_names(n->children[i], arr, out, max, count, seen);
+    bind_element_names(n->left, arr, out, max, count, seen);
+    bind_element_names(n->right, arr, out, max, count, seen);
+    bind_element_names(n->condition, arr, out, max, count, seen);
+    bind_element_names(n->body, arr, out, max, count, seen);
+    bind_element_names(n->next, arr, out, max, count, seen);
 }
 
 /* An array handed straight to another function holds whatever that
    function's parameter was found to hold. mean_float() gives no other clue:
    it only passes its array to sum_float() and divides by its length. */
-static void elem_from_pass_through(ASTNode *n, const char *pname, DataType *acc) {
-    if (!n) return;
+static void elem_from_pass_through(ASTNode *n, const char *pname, DataType *acc,
+                                   AstSet *seen) {
+    WALK_ENTER(seen, n);
     if (n->type == AST_CALL_EXPR && n->value) {
         ASTNode *decl = fn_lookup(n->value);
         if (decl) {
@@ -689,31 +1041,34 @@ static void elem_from_pass_through(ASTNode *n, const char *pname, DataType *acc)
         }
     }
     for (int i = 0; i < n->child_count; i++)
-        elem_from_pass_through(n->children[i], pname, acc);
-    elem_from_pass_through(n->left, pname, acc);
-    elem_from_pass_through(n->right, pname, acc);
-    elem_from_pass_through(n->condition, pname, acc);
-    elem_from_pass_through(n->body, pname, acc);
-    elem_from_pass_through(n->next, pname, acc);
+        elem_from_pass_through(n->children[i], pname, acc, seen);
+    elem_from_pass_through(n->left, pname, acc, seen);
+    elem_from_pass_through(n->right, pname, acc, seen);
+    elem_from_pass_through(n->condition, pname, acc, seen);
+    elem_from_pass_through(n->body, pname, acc, seen);
+    elem_from_pass_through(n->next, pname, acc, seen);
 }
 
 /* Whether the body has a bare `return <name>`. With an explicit return type
    that pins the name down, which is the only clue min_float() gives about
    what its array holds. */
-static int returns_name(ASTNode *n, const char *name) {
-    if (!n || !name) return 0;
+static int returns_name(ASTNode *n, const char *name, AstSet *seen) {
+    if (!n || !name || ast_set_has(seen, n)) return 0;
+    ast_set_add(seen, n);
     if (n->type == AST_RETURN_STMT && n->right &&
         n->right->type == AST_IDENTIFIER && n->right->value &&
         strcmp(n->right->value, name) == 0) return 1;
     for (int i = 0; i < n->child_count; i++)
-        if (returns_name(n->children[i], name)) return 1;
-    return returns_name(n->left, name) || returns_name(n->right, name) ||
-           returns_name(n->condition, name) || returns_name(n->body, name) ||
-           returns_name(n->next, name);
+        if (returns_name(n->children[i], name, seen)) return 1;
+    return returns_name(n->left, name, seen) || returns_name(n->right, name, seen) ||
+           returns_name(n->condition, name, seen) || returns_name(n->body, name, seen) ||
+           returns_name(n->next, name, seen);
 }
 
-static void scan_param_usage(ASTNode *node, const char *pname, DataType *acc) {
-    if (!node || !pname) return;
+static void scan_param_usage(ASTNode *node, const char *pname, DataType *acc,
+                             AstSet *seen) {
+    WALK_ENTER(seen, node);
+    if (!pname) return;
 
     if (node->type == AST_BINARY_EXPR && node->value) {
         ASTNode *l = node->left, *r = node->right;
@@ -777,46 +1132,40 @@ static void scan_param_usage(ASTNode *node, const char *pname, DataType *acc) {
         }
     }
 
-    scan_param_usage(node->left,      pname, acc);
-    scan_param_usage(node->right,     pname, acc);
-    scan_param_usage(node->condition, pname, acc);
-    scan_param_usage(node->body,      pname, acc);
+    scan_param_usage(node->left,      pname, acc, seen);
+    scan_param_usage(node->right,     pname, acc, seen);
+    scan_param_usage(node->condition, pname, acc, seen);
+    scan_param_usage(node->body,      pname, acc, seen);
     for (int i = 0; i < node->child_count; i++)
-        scan_param_usage(node->children[i], pname, acc);
-    scan_param_usage(node->next,      pname, acc);
+        scan_param_usage(node->children[i], pname, acc, seen);
+    scan_param_usage(node->next,      pname, acc, seen);
 }
 
 /* ----------------------------------------------------------------
    Driver
    ---------------------------------------------------------------- */
 
-static void collect_functions(ASTNode *node) {
-    if (!node) return;
+static void collect_functions(ASTNode *node, AstSet *seen) {
+    WALK_ENTER(seen, node);
 
-    if (node->type == AST_FUNCTION_DECL && node->value &&
-        g_fns.count < MAX_TRACKED_FUNCTIONS) {
-        if (!fn_lookup(node->value)) {
-            g_fns.items[g_fns.count].decl = node;
-            g_fns.items[g_fns.count].name = node->value;
-            g_fns.count++;
-        }
-    }
+    if (node->type == AST_FUNCTION_DECL && node->value && fn_lookup_index(node->value) < 0)
+        fn_register_infer(node);
 
-    collect_functions(node->left);
-    collect_functions(node->right);
-    collect_functions(node->condition);
-    collect_functions(node->body);
+    collect_functions(node->left, seen);
+    collect_functions(node->right, seen);
+    collect_functions(node->condition, seen);
+    collect_functions(node->body, seen);
     for (int i = 0; i < node->child_count; i++)
-        collect_functions(node->children[i]);
-    collect_functions(node->next);
+        collect_functions(node->children[i], seen);
+    collect_functions(node->next, seen);
 }
 
 /* Variable declarations are typed from their initializer. Without this,
    `let r = safe_div(10.0, 4.0)` stayed untyped and the C backend fell back
    to `long`, truncating 2.5 to 2. Runs after function signatures settle so
    a call's return type is known. */
-static void infer_var_decls(ASTNode *node) {
-    if (!node) return;
+static void infer_var_decls(ASTNode *node, AstSet *seen) {
+    WALK_ENTER(seen, node);
 
     if ((node->type == AST_VAR_DECL || node->type == AST_CONST_DECL) &&
         node->right && !node->metadata) {
@@ -866,23 +1215,23 @@ static void infer_var_decls(ASTNode *node) {
     ASTNode *saved = g_current_fn;
     if (node->type == AST_FUNCTION_DECL) g_current_fn = node;
 
-    infer_var_decls(node->left);
-    infer_var_decls(node->right);
-    infer_var_decls(node->condition);
-    infer_var_decls(node->body);
+    infer_var_decls(node->left, seen);
+    infer_var_decls(node->right, seen);
+    infer_var_decls(node->condition, seen);
+    infer_var_decls(node->body, seen);
     for (int i = 0; i < node->child_count; i++)
-        infer_var_decls(node->children[i]);
+        infer_var_decls(node->children[i], seen);
 
     g_current_fn = saved;
-    infer_var_decls(node->next);
+    infer_var_decls(node->next, seen);
 }
 
 /* `let out = []` is declared before anything is pushed into it, so its type
    has to be written back onto the literal once the pushes have been seen -
    every backend asks the initializer what the elements are, and an empty
    literal on its own can only answer "integers". */
-static void stamp_empty_array_elems(ASTNode *node) {
-    if (!node) return;
+static void stamp_empty_array_elems(ASTNode *node, AstSet *seen) {
+    WALK_ENTER(seen, node);
 
     if ((node->type == AST_VAR_DECL || node->type == AST_CONST_DECL) &&
         node->value && node->right &&
@@ -896,23 +1245,23 @@ static void stamp_empty_array_elems(ASTNode *node) {
     ASTNode *saved = g_current_fn;
     if (node->type == AST_FUNCTION_DECL) g_current_fn = node;
 
-    stamp_empty_array_elems(node->left);
-    stamp_empty_array_elems(node->right);
-    stamp_empty_array_elems(node->condition);
-    stamp_empty_array_elems(node->body);
+    stamp_empty_array_elems(node->left, seen);
+    stamp_empty_array_elems(node->right, seen);
+    stamp_empty_array_elems(node->condition, seen);
+    stamp_empty_array_elems(node->body, seen);
     for (int i = 0; i < node->child_count; i++)
-        stamp_empty_array_elems(node->children[i]);
+        stamp_empty_array_elems(node->children[i], seen);
 
     g_current_fn = saved;
-    stamp_empty_array_elems(node->next);
+    stamp_empty_array_elems(node->next, seen);
 }
 
 /* Second pass: stamp the declaration's type onto every identifier that refers
    to it. The semantic pass leaves identifier nodes carrying its own int
    default, which short-circuits any later lookup - so the type has to be
    written onto the node itself, not just made available for lookup. */
-static void propagate_var_types_to_identifiers(ASTNode *node) {
-    if (!node) return;
+static void propagate_var_types_to_identifiers(ASTNode *node, AstSet *seen) {
+    WALK_ENTER(seen, node);
 
     if (node->type == AST_IDENTIFIER && node->value) {
         /* A parameter of the enclosing function is not the variable of the
@@ -979,15 +1328,15 @@ static void propagate_var_types_to_identifiers(ASTNode *node) {
     ASTNode *saved = g_current_fn;
     if (node->type == AST_FUNCTION_DECL) g_current_fn = node;
 
-    propagate_var_types_to_identifiers(node->left);
-    propagate_var_types_to_identifiers(node->right);
-    propagate_var_types_to_identifiers(node->condition);
-    propagate_var_types_to_identifiers(node->body);
+    propagate_var_types_to_identifiers(node->left, seen);
+    propagate_var_types_to_identifiers(node->right, seen);
+    propagate_var_types_to_identifiers(node->condition, seen);
+    propagate_var_types_to_identifiers(node->body, seen);
     for (int i = 0; i < node->child_count; i++)
-        propagate_var_types_to_identifiers(node->children[i]);
+        propagate_var_types_to_identifiers(node->children[i], seen);
 
     g_current_fn = saved;
-    propagate_var_types_to_identifiers(node->next);
+    propagate_var_types_to_identifiers(node->next, seen);
 }
 
 /* ----------------------------------------------------------------
@@ -1140,8 +1489,9 @@ static void mark_nullable_functions(void) {
    body. Backends look at the node in front of them, not at the enclosing
    signature, so without this `b == 0` inside safe_div looked untyped and the
    Rust backend could not tell it needed a float literal on the right. */
-static void propagate_param_types_to_identifiers(ASTNode *fn, ASTNode *node) {
-    if (!node) return;
+static void propagate_param_types_to_identifiers(ASTNode *fn, ASTNode *node,
+                                                 AstSet *seen) {
+    WALK_ENTER(seen, node);
     /* An inner function has its own parameters; do not reach into it. */
     if (node != fn && node->type == AST_FUNCTION_DECL) return;
 
@@ -1155,26 +1505,31 @@ static void propagate_param_types_to_identifiers(ASTNode *fn, ASTNode *node) {
         }
     }
 
-    propagate_param_types_to_identifiers(fn, node->left);
-    propagate_param_types_to_identifiers(fn, node->right);
-    propagate_param_types_to_identifiers(fn, node->condition);
-    propagate_param_types_to_identifiers(fn, node->body);
+    propagate_param_types_to_identifiers(fn, node->left, seen);
+    propagate_param_types_to_identifiers(fn, node->right, seen);
+    propagate_param_types_to_identifiers(fn, node->condition, seen);
+    propagate_param_types_to_identifiers(fn, node->body, seen);
     for (int i = 0; i < node->child_count; i++)
-        propagate_param_types_to_identifiers(fn, node->children[i]);
-    propagate_param_types_to_identifiers(fn, node->next);
+        propagate_param_types_to_identifiers(fn, node->children[i], seen);
+    propagate_param_types_to_identifiers(fn, node->next, seen);
 }
 
 void infer_function_signatures(ASTNode *program) {
-    g_elems.count = 0;
+    g_elems.len = 0;
+    g_vars.len = 0;
     g_props.count = 0;
     g_iclass_count = 0;
     iclasses_collect(program);
     if (!program) return;
 
+    free(g_vars.items); free(g_elems.items); free(g_fn_tab);
+    memset(&g_vars, 0, sizeof(g_vars));
+    memset(&g_elems, 0, sizeof(g_elems));
+    memset(&g_fn_tab, 0, sizeof(g_fn_tab));
     g_fns.count = 0;
-    g_vars.count = 0;
     g_expr_depth = 0;
-    collect_functions(program);
+    AstSet seen = {NULL, 0, 0};
+    collect_functions(program, &seen);
     /* No early return when a program declares no functions. Everything below
        that walks g_fns simply does nothing, but infer_var_decls and
        propagate_var_types_to_identifiers still have work: a script with no
@@ -1186,12 +1541,13 @@ void infer_function_signatures(ASTNode *program) {
        source annotated a parameter, so a non-NULL metadata is already the
        "explicitly typed" flag - inference only reads it, never writes it. */
 
-    /* Types flow both ways: a call site pins down a parameter, which fixes a
-       return type, which pins down a parameter one level up. Iterate to a
-       fixpoint with a small bound - three rounds settles every shape we
-       generate, and the bound keeps mutual recursion from looping. */
+    /* Collect every user call site once, then replay the same list for each
+       round - identical merges in identical order to the old whole-program
+       walks, but O(sites) per round instead of O(program). */
+    collect_call_sites(program);
     for (int round = 0; round < 3; round++) {
-        propagate_call_sites(program);
+        WALK_RESET(seen);
+        propagate_call_sites_round();
 
         for (int i = 0; i < g_fns.count; i++) {
             ASTNode *fn = g_fns.items[i].decl;
@@ -1217,7 +1573,8 @@ void infer_function_signatures(ASTNode *program) {
 
             DataType acc = TYPE_UNKNOWN;
             g_current_fn = fn;
-            scan_param_usage(fn->body, param->value, &acc);
+            WALK_RESET(seen);
+            scan_param_usage(fn->body, param->value, &acc, &seen);
             g_current_fn = NULL;
             if (!type_is_unresolved(acc)) param->data_type = acc;
         }
@@ -1233,6 +1590,7 @@ void infer_function_signatures(ASTNode *program) {
        what they are: what the loop variable is added to, or what the function
        returns after reading one. */
     for (int round = 0; round < 2; round++) {
+        WALK_RESET(seen);
         for (int i = 0; i < g_fns.count; i++) {
             ASTNode *fn = g_fns.items[i].decl;
             for (int p = 0; p < fn->child_count; p++) {
@@ -1242,18 +1600,23 @@ void infer_function_signatures(ASTNode *program) {
 
                 const char *names[MAX_TRACKED_VARS];
                 int n = 0;
+                WALK_RESET(seen);
                 bind_element_names(fn->body, param->value, names,
-                                   MAX_TRACKED_VARS, &n);
+                                   MAX_TRACKED_VARS, &n, &seen);
 
                 DataType acc = TYPE_UNKNOWN;
                 g_current_fn = fn;
                 for (int k = 0; k < n; k++) {
-                    scan_param_usage(fn->body, names[k], &acc);
-                    if (fn->explicit_type && !type_is_unresolved(fn->data_type) &&
-                        returns_name(fn->body, names[k]))
-                        acc = type_merge(acc, fn->data_type);
+                    WALK_RESET(seen);
+                    scan_param_usage(fn->body, names[k], &acc, &seen);
+                    if (fn->explicit_type && !type_is_unresolved(fn->data_type)) {
+                        WALK_RESET(seen);
+                        if (returns_name(fn->body, names[k], &seen))
+                            acc = type_merge(acc, fn->data_type);
+                    }
                 }
-                elem_from_pass_through(fn->body, param->value, &acc);
+                WALK_RESET(seen);
+                elem_from_pass_through(fn->body, param->value, &acc, &seen);
                 g_current_fn = NULL;
                 if (!type_is_unresolved(acc) && acc != TYPE_GENERIC)
                     param->elem_type = acc;
@@ -1263,7 +1626,7 @@ void infer_function_signatures(ASTNode *program) {
         /* An array handed straight to another function holds whatever that
            function's parameter holds. */
         for (int i = 0; i < g_fns.count; i++)
-            propagate_call_sites(g_fns.items[i].decl->body);
+            propagate_call_sites_in_fn(i);
     }
 
     /* Anything still unknown is genuinely unconstrained - a numeric default
@@ -1286,11 +1649,15 @@ void infer_function_signatures(ASTNode *program) {
     mark_nullable_functions();
     for (int i = 0; i < g_fns.count; i++) {
         ASTNode *fn = g_fns.items[i].decl;
-        propagate_param_types_to_identifiers(fn, fn->body);
+        WALK_RESET(seen);
+        propagate_param_types_to_identifiers(fn, fn->body, &seen);
     }
-    infer_var_decls(program);
-    stamp_empty_array_elems(program);
-    propagate_var_types_to_identifiers(program);
+    WALK_RESET(seen);
+    infer_var_decls(program, &seen);
+    WALK_RESET(seen);
+    stamp_empty_array_elems(program, &seen);
+    WALK_RESET(seen);
+    propagate_var_types_to_identifiers(program, &seen);
 
     /* After the locals: `return out` can only say what it holds once the
        pushes into `out` have been seen. */
@@ -1300,10 +1667,13 @@ void infer_function_signatures(ASTNode *program) {
             continue;
         g_current_fn = fn;
         DataType et = TYPE_UNKNOWN;
-        collect_return_elem(fn->body, &et);
+        WALK_RESET(seen);
+        collect_return_elem(fn->body, &et, &seen);
         g_current_fn = NULL;
         if (!type_is_unresolved(et) && et != TYPE_GENERIC) fn->elem_type = et;
     }
+
+    free(seen.items);
 
     if (getenv("SUB_INFER_DEBUG")) {
         for (int i = 0; i < g_fns.count; i++) {
