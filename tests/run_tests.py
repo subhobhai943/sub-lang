@@ -11,6 +11,7 @@ program output is checked as a suffix of what the tool printed.
 import os
 import subprocess
 import sys
+import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -507,6 +508,49 @@ def main():
         for path in (bad_json, bad_semver):
             if os.path.exists(path):
                 os.remove(path)
+
+    # --- Compile-time regression: a generated 1000-function program must
+    # compile in a few seconds. The old inference passes were cubic in the
+    # number of functions; this test guards that against regressions.
+    print("\n=== compile-time regression (1000 functions) ===")
+    lines = [
+        "fn f%d(a, b) { let x = a*%d+b; if x > 100 { return x - 1 } return x + 1 }"
+        % (k, k)
+        for k in range(1000)
+    ]
+    lines.append("println(f999(1, 2))")
+    perf_file = os.path.join(SCRIPT_DIR, "_perf_regression.sb")
+    with open(perf_file, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    out_name = os.path.join(ROOT_DIR, "_perf_regression")
+    bin_path = out_name + EXE
+    try:
+        start = time.time()
+        rc, out = run([SUBC, perf_file, "-o", out_name])
+        elapsed = time.time() - start
+        if rc != 0:
+            fail("subc: 1000-function program", f"compile exit {rc}: {out}")
+        elif elapsed > 3.0:
+            fail("subc: 1000-function program",
+                 f"compiled in {elapsed:.2f}s (limit 3s)")
+        else:
+            print(f"  OK   subc: 1000-function program compiled in {elapsed:.2f}s")
+        if os.path.exists(bin_path):
+            rc, run_out = run([bin_path])
+            os.remove(bin_path)
+            if rc != 0:
+                fail("subc: 1000-function program run", f"exit {rc}: {run_out}")
+            elif run_out.rstrip("\n") != "1000":
+                fail("subc: 1000-function program run",
+                     f"expected 1000, got {run_out!r}")
+            else:
+                print("  OK   subc: 1000-function program prints 1000")
+        c_file = out_name + ".c"
+        if os.path.exists(c_file):
+            os.remove(c_file)
+    finally:
+        if os.path.exists(perf_file):
+            os.remove(perf_file)
 
     print(f"\n{'='*40}")
     if failures:

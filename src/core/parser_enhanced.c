@@ -1813,8 +1813,58 @@ static int is_builtin_method(const char *name) {
     return 0;
 }
 
-static void normalize_builtin_methods(ASTNode *node) {
-    if (!node) return;
+/* Single-visit walk for normalize_builtin_methods: statements live on both
+   the `next` chain and in `children[]`, so the naive walk visits each
+   statement of an m-statement block O(m) times. Marking visited nodes makes
+   it O(m); the rewrite is idempotent (a normalized call no longer matches
+   the pattern), so the result is identical. */
+typedef struct {
+    ASTNode **items;
+    int len, cap;
+} NormSet;
+
+static int norm_set_has(NormSet *set, ASTNode *n) {
+    if (!n || set->cap == 0) return 0;
+    unsigned h = (unsigned)((uintptr_t)n) * 0x9E3779B9U;
+    h &= (unsigned)(set->cap - 1);
+    while (set->items[h]) {
+        if (set->items[h] == n) return 1;
+        h = (h + 1) & (unsigned)(set->cap - 1);
+    }
+    return 0;
+}
+
+static void norm_set_add(NormSet *set, ASTNode *n) {
+    if (!n) return;
+    if (set->len + 1 > set->cap * 3 / 4) {
+        int ncap = set->cap ? set->cap * 2 : 64;
+        ASTNode **ni = calloc((size_t)ncap, sizeof(ASTNode *));
+        if (!ni) abort();
+        for (int i = 0; i < set->cap; i++) {
+            if (!set->items[i]) continue;
+            unsigned h = (unsigned)((uintptr_t)set->items[i]) * 0x9E3779B9U;
+            h &= (unsigned)(ncap - 1);
+            while (ni[h]) h = (h + 1) & (unsigned)(ncap - 1);
+            ni[h] = set->items[i];
+        }
+        free(set->items);
+        set->items = ni;
+        set->cap = ncap;
+    }
+    unsigned h = (unsigned)((uintptr_t)n) * 0x9E3779B9U;
+    h &= (unsigned)(set->cap - 1);
+    while (set->items[h]) h = (h + 1) & (unsigned)(set->cap - 1);
+    set->items[h] = n;
+    set->len++;
+}
+
+#define NORM_WALK_ENTER(set, n) do {                  \
+    if (!n || norm_set_has(set, n)) return;           \
+    norm_set_add(set, n);                             \
+} while (0)
+
+static void normalize_builtin_methods(ASTNode *node, NormSet *seen) {
+    NORM_WALK_ENTER(seen, node);
 
     if (node->type == AST_CALL_EXPR && !node->value &&
         node->left && node->left->type == AST_MEMBER_ACCESS &&
@@ -1839,13 +1889,13 @@ static void normalize_builtin_methods(ASTNode *node) {
         }
     }
 
-    normalize_builtin_methods(node->left);
-    normalize_builtin_methods(node->right);
-    normalize_builtin_methods(node->condition);
-    normalize_builtin_methods(node->body);
+    normalize_builtin_methods(node->left, seen);
+    normalize_builtin_methods(node->right, seen);
+    normalize_builtin_methods(node->condition, seen);
+    normalize_builtin_methods(node->body, seen);
     for (int i = 0; i < node->child_count; i++)
-        normalize_builtin_methods(node->children[i]);
-    normalize_builtin_methods(node->next);
+        normalize_builtin_methods(node->children[i], seen);
+    normalize_builtin_methods(node->next, seen);
 }
 
 /* Main parser function */
@@ -1906,7 +1956,11 @@ ASTNode* parser_parse(Token *tokens, int token_count) {
     }
 
     root->body = first_stmt;
-    normalize_builtin_methods(root);
+    {
+        NormSet seen = {NULL, 0, 0};
+        normalize_builtin_methods(root, &seen);
+        free(seen.items);
+    }
 
     if (state.had_error) {
         fprintf(stderr, "Parser completed with errors\n");
@@ -1943,20 +1997,38 @@ typedef struct {
 } FreeSet;
 
 static bool freeset_contains(FreeSet *fs, void *p) {
-    for (int i = 0; i < fs->count; i++) {
-        if (fs->ptrs[i] == p) return true;
+    if (!p || fs->capacity == 0) return false;
+    unsigned h = (unsigned)((uintptr_t)p) * 0x9E3779B9U;
+    h &= (unsigned)(fs->capacity - 1);
+    while (fs->ptrs[h]) {
+        if (fs->ptrs[h] == p) return true;
+        h = (h + 1) & (unsigned)(fs->capacity - 1);
     }
     return false;
 }
 
 static void freeset_add(FreeSet *fs, void *p) {
-    if (fs->count >= fs->capacity) {
-        fs->capacity = fs->capacity ? fs->capacity * 2 : 64;
-        void **tmp = realloc(fs->ptrs, sizeof(void *) * fs->capacity);
-        if (!tmp) return;
+    if (!p) return;
+    if (fs->capacity == 0 || fs->count + 1 > fs->capacity * 3 / 4) {
+        int ncap = fs->capacity ? fs->capacity * 2 : 64;
+        void **tmp = calloc((size_t)ncap, sizeof(void *));
+        if (!tmp) return; /* keep the old set; lookups may miss once */
+        for (int i = 0; i < fs->capacity; i++) {
+            if (!fs->ptrs[i]) continue;
+            unsigned h = (unsigned)((uintptr_t)fs->ptrs[i]) * 0x9E3779B9U;
+            h &= (unsigned)(ncap - 1);
+            while (tmp[h]) h = (h + 1) & (unsigned)(ncap - 1);
+            tmp[h] = fs->ptrs[i];
+        }
+        free(fs->ptrs);
         fs->ptrs = tmp;
+        fs->capacity = ncap;
     }
-    fs->ptrs[fs->count++] = p;
+    unsigned h = (unsigned)((uintptr_t)p) * 0x9E3779B9U;
+    h &= (unsigned)(fs->capacity - 1);
+    while (fs->ptrs[h]) h = (h + 1) & (unsigned)(fs->capacity - 1);
+    fs->ptrs[h] = p;
+    fs->count++;
 }
 
 static void free_ast_impl(ASTNode *node, FreeSet *fs) {
