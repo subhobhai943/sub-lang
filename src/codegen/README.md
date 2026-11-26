@@ -6,7 +6,12 @@ This directory contains all code generation backends for SUB language.
 
 ### Main Code Generation
 - codegen.c - C backend (used by `subc`, the native compiler)
-- targets.c / targets.h - Target registry: maps a target name to its codegen function
+- codegen_infer.c/h - shared signature inference; annotates the AST once for every statically typed backend
+- codegen_switch.c/h - switch lowering shared by the backends
+- codegen_globals.c/h - top-level variable collection shared by the backends
+
+The target registry (name -> codegen function, output extension, run hint)
+lives in `src/compilers/sub.c`, not in this directory.
 
 ### Language-Specific Backends
 - codegen_multilang.c - Python, Java, Swift, Kotlin, JavaScript, Go, Assembly, CSS, Ruby

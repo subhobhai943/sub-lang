@@ -103,13 +103,15 @@ the top of the exponent range — the output is identical.
 
 ## What is not here yet
 
-Objects, classes, `input()`, string slicing, `try`/`catch`, and functions of
-more than six parameters. These are reported by name through `nc_fail()` and
-the driver falls back to the C backend, so an unimplemented construct is
-never mis-compiled — it is declined, out loud.
+`input()`, `try`/`catch`, iterating a string, and functions of more than six
+parameters. These are reported by name through `nc_fail()` and the driver
+falls back to the C backend, so an unimplemented construct is never
+mis-compiled — it is declined, out loud.
 
-Arrays, `switch`, `do`/`while`, `break`/`continue` and `for x in <array>` all
-compile here now; the list above is what is left.
+Arrays, objects and classes, the string builtins (`substring`, `char_at`,
+`contains`, `replace`, `split`, `join`), `switch`, `do`/`while`,
+`break`/`continue` and `for x in <array>` all compile here now; the list
+above is what is left.
 
 ## Testing
 

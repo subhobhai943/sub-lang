@@ -5074,7 +5074,40 @@ static void generate_asm_node(StringBuilder *sb, ASTNode *node, int *str_lbl,
     }
 }
 
+/* The asm backend emits functions with per-call parameter slots and lowers
+   while/do-while with a real condition and exit, but `for` has no
+   init/test/increment lowering yet - it emitted an unconditional backward
+   jump over an undefined loop variable - and break/continue emit placeholder
+   labels that nothing ever patches. Refuse those constructs out loud rather
+   than writing assembly that cannot assemble, the same rule every other
+   backend follows for constructs it cannot express. */
+static int asm_reject_unsupported(ASTNode *n) {
+    for (; n; n = n->next) {
+        const char *what = NULL;
+        if (n->type == AST_FOR_STMT)           what = "for loops";
+        else if (n->type == AST_BREAK_STMT)    what = "break statements";
+        else if (n->type == AST_CONTINUE_STMT) what = "continue statements";
+        if (what) {
+            fprintf(stderr,
+                    "Error: %s are not supported by the assembly transpiler.\n"
+                    "       Run this program with subi or subc, or transpile it\n"
+                    "       to another target. while and do/while are supported.\n",
+                    what);
+            return 1;
+        }
+        if (asm_reject_unsupported(n->body) ||
+            asm_reject_unsupported(n->left) ||
+            asm_reject_unsupported(n->right))
+            return 1;
+        for (int i = 0; i < n->child_count; i++)
+            if (asm_reject_unsupported(n->children[i]))
+                return 1;
+    }
+    return 0;
+}
+
 char* codegen_assembly(ASTNode *ast, const char *source) {
+    if (asm_reject_unsupported(ast)) return NULL;
     (void)source;
     StringBuilder *sb = sb_create();
     StringBuilder *data_sb = sb_create();
