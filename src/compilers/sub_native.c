@@ -49,6 +49,7 @@ void print_usage_native(const char *prog_name) {
     printf("  --native           Emit machine code directly (no C compiler).\n");
     printf("                     Fail rather than fall back.\n");
     printf("  --via-c            Generate C and build it with $CC (default: gcc).\n");
+    printf("  --target <name>    Native target: x86_64-linux, aarch64-linux.\n");
     printf("                     Default is --native where supported, --via-c otherwise.\n\n");
     printf("Optimization (--via-c only):\n");
     printf("  -O0 -O1 -O2 -O3    Passed through to the C compiler\n\n");
@@ -192,6 +193,8 @@ static int build_via_c(ASTNode *ast, const char *out_with_ext,
     return 0;
 }
 
+static const char *g_native_target = NULL;
+
 int compile_to_native(const char *input_file, const char *output_name,
                       bool verbose, int opt_level, Backend backend) {
     if (!output_name || !*output_name) {
@@ -212,7 +215,7 @@ int compile_to_native(const char *input_file, const char *output_name,
     if (SUB_NATIVE_BACKEND && backend != BACKEND_VIA_C) {
         if (verbose) printf("[4/4] Emitting machine code...\n");
         char why[256] = "";
-        if (native_compile(ast, out_with_ext, why, sizeof(why)) == 0) {
+        if (native_compile_target(ast, out_with_ext, why, sizeof(why), g_native_target) == 0) {
             rc = 0;
             used_native = 1;
         } else if (backend == BACKEND_NATIVE) {
@@ -231,7 +234,7 @@ int compile_to_native(const char *input_file, const char *output_name,
         }
     } else if (backend == BACKEND_NATIVE) {
         fprintf(stderr, "The native backend is not available for this host "
-                        "(it targets x86-64 Linux).\n");
+                        "(it targets x86-64 and AArch64 Linux).\n");
         parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
         return 1;
     }
@@ -537,6 +540,8 @@ int main(int argc, char *argv[]) {
             backend = BACKEND_NATIVE;
         } else if (strcmp(argv[i], "--via-c") == 0) {
             backend = BACKEND_VIA_C;
+        } else if (strcmp(argv[i], "--target") == 0 && i + 1 < argc) {
+            g_native_target = argv[++i];
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             return 1;

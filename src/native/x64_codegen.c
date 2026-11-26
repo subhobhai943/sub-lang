@@ -1860,8 +1860,8 @@ static void globals_bind(ASTNode *program) {
     }
 }
 
-int native_compile(ASTNode *program, const char *out_path,
-                   char *err, size_t err_size) {
+int x64_native_compile(ASTNode *program, const char *out_path,
+                       char *err, size_t err_size) {
     NCtx ctx;
     memset(&ctx, 0, sizeof(ctx));
     buf_init(&ctx.text);

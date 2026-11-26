@@ -1,0 +1,54 @@
+name: Native Cross-Arch
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  aarch64-qemu:
+    name: AArch64 Linux under qemu (no C compiler)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install qemu-user
+        run: sudo apt-get update && sudo apt-get install -y qemu-user
+      - name: Build
+        run: make -j"$(nproc)"
+      - name: Cross-compile SUB -> AArch64 ELF and run under qemu
+        run: python3 tests/native_cross.py aarch64-linux
+      - name: Confirm static AArch64 ELF (EM_AARCH64, no PT_DYNAMIC)
+        run: |
+          python3 - <<'PY'
+          import glob, struct, sys
+          files = glob.glob('/tmp/subcross_*')
+          assert files, "no cross binaries produced"
+          for f in files:
+              d = open(f,'rb').read()
+              assert d[:4]==b'\x7fELF', f
+              assert struct.unpack_from('<H',d,18)[0]==183, f"not EM_AARCH64: {f}"
+              phoff=struct.unpack_from('<Q',d,32)[0]; phnum=struct.unpack_from('<H',d,56)[0]
+              for i in range(phnum):
+                  assert struct.unpack_from('<I',d,phoff+i*56)[0]!=2, f"PT_DYNAMIC in {f}"
+          print("all", len(files), "binaries are static AArch64 ELF")
+          PY
+
+  x86_64-regression:
+    name: x86-64 native still toolchain-free
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -j"$(nproc)"
+      - run: python3 tests/native_backend.py
+
+  aarch64-native-runner:
+    name: AArch64 on a real arm64 runner
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -j"$(nproc)"
+      - name: subc auto-selects AArch64 on this host
+        run: |
+          printf 'print(6 * 7)\n' > hello.sb
+          ./subc hello.sb --native -o hello
+          test "$(./hello)" = "42"

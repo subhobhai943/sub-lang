@@ -47,11 +47,13 @@ static void put_phdr(Buf *out, uint32_t type, uint32_t flags,
     buf_u64(out, align);
 }
 
-int elf64_write(const char *path, const Buf *text, size_t entry_off) {
+int elf64_write_target(const char *path, const Buf *text, size_t entry_off,
+                       uint16_t e_machine, uint64_t text_base,
+                       uint64_t bss_base, uint64_t bss_size) {
     Buf out;
     buf_init(&out);
 
-    uint64_t entry = X64_TEXT_BASE + HDR_TOTAL + entry_off;
+    uint64_t entry = text_base + HDR_TOTAL + entry_off;
 
     /* --- ELF header --- */
     static const uint8_t ident[16] = {
@@ -64,7 +66,7 @@ int elf64_write(const char *path, const Buf *text, size_t entry_off) {
     };
     buf_bytes(&out, ident, 16);
     buf_u16(&out, 2);            /* e_type    = ET_EXEC */
-    buf_u16(&out, 0x3E);         /* e_machine = EM_X86_64 */
+    buf_u16(&out, e_machine);    /* EM_X86_64=62, EM_AARCH64=183 */
     buf_u32(&out, 1);            /* e_version */
     buf_u64(&out, entry);
     buf_u64(&out, EHDR_SIZE);    /* e_phoff */
@@ -80,9 +82,9 @@ int elf64_write(const char *path, const Buf *text, size_t entry_off) {
     /* --- Program headers --- */
     uint64_t text_filesz = HDR_TOTAL + text->len;
     put_phdr(&out, PT_LOAD, PF_R | PF_X,
-             0, X64_TEXT_BASE, text_filesz, text_filesz, 0x1000);
+             0, text_base, text_filesz, text_filesz, 0x1000);
     put_phdr(&out, PT_LOAD, PF_R | PF_W,
-             0, X64_BSS_BASE, 0, X64_BSS_SIZE, 0x1000);
+             0, bss_base, 0, bss_size, 0x1000);
 
     /* --- Text --- */
     buf_bytes(&out, text->data, text->len);
@@ -102,4 +104,9 @@ int elf64_write(const char *path, const Buf *text, size_t entry_off) {
     if (chmod(path, 0755) != 0) return -1;
 #endif
     return 0;
+}
+
+int elf64_write(const char *path, const Buf *text, size_t entry_off) {
+    return elf64_write_target(path, text, entry_off, 0x3E,
+                              X64_TEXT_BASE, X64_BSS_BASE, X64_BSS_SIZE);
 }
