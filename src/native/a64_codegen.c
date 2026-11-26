@@ -10,7 +10,7 @@
 #define MAXSLOTS 32
 #define FRAME_BYTES (8*MAXSLOTS)
 
-typedef struct { const char *name; uint64_t addr; } Glob;
+typedef struct { const char *name; uint64_t addr; int is_bool; } Glob;
 typedef struct { const char *name; int label; ASTNode *decl; } Func;
 typedef struct { size_t off; int label; int kind; int aux; } Fixup;
 typedef struct { size_t off; int bound; } Label;
@@ -22,11 +22,11 @@ typedef struct {
     Func funcs[256]; int nfunc;
     Fixup fix[4096]; int nfix;
     Label lab[4096]; int nlab;
-    const char *locals[MAXSLOTS]; int nloc;
+    const char *locals[MAXSLOTS]; int local_bool[MAXSLOTS]; int nloc;
     int is_main, depth;
     int ret_label;
     int loop_brk[64], loop_cont[64], loop_n;
-    int rt_print, div0;
+    int rt_print, rt_bool, div0;
     int failed; char *err; size_t errsize;
 } Ctx;
 
@@ -51,6 +51,14 @@ static Func *find_func(Ctx*c,const char*n){ for(int i=0;i<c->nfunc;i++) if(!strc
 static ASTNode *block_first(ASTNode*n){ if(!n)return NULL; if(n->body)return n->body; if(n->children&&n->child_count>0)return n->children[0]; if(n->left)return n->left; return NULL; }
 static int cmp_cond(const char*op){ if(!strcmp(op,"=="))return 0; if(!strcmp(op,"!="))return 1; if(!strcmp(op,"<"))return 11; if(!strcmp(op,">"))return 12; if(!strcmp(op,"<="))return 13; return 10; }
 static int is_cmp(const char*op){ return !strcmp(op,"==")||!strcmp(op,"!=")||!strcmp(op,"<")||!strcmp(op,">")||!strcmp(op,"<=")||!strcmp(op,">="); }
+static int name_is_bool(Ctx*c,const char*n){ int s=local_find(c,n); if(s>=0)return c->local_bool[s]; for(int i=0;i<c->nglob;i++) if(!strcmp(c->globs[i].name,n)) return c->globs[i].is_bool; return 0; }
+static int expr_is_bool(Ctx*c,ASTNode*n){
+    if(!n)return 0;
+    if(n->type==AST_BINARY_EXPR)return is_cmp(n->value?n->value:"");
+    if(n->type==AST_LITERAL)return n->value&&(!strcmp(n->value,"true")||!strcmp(n->value,"false"));
+    if(n->type==AST_IDENTIFIER)return name_is_bool(c,n->value?n->value:"");
+    return 0;
+}
 
 static void emit_print_int(Buf*b){
     a64_stp_fp48(b); a64_addi(b,A64_X29,A64_SP,0);
@@ -87,6 +95,8 @@ static void gen_expr(Ctx*c,ASTNode*n){
     if(!n){fail(c,"empty expression");return;}
     switch(n->type){
     case AST_LITERAL:
+        if(n->value&&!strcmp(n->value,"true")){a64_imm64(b,A64_X0,1);return;}
+        if(n->value&&!strcmp(n->value,"false")){a64_imm64(b,A64_X0,0);return;}
         if(n->data_type!=TYPE_INT){fail(c,"the AArch64 backend supports integer literals only (for now)");return;}
         a64_imm64(b,A64_X0,(uint64_t)strtoll(n->value?n->value:"0",NULL,10)); return;
     case AST_IDENTIFIER:{
@@ -122,18 +132,21 @@ static void gen_stmt(Ctx*c,ASTNode*s){
     Buf*b=c->text;
     switch(s->type){
     case AST_VAR_DECL: case AST_CONST_DECL:{
+        int ib=expr_is_bool(c,s->right);
         gen_expr(c,s->right); if(c->failed)return;
-        if(c->is_main&&c->depth==0){ a64_imm64(b,A64_X1,glob_addr(c,s->value?s->value:"")); a64_str(b,A64_X0,A64_X1); }
-        else { int slot=add_local(c,s->value?s->value:""); a64_stur(b,A64_X0,A64_X29,slot_disp(slot)); }
+        const char*nm=s->value?s->value:"";
+        if(c->is_main&&c->depth==0){ a64_imm64(b,A64_X1,glob_addr(c,nm)); a64_str(b,A64_X0,A64_X1); for(int i=0;i<c->nglob;i++) if(!strcmp(c->globs[i].name,nm)) c->globs[i].is_bool=ib; }
+        else { int slot=add_local(c,nm); c->local_bool[slot]=ib; a64_stur(b,A64_X0,A64_X29,slot_disp(slot)); }
         return; }
     case AST_ASSIGN_STMT:{
         if(!s->left||s->left->type!=AST_IDENTIFIER){fail(c,"the AArch64 backend supports simple assignment only (for now)");return;}
         gen_expr(c,s->right); if(c->failed)return;
         const char*nm=s->left->value?s->left->value:"";
+        int ib=expr_is_bool(c,s->right);
         int slot=local_find(c,nm);
-        if(slot>=0){ a64_stur(b,A64_X0,A64_X29,slot_disp(slot)); return; }
+        if(slot>=0){ c->local_bool[slot]=ib; a64_stur(b,A64_X0,A64_X29,slot_disp(slot)); return; }
         uint64_t ga=glob_addr(c,nm);
-        if(ga){ a64_imm64(b,A64_X1,ga); a64_str(b,A64_X0,A64_X1); return; }
+        if(ga){ a64_imm64(b,A64_X1,ga); a64_str(b,A64_X0,A64_X1); for(int i=0;i<c->nglob;i++) if(!strcmp(c->globs[i].name,nm)) c->globs[i].is_bool=ib; return; }
         fail(c,"assignment to an unknown name"); return; }
     case AST_IF_STMT:{
         gen_expr(c,s->condition); if(c->failed)return;
@@ -189,7 +202,8 @@ static void gen_stmt(Ctx*c,ASTNode*s){
         const char*fn=s->value?s->value:"";
         if(!strcmp(fn,"print")||!strcmp(fn,"println")||!strcmp(fn,"show")){
             if(s->child_count!=1){fail(c,"the AArch64 backend supports print of one value (for now)");return;}
-            gen_expr(c,s->children[0]); if(c->failed)return; emit_bl(c,c->rt_print); return;
+            int ib=expr_is_bool(c,s->children[0]);
+            gen_expr(c,s->children[0]); if(c->failed)return; emit_bl(c,ib?c->rt_bool:c->rt_print); return;
         }
         gen_user_call(c,s); return; }
     case AST_BLOCK: gen_block(c,s); return;
@@ -224,10 +238,19 @@ int a64_native_compile(ASTNode*program,const char*out_path,char*err,size_t err_s
         }
     }
     int main_label=new_label(&c);
-    c.rt_print=new_label(&c); c.div0=new_label(&c); int msg_label=new_label(&c);
+    c.rt_print=new_label(&c); c.rt_bool=new_label(&c); c.div0=new_label(&c);
+    int msg_label=new_label(&c), true_msg=new_label(&c), false_msg=new_label(&c);
     emit_bl(&c,main_label);
     a64_movz(&text,A64_X0,0,0); a64_movz(&text,A64_X8,93,0); a64_svc(&text);
     bind(&c,c.rt_print); emit_print_int(&text);
+    bind(&c,c.rt_bool);
+    { int fb=new_label(&c), wr=new_label(&c);
+      emit_cbz(&c,A64_X0,fb);
+      emit_addr_label(&c,A64_X1,true_msg); a64_movz(&text,A64_X2,5,0); emit_b(&c,wr);
+      bind(&c,fb);
+      emit_addr_label(&c,A64_X1,false_msg); a64_movz(&text,A64_X2,6,0);
+      bind(&c,wr);
+      a64_movz(&text,A64_X0,1,0); a64_movz(&text,A64_X8,64,0); a64_svc(&text); a64_ret(&text); }
     bind(&c,c.div0);
     emit_addr_label(&c,A64_X1,msg_label);
     a64_movz(&text,A64_X0,2,0); a64_movz(&text,A64_X2,31,0); a64_movz(&text,A64_X8,64,0); a64_svc(&text);
@@ -246,6 +269,8 @@ int a64_native_compile(ASTNode*program,const char*out_path,char*err,size_t err_s
     a64_addi(&text,A64_SP,A64_X29,0); a64_ldp_fp16(&text); a64_ret(&text);
     bind(&c,msg_label);
     buf_bytes(&text,"RuntimeError: division by zero\n",31);
+    bind(&c,true_msg); buf_bytes(&text,"true\n",5);
+    bind(&c,false_msg); buf_bytes(&text,"false\n",6);
     if(c.failed){ buf_free(&text); return 1; }
     for(int i=0;i<c.nfix;i++){
         Fixup*f=&c.fix[i];
