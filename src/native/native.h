@@ -11,7 +11,7 @@
 /* True when this build can emit machine code itself. The backend targets
    x86-64 Linux; everywhere else `subc` still goes through the C backend and
    a host C compiler. */
-#if defined(__x86_64__) && defined(__linux__)
+#if (defined(__x86_64__) || defined(__aarch64__)) && defined(__linux__)
 #  define SUB_NATIVE_BACKEND 1
 #else
 #  define SUB_NATIVE_BACKEND 0
@@ -24,5 +24,7 @@
    the program is wrong - the caller can fall back to the C backend. */
 int native_compile(ASTNode *program, const char *out_path,
                    char *err, size_t err_size);
+int native_compile_target(ASTNode *program, const char *out_path,
+                          char *err, size_t err_size, const char *target);
 
 #endif /* SUB_NATIVE_H */

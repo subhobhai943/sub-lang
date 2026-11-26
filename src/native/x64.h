@@ -177,6 +177,9 @@ void e_f_op(Buf *b, uint8_t b0, uint8_t b1);   /* two-byte x87 opcode */
    `text` is placed at X64_TEXT_BASE + header size and entered at
    `entry_off` bytes into it. Returns 0 on success. */
 int elf64_write(const char *path, const Buf *text, size_t entry_off);
+int elf64_write_target(const char *path, const Buf *text, size_t entry_off,
+                       uint16_t e_machine, uint64_t text_base,
+                       uint64_t bss_base, uint64_t bss_size);
 
 /* Offset from the start of `text` to its virtual address. Codegen needs this
    to turn "byte 37 of the text buffer" into an absolute address. */
