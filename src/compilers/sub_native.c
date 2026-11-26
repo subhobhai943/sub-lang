@@ -218,11 +218,15 @@ int compile_to_native(const char *input_file, const char *output_name,
         if (native_compile_target(ast, out_with_ext, why, sizeof(why), g_native_target) == 0) {
             rc = 0;
             used_native = 1;
-        } else if (backend == BACKEND_NATIVE) {
+        } else if (backend == BACKEND_NATIVE || g_native_target) {
             /* The message already names the backend, so do not prefix it. */
             fprintf(stderr, "%s\n", why);
-            fprintf(stderr, "Drop --native to build this program through the "
-                            "C backend instead.\n");
+            if (g_native_target)
+                fprintf(stderr, "Cross-compiling to %s: the C fallback builds for "
+                                "the host, so it is not used.\n", g_native_target);
+            else
+                fprintf(stderr, "Drop --native to build this program through the "
+                                "C backend instead.\n");
             parser_free_ast(ast); lexer_free_tokens(tokens, ntok); free(source);
             return 1;
         } else {
@@ -540,7 +544,11 @@ int main(int argc, char *argv[]) {
             backend = BACKEND_NATIVE;
         } else if (strcmp(argv[i], "--via-c") == 0) {
             backend = BACKEND_VIA_C;
-        } else if (strcmp(argv[i], "--target") == 0 && i + 1 < argc) {
+        } else if (strcmp(argv[i], "--target") == 0) {
+            if (i + 1 >= argc || argv[i + 1][0] == '-') {
+                fprintf(stderr, "--target requires a target name (e.g. aarch64-linux)\n");
+                return 1;
+            }
             g_native_target = argv[++i];
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
