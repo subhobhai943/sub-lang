@@ -33,3 +33,9 @@ void a64_blr(Buf*b,int rn){ w(b,0xD63F0000u|((uint32_t)rn<<5)); }
 void a64_ret(Buf*b){ w(b,0xD65F03C0u); }
 void a64_svc(Buf*b){ w(b,0xD4000001u); }
 void a64_cbnz_back(Buf*b,int rn,int off_bytes){ uint32_t imm19=(uint32_t)(off_bytes>>2)&0x7FFFF; w(b,0xB5000000u|(imm19<<5)|(uint32_t)rn); }
+void a64_sdiv(Buf*b,int rd,int rn,int rm){ w(b,0x9AC00C00u|((uint32_t)rm<<16)|((uint32_t)rn<<5)|(uint32_t)rd); }
+void a64_cmp(Buf*b,int rn,int rm){ w(b,0xEB000000u|((uint32_t)rm<<16)|((uint32_t)rn<<5)|31u); }
+void a64_cset(Buf*b,int rd,int cond){ w(b,0x9A800400u|(31u<<16)|(((uint32_t)(cond^1))<<12)|(31u<<5)|(uint32_t)rd); }
+void a64_subi(Buf*b,int rd,int rn,uint32_t imm){ w(b,0xD1000000u|(imm<<10)|((uint32_t)rn<<5)|(uint32_t)rd); }
+void a64_ldur(Buf*b,int rt,int rn,int imm9){ w(b,0xF8400000u|(((uint32_t)imm9&0x1FF)<<12)|((uint32_t)rn<<5)|(uint32_t)rt); }
+void a64_stur(Buf*b,int rt,int rn,int imm9){ w(b,0xF8000000u|(((uint32_t)imm9&0x1FF)<<12)|((uint32_t)rn<<5)|(uint32_t)rt); }

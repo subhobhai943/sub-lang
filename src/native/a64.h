@@ -21,5 +21,7 @@ void a64_strb_pre(Buf*,int,int,int); void a64_strb(Buf*,int,int);
 void a64_push(Buf*,int); void a64_pop(Buf*,int);
 void a64_stp_fp48(Buf*); void a64_ldp_fp48(Buf*); void a64_stp_fp16(Buf*); void a64_ldp_fp16(Buf*);
 void a64_blr(Buf*,int); void a64_ret(Buf*); void a64_svc(Buf*); void a64_cbnz_back(Buf*,int,int);
+void a64_sdiv(Buf*,int,int,int); void a64_cmp(Buf*,int,int); void a64_cset(Buf*,int,int);
+void a64_subi(Buf*,int,int,uint32_t); void a64_ldur(Buf*,int,int,int); void a64_stur(Buf*,int,int,int);
 int a64_native_compile(ASTNode *program, const char *out_path, char *err, size_t err_size);
 #endif
