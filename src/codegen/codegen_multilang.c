@@ -5096,6 +5096,7 @@ static int asm_reject_unsupported(ASTNode *n) {
             return 1;
         }
         if (asm_reject_unsupported(n->body) ||
+            asm_reject_unsupported(n->condition) ||
             asm_reject_unsupported(n->left) ||
             asm_reject_unsupported(n->right))
             return 1;
