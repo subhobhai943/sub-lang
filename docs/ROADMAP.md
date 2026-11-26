@@ -27,6 +27,11 @@ for a method inside a class body rather than silently dropping it.
 
 ## Error handling
 
+The brace form is implemented today: `try { ... } catch (e) { ... } finally
+{ ... }` and `throw <value>` run through `subi` and the C backend (`subc`
+falls back from the machine-code backend by name). What remains aspirational
+is *typed* catches - matching an error class and binding it as an object:
+
 ```coffee
 try
     var result = divide(10, 0)
@@ -43,12 +48,14 @@ throw CustomError("Something went wrong")
 
 `async`, `await`, `yield` are reserved but unimplemented.
 
-## Ternary operator, C-style `for`, `do...while`
+## C-style `for`
+
+The ternary operator (`condition ? a : b`) and `do { ... } while condition`
+are implemented today across the interpreter and the compiled/transpiled
+backends. What remains aspirational is the C-style three-part `for`:
 
 ```coffee
-var result = condition ? value1 : value2
 for (i = 0; i < 10; i++) { print(i) }
-do { print(i) } while condition
 ```
 
 ## UI DSL

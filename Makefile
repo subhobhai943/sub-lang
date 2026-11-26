@@ -55,6 +55,10 @@ else ifeq ($(UNAME_S),Darwin)
 else ifeq ($(UNAME_S),Linux)
     # Linux
     CFLAGS += -DLINUX
+    # The interpreter runs on a big-stack pthread. glibc >= 2.34 merged
+    # libpthread into libc so this flag is a no-op there, but older glibc
+    # (Debian 10, RHEL 8, ...) still needs it to resolve pthread_create.
+    LDFLAGS += -pthread
 else ifeq ($(UNAME_S),FreeBSD)
     # FreeBSD (DragonFly reports the same way and builds identically)
     CFLAGS += -DFREEBSD

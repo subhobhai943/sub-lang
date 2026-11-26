@@ -711,10 +711,13 @@ must be named `SubProgram`, so the file must be `SubProgram.java`.
 
 Two targets are narrower than the table suggests, so treat them accordingly:
 
-- **Assembly** emits top-level arithmetic, variables and `print` correctly,
-  but silently drops function declarations and loops - compiling
-  `examples/fibonacci.sb` yields an empty `main`. Do not rely on it for
-  anything with a function in it.
+- **Assembly** emits top-level arithmetic, variables, `print`, `if`,
+  `while`/`do`-`while`, and functions (including recursion) - verified by
+  assembling with NASM and diffing the output against the interpreter.
+  `for` loops and `break`/`continue` are not lowered yet and are now
+  **rejected with a clear error** instead of emitting assembly that cannot
+  assemble. The output is still not exercised in CI, so treat it as
+  experimental.
 - **CSS** does not translate program logic. It emits a base stylesheet plus a
   class per `ui.*` declaration, so it is only meaningful alongside the UI
   syntax.

@@ -1664,10 +1664,11 @@ SubVal eval(ASTNode *node, Env *env) {
                 val_free(idx_val);
                 if (idx < 0) idx += (long long)target.arr->count;
                 if (idx < 0 || idx >= target.arr->count) {
+                    int count = target.arr->count;   /* read before the free below */
                     if (node->left->left->type != AST_IDENTIFIER)
                         val_free(target);
                     runtime_error("array index %lld out of bounds [0, %d)",
-                                  idx, target.arr->count);
+                                  idx, count);
                     return NULL_VAL;
                 }
                 if (expr_borrows_binding(node->right)) { /* already copied */ }
@@ -1705,10 +1706,11 @@ SubVal eval(ASTNode *node, Env *env) {
             val_free(idx_val);
             if (idx < 0) idx += (long long)arr_val.arr->count;
             if (idx < 0 || idx >= arr_val.arr->count) {
+                int count = arr_val.arr->count;   /* read before the free below */
                 if (node->left->left->type != AST_IDENTIFIER)
                     val_free(arr_val);
                 runtime_error("array index %lld out of bounds [0, %d)",
-                              idx, arr_val.arr->count);
+                              idx, count);
                 return NULL_VAL;
             }
             SubVal *item = &arr_val.arr->items[idx];
@@ -2222,10 +2224,13 @@ SubVal eval(ASTNode *node, Env *env) {
         if (container.type == VAL_ARRAY && container.arr) {
             if (i < 0) i += (long long)container.arr->count;
             if (i < 0 || i >= container.arr->count) {
+                /* Capture the count before freeing: the error message reads
+                   it, and val_free(container) releases the array it lives in. */
+                int count = container.arr->count;
                 val_free(container);
                 val_free(idx);
                 runtime_error("array index %lld out of bounds [0, %d)",
-                        i, container.arr->count);
+                        i, count);
                 return NULL_VAL;
             }
             SubVal result = val_copy(container.arr->items[i]);
