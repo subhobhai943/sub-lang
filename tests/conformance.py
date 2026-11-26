@@ -16,6 +16,7 @@ Usage:
 """
 
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -155,6 +156,14 @@ def check(case, target, spec, workdir):
         return "skip", "interpreter did not run: %s" % (err.strip() or want_rc)
 
     if target in (NATIVE, NATIVE_C):
+        # The full-featured machine-code backend targets x86-64 Linux. The
+        # AArch64 backend is a separate, growing subset covered by
+        # tests/native_cross.py, so the conformance suite's `native` target
+        # stays x86-64-only until it reaches feature parity.
+        if target == NATIVE and not (
+            platform.system() == "Linux" and platform.machine() == "x86_64"
+        ):
+            return "skip", "machine-code backend does not target this host"
         flag = "--native" if target == NATIVE else "--via-c"
         exe = os.path.join(workdir, name + "_" + target.replace("-", "_"))
         rc, out, err = run([SUBC, case, flag, "-o", exe], workdir)
